@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+  GATE
+}
+
+enum InviteStatus {
+  PENDING
+  ACTIVE
+  USED
+  EXPIRED
+  REVOKED
+  OFFLINE_PENDING
+}
+
+enum EntryMode {
+  PEDESTRIAN
+  MOTORCYCLE
+  VEHICLE
+}
+
+enum VisitStatus {
+  INVITED
+  ARRIVED
+  EXITED
+  CANCELLED
+}
+
+model Organisation {
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+  invites   Invite[]
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  fullName       String
+  role           Role         @default(STAFF)
+  portfolio      String?
+  isActive       Boolean      @default(true)
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  invites        Invite[]     @relation("HostInvites")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  auditLogs      AuditLog[]
+}
+
+model Invite {
+  id             String       @id @default(uuid())
+  token          String       @unique
+  passphrase     String
+  status         InviteStatus @default(PENDING)
+  purpose        String
+  guestCount     Int          @default(1)
+  guestNames     String[]
+  expectedMode   EntryMode?
+  expiresAt      DateTime
+  revivedAt      DateTime?
+  hostId         String
+  host           User         @relation("HostInvites", fields: [hostId], references: [id])
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  visitors       Visitor[]
+  isOffline      Boolean      @default(false)
+  approvedById   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Visitor {
+  id          String      @id @default(uuid())
+  inviteId    String
+  invite      Invite      @relation(fields: [inviteId], references: [id])
+  fullName    String
+  photoPath   String?
+  qrCodeData  String?
+  status      VisitStatus @default(INVITED)
+  entryMode   EntryMode?
+  enteredAt   DateTime?
+  exitedAt    DateTime?
+  gateNotes   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  ip        String?
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  isRead    Boolean  @default(false)
+  meta      Json?
+  createdAt DateTime @default(now())
+}

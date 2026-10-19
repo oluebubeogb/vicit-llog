@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* High contrast for outdoor / gate use */
+.gate-mode {
+  @apply bg-slate-900 text-white;
+}
+
+/* Bottom nav safe area */
+.bottom-nav {
+  padding-bottom: max(0.5rem, var(--safe-bottom));
+}
