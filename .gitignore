@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build
+.next/
+out/
+dist/
+build/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Photos & reports (keep dirs, ignore content)
+data/photos/*
+!data/photos/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
+
+# Docker volumes
+postgres_data/
+
+# Misc
+coverage/
+*.tsbuildinfo
+next-env.d.ts

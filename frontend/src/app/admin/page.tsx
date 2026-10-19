@@ -3,13 +3,23 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import Link from 'next/link';
-import { ArrowLeft, UserPlus } from 'lucide-react';
+import {
+  ArrowLeft,
+  UserPlus,
+  BarChart3,
+  Ban,
+  MapPin,
+  Palette,
+  Download,
+  Activity,
+  Trash2,
+} from 'lucide-react';
 
 export default function AdminPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [invites, setInvites] = useState<any[]>([]);
   const [audit, setAudit] = useState<any[]>([]);
-  const [tab, setTab] = useState<'users' | 'invites' | 'audit'>('users');
+  const [tab, setTab] = useState<'users' | 'invites' | 'audit' | 'tools'>('tools');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     email: '',
@@ -19,11 +29,13 @@ export default function AdminPage() {
     portfolio: '',
   });
   const [msg, setMsg] = useState('');
+  const [health, setHealth] = useState<any>(null);
 
   useEffect(() => {
     api.users().then(setUsers).catch(() => {});
     api.allInvites().then(setInvites).catch(() => {});
     api.audit().then(setAudit).catch(() => {});
+    api.health().then(setHealth).catch(() => {});
   }, []);
 
   async function createUser(e: React.FormEvent) {
@@ -45,6 +57,31 @@ export default function AdminPage() {
     setInvites(list);
   }
 
+  async function exportCsv() {
+    try {
+      const csv = await api.exportCsv();
+      const blob = new Blob([csv as string], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vicit-visits-${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg('CSV exported');
+    } catch (err: any) {
+      setMsg(err.message);
+    }
+  }
+
+  async function cleanup() {
+    try {
+      const res = await api.cleanupPhotos();
+      setMsg(`Cleanup: scanned ${res.scanned}, deleted ${res.deleted} photos`);
+    } catch (err: any) {
+      setMsg(err.message);
+    }
+  }
+
   return (
     <div className="px-4 pt-6 pb-8">
       <div className="mb-6 flex items-center gap-3">
@@ -54,15 +91,45 @@ export default function AdminPage() {
         <h1 className="text-xl font-bold">Admin</h1>
       </div>
 
-      <div className="mb-4 flex gap-2">
-        {(['users', 'invites', 'audit'] as const).map((t) => (
+      {/* Phase 2 quick links */}
+      <div className="mb-6 grid grid-cols-2 gap-3">
+        <Link
+          href="/analytics"
+          className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm"
+        >
+          <BarChart3 size={22} className="text-brand-600" />
+          <span className="text-xs font-semibold">Analytics</span>
+        </Link>
+        <Link
+          href="/blacklist"
+          className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm"
+        >
+          <Ban size={22} className="text-red-600" />
+          <span className="text-xs font-semibold">Blacklist</span>
+        </Link>
+        <Link
+          href="/locations"
+          className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm"
+        >
+          <MapPin size={22} className="text-emerald-600" />
+          <span className="text-xs font-semibold">Locations</span>
+        </Link>
+        <Link
+          href="/branding"
+          className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm"
+        >
+          <Palette size={22} className="text-violet-600" />
+          <span className="text-xs font-semibold">Branding</span>
+        </Link>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {(['tools', 'users', 'invites', 'audit'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize ${
-              tab === t
-                ? 'bg-brand-600 text-white'
-                : 'bg-slate-100 text-slate-600'
+              tab === t ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'
             }`}
           >
             {t}
@@ -71,9 +138,45 @@ export default function AdminPage() {
       </div>
 
       {msg && (
-        <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">
-          {msg}
-        </p>
+        <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">{msg}</p>
+      )}
+
+      {tab === 'tools' && (
+        <div className="space-y-3">
+          {health && (
+            <div className="rounded-xl border bg-white p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Activity size={18} />
+                <span className="font-semibold">System Health</span>
+                <span
+                  className={`ml-auto rounded-full px-2 py-0.5 text-xs font-medium ${
+                    health.status === 'healthy'
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-amber-50 text-amber-700'
+                  }`}
+                >
+                  {health.status}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                DB: {health.checks?.database} · Photos: {health.checks?.photoStorage} (
+                {health.checks?.photoCount}) · v{health.version}
+              </p>
+            </div>
+          )}
+          <button
+            onClick={exportCsv}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white py-3 font-medium shadow-sm"
+          >
+            <Download size={18} /> Export Visits CSV
+          </button>
+          <button
+            onClick={cleanup}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white py-3 font-medium shadow-sm"
+          >
+            <Trash2 size={18} /> Run Photo Cleanup
+          </button>
+        </div>
       )}
 
       {tab === 'users' && (

@@ -20,6 +20,7 @@ enum InviteStatus {
   EXPIRED
   REVOKED
   OFFLINE_PENDING
+  AWAITING_APPROVAL
 }
 
 enum EntryMode {
@@ -33,16 +34,63 @@ enum VisitStatus {
   ARRIVED
   EXITED
   CANCELLED
+  DENIED
+}
+
+enum WorkflowType {
+  NONE
+  HOST_ONLY
+  MANAGER_THEN_HOST
+  SECURITY_THEN_HOST
 }
 
 model Organisation {
-  id        String   @id @default(uuid())
-  name      String
-  code      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  users     User[]
-  invites   Invite[]
+  id              String          @id @default(uuid())
+  name            String
+  code            String          @unique
+  // White-label
+  logoUrl         String?
+  primaryColor    String?         @default("#2563eb")
+  secondaryColor  String?         @default("#1e40af")
+  customDomain    String?
+  // Settings
+  requireApproval Boolean         @default(false)
+  defaultWorkflow WorkflowType    @default(NONE)
+  photoRetentionDays Int          @default(90)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  users           User[]
+  invites         Invite[]
+  locations       Location[]
+  blacklist       BlacklistEntry[]
+  workflows       ApprovalWorkflow[]
+}
+
+model Location {
+  id             String       @id @default(uuid())
+  name           String
+  code           String
+  address        String?
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  gates          Gate[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organisationId, code])
+}
+
+model Gate {
+  id         String   @id @default(uuid())
+  name       String
+  code       String
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([locationId, code])
 }
 
 model User {
@@ -52,6 +100,7 @@ model User {
   fullName       String
   role           Role         @default(STAFF)
   portfolio      String?
+  permissions    String[]     @default([])
   isActive       Boolean      @default(true)
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
@@ -76,9 +125,11 @@ model Invite {
   host           User         @relation("HostInvites", fields: [hostId], references: [id])
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
+  locationId     String?
   visitors       Visitor[]
   isOffline      Boolean      @default(false)
   approvedById   String?
+  workflowState  String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }
@@ -94,9 +145,39 @@ model Visitor {
   entryMode   EntryMode?
   enteredAt   DateTime?
   exitedAt    DateTime?
+  gateId      String?
   gateNotes   String?
+  idNumber    String?
+  phone       String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+}
+
+model BlacklistEntry {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  fullName       String?
+  idNumber       String?
+  phone          String?
+  reason         String
+  photoPath      String?
+  isActive       Boolean      @default(true)
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model ApprovalWorkflow {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  name           String
+  type           WorkflowType @default(HOST_ONLY)
+  steps          Json
+  isDefault      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }
 
 model AuditLog {
@@ -117,6 +198,7 @@ model Notification {
   title     String
   body      String
   isRead    Boolean  @default(false)
+  channel   String   @default("in_app")
   meta      Json?
   createdAt DateTime @default(now())
 }
