@@ -9,6 +9,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { Role } from '@prisma/client';
 import { generateNigerianPassword } from '../../common/utils/password-words';
+import { MailService } from '../mail/mail.service';
 
 const userSelect = {
   id: true,
@@ -22,9 +23,16 @@ const userSelect = {
   createdAt: true,
 } as const;
 
+function showTempInAdmin(): boolean {
+  return (process.env.SHOW_TEMP_PASSWORDS_IN_ADMIN || 'false').toLowerCase() === 'true';
+}
+
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private mail: MailService,
+  ) {}
 
   async create(dto: CreateUserDto, orgId: string) {
     const existing = await this.prisma.user.findUnique({
@@ -32,7 +40,7 @@ export class UsersService {
     });
     if (existing) throw new ConflictException('Email already registered');
 
-    const initialPassword = generateNigerianPassword();
+    const initialPassword = generateNigerianPassword(); // lowercase 5-letter
     const passwordHash = await bcrypt.hash(initialPassword, 12);
 
     const user = await this.prisma.user.create({
@@ -49,8 +57,15 @@ export class UsersService {
       select: userSelect,
     });
 
-    // Return initial password ONLY once at creation time
-    return { user, initialPassword };
+    // Always try welcome email
+    await this.mail.sendWelcome(user.email, user.fullName, initialPassword);
+
+    return {
+      user,
+      // Only include plaintext password in API when env allows admin UI display
+      ...(showTempInAdmin() ? { initialPassword } : {}),
+      emailSent: true,
+    };
   }
 
   async findAll(orgId: string) {
@@ -84,11 +99,14 @@ export class UsersService {
       data: { passwordHash, mustChangePassword: true },
     });
 
+    await this.mail.sendPasswordReset(user.email, user.fullName, initialPassword);
+
     return {
       userId: user.id,
       email: user.email,
       fullName: user.fullName,
-      initialPassword, // shown once only
+      emailSent: true,
+      ...(showTempInAdmin() ? { initialPassword } : {}),
     };
   }
 
@@ -115,10 +133,6 @@ export class UsersService {
     });
   }
 
-  /**
-   * Bulk create from CSV rows: fullName,email,role,portfolio,phone
-   * Returns users + credentials for downloadable CSV
-   */
   async bulkCreate(
     orgId: string,
     rows: Array<{ fullName: string; email: string; role?: string; portfolio?: string; phone?: string }>,
@@ -167,6 +181,11 @@ export class UsersService {
             mustChangePassword: true,
           },
         });
+        await this.mail.sendWelcome(
+          row.email.toLowerCase().trim(),
+          row.fullName.trim(),
+          initialPassword,
+        );
         created.push({
           fullName: row.fullName.trim(),
           email: row.email.toLowerCase().trim(),
@@ -179,7 +198,10 @@ export class UsersService {
       }
     }
 
-    // Build credentials CSV
+    // Credentials CSV always generated for download when admin explicitly downloads
+    // (still gated: only return csv if SHOW_TEMP_PASSWORDS_IN_ADMIN or always for bulk download?)
+    // User asked: showing on admin off by default; email still goes.
+    // Bulk download of credentials is useful — return csv only when SHOW_TEMP_PASSWORDS_IN_ADMIN=true
     const header = 'fullName,email,role,phone,initialPassword';
     const lines = created.map(
       (c) =>
@@ -191,9 +213,10 @@ export class UsersService {
       createdCount: created.length,
       errorCount: errors.length,
       errors,
-      credentialsCsv,
-      // credentials also as structured data (passwords only in this response)
-      credentials: created,
+      emailSent: true,
+      ...(showTempInAdmin()
+        ? { credentialsCsv, credentials: created }
+        : {}),
     };
   }
 }

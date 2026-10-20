@@ -1,24 +1,24 @@
-/** Exactly 5-letter recognizable Nigerian native-language / local names */
+/** Exactly 5-letter recognizable Nigerian native-language / local names (lowercase) */
 const NORMALIZED = Array.from(
   new Set(
     [
-      'BAYO', 'CHIDI', 'ADEMI', 'NGOZI', 'KEMIS', 'TUNDE', 'AMAKA', 'EFEKA',
-      'ZAINA', 'HADIZ', 'SADIA', 'YEMIS', 'OBINA', 'CHIKA', 'NNEKA', 'FOLAK',
-      'GBEMI', 'IFEMA', 'JUMOK', 'KUDIS', 'LARAI', 'MOJIS', 'NIKES', 'OPEMI',
-      'PEJUA', 'REMIS', 'SEUNB', 'TOBIS', 'WUMIS', 'YETUN', 'ZIKOR', 'ADAOB',
-      'EBUBE', 'CHUKA', 'DAMIL', 'ENIOL', 'FUNMI', 'HALIM', 'IJEMA', 'JOKEA',
-      'KEHIN', 'LOLAS', 'MODUP', 'NABIL', 'OLAMI', 'PATIS', 'RONKE', 'SIMIS',
-      'TIWAS', 'UCHES', 'VIVIS', 'WALES', 'YINKA', 'ZARAH', 'ABIOL',
-      'BOLAS', 'CHIKE', 'DOYIN', 'ESEOG', 'FOLAS', 'GBENG', 'HAUWA', 'IYANU',
-      'JIDES', 'KOLAS', 'LANRE', 'MUIZA', 'NURAS', 'OLASE', 'PASUA', 'QUADI',
-      'RAFIS', 'SULAS', 'TAIWO', 'USMAN', 'WURAS', 'YUSUF', 'ZUBAI', 'ADEOY',
-      'BIMBO', 'CHIOM', 'DABIR', 'EFEYA', 'FARID', 'GODIS', 'HABIB', 'ISOLA',
-      'JAFAR', 'KHALI', 'LATIF', 'MUBIN', 'OMOLA', 'PETRA', 'QASIM',
-      'RISHA', 'SAKIN', 'TOLUA', 'UMARU', 'ADEBA', 'BUNMI', 'CHISO', 'DAYO',
-      'EJIKE', 'FEMIS', 'GIFTI', 'HENRY', 'IDOWE', 'JOYCE', 'KAMSI', 'LOVET',
-      'MERCY', 'NDIDI', 'OSASO', 'PEACE', 'QUEEN', 'RITA', 'SOLOM', 'TITIL',
+      'bayo', 'chidi', 'ademi', 'ngozi', 'kemis', 'tunde', 'amaka', 'efeka',
+      'zaina', 'hadiz', 'sadia', 'yemis', 'obina', 'chika', 'nneka', 'folak',
+      'gbemi', 'ifema', 'jumok', 'kudis', 'larai', 'mojis', 'nikes', 'opemi',
+      'pejua', 'remis', 'seunb', 'tobis', 'wumis', 'yetun', 'zikor', 'adaob',
+      'ebube', 'chuka', 'damil', 'eniol', 'funmi', 'halim', 'ijema', 'jokea',
+      'kehin', 'lolas', 'modup', 'nabil', 'olami', 'patis', 'ronke', 'simis',
+      'tiwas', 'uches', 'vivis', 'wales', 'yinka', 'zarah', 'abiol',
+      'bolas', 'chike', 'doyin', 'eseog', 'folas', 'gbeng', 'hauwa', 'iyanu',
+      'jides', 'kolas', 'lanre', 'muiza', 'nuras', 'olase', 'pasua', 'quadi',
+      'rafis', 'sulas', 'taiwo', 'usman', 'wuras', 'yusuf', 'zubai', 'adeoy',
+      'bimbo', 'chiom', 'dabir', 'efeya', 'farid', 'godis', 'habib', 'isola',
+      'jafar', 'khali', 'latif', 'mubin', 'omola', 'petra', 'qasim',
+      'risha', 'sakin', 'tolua', 'umaru', 'adeba', 'bunmi', 'chiso', 'dayoa',
+      'ejike', 'femis', 'gifti', 'henry', 'idowe', 'joyce', 'kamsi', 'lovet',
+      'mercy', 'ndidi', 'osaso', 'peace', 'queen', 'ritaa', 'solom', 'titil',
     ]
-      .map((w) => w.toUpperCase().replace(/[^A-Z]/g, '').padEnd(5, 'A').slice(0, 5))
+      .map((w) => w.toLowerCase().replace(/[^a-z]/g, '').padEnd(5, 'a').slice(0, 5))
       .filter((w) => w.length === 5),
   ),
 );

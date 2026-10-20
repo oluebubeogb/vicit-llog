@@ -148,8 +148,8 @@ export default function AdminPage() {
   async function resetPw(id: string) {
     try {
       const res = await api.resetUserPassword(id);
-      setOncePassword(res.initialPassword);
-      setMsg(`Password reset for ${res.email}`);
+      if (res.initialPassword) setOncePassword(res.initialPassword);
+      setMsg(res.initialPassword ? `Password reset for ${res.email}` : `Password reset for ${res.email} — new temp password emailed.`);
       setSelected((s: any) => (s ? { ...s, mustChangePassword: true } : s));
     } catch (err: any) {
       setMsg(err.message);

@@ -13,10 +13,12 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { BrandingModule } from './modules/branding/branding.module';
 import { HealthModule } from './modules/health/health.module';
 import { PrismaModule } from './common/prisma/prisma.module';
+import { MailModule } from './modules/mail/mail.module';
 
 @Module({
   imports: [
     PrismaModule,
+    MailModule,
     AuthModule,
     UsersModule,
     InvitesModule,
