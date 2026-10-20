@@ -57,8 +57,8 @@ export class AuthService {
   }
 
   async changeOwnPassword(userId: string, currentPassword: string, newPassword: string) {
-    if (!newPassword || newPassword.length < 6) {
-      throw new BadRequestException('New password must be at least 6 characters');
+    if (!newPassword || newPassword.length < 5) {
+      throw new BadRequestException('New password must be at least 5 characters');
     }
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();

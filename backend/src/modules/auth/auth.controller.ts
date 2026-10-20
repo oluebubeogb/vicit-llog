@@ -14,7 +14,7 @@ class ChangePasswordDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(6)
+  @MinLength(5)
   newPassword: string;
 }
 

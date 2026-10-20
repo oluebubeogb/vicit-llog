@@ -15,8 +15,8 @@ export default function ChangePasswordPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (newPassword.length < 6) {
-      setError('New password must be at least 6 characters');
+    if (newPassword.length < 5) {
+      setError('New password must be at least 5 characters');
       return;
     }
     if (newPassword === currentPassword) {
@@ -65,7 +65,7 @@ export default function ChangePasswordPage() {
             value={newPassword}
             onChange={(e) => setNew(e.target.value)}
             className="w-full rounded-xl border px-4 py-3"
-            minLength={6}
+            minLength={5}
             required
           />
         </div>
@@ -76,7 +76,7 @@ export default function ChangePasswordPage() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             className="w-full rounded-xl border px-4 py-3"
-            minLength={6}
+            minLength={5}
             required
           />
         </div>
