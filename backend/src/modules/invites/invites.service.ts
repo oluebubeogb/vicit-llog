@@ -10,6 +10,7 @@ import { InviteStatus, Role } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../mail/mail.service';
 import * as QRCode from 'qrcode';
 
 @Injectable()
@@ -18,6 +19,7 @@ export class InvitesService {
     private prisma: PrismaService,
     private audit: AuditService,
     private notifications: NotificationsService,
+    private mail: MailService,
   ) {}
 
   private generatePassphrase(): string {
@@ -53,18 +55,34 @@ export class InvitesService {
       },
     });
 
-    // Create visitor records
-    const names = dto.guestNames?.length
-      ? dto.guestNames
-      : Array.from({ length: dto.guestCount || 1 }, (_, i) => `Guest ${i + 1}`);
+    // Build guest list from structured guests[] or legacy guestNames
+    type G = { fullName: string; email?: string; phone?: string };
+    let guests: G[] = [];
+    if (dto.guests?.length) {
+      guests = dto.guests.map((g) => ({
+        fullName: g.fullName.trim(),
+        email: g.email?.trim().toLowerCase() || undefined,
+        phone: g.phone?.trim() || undefined,
+      }));
+    } else if (dto.guestNames?.length) {
+      guests = dto.guestNames.map((n) => ({ fullName: n.trim() }));
+    } else {
+      guests = Array.from({ length: dto.guestCount || 1 }, (_, i) => ({
+        fullName: `Guest ${i + 1}`,
+      }));
+    }
 
-    for (const name of names) {
-      await this.prisma.visitor.create({
+    const createdVisitors = [];
+    for (const g of guests) {
+      const v = await this.prisma.visitor.create({
         data: {
           inviteId: invite.id,
-          fullName: name,
+          fullName: g.fullName,
+          email: g.email || null,
+          phone: g.phone || null,
         },
       });
+      createdVisitors.push(v);
     }
 
     await this.audit.log({
@@ -72,16 +90,44 @@ export class InvitesService {
       entity: 'Invite',
       entityId: invite.id,
       userId: hostId,
-      details: { purpose: dto.purpose, guestCount: dto.guestCount },
+      details: { purpose: dto.purpose, guestCount: guests.length },
     });
 
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     const link = `${baseUrl}/visitor/${token}`;
 
+    // Email each guest that has an address (skip offline-pending until approved)
+    const emailsSent: string[] = [];
+    if (!dto.isOffline) {
+      for (const g of guests) {
+        if (!g.email) continue;
+        const subject = `Visitor invite: ${dto.purpose}`;
+        const text = [
+          `Hello ${g.fullName},`,
+          ``,
+          `You have been invited by ${invite.host.fullName}.`,
+          `Purpose: ${dto.purpose}`,
+          ``,
+          `Open this link on your phone to register (photo + pass):`,
+          link,
+          ``,
+          `Backup passphrase at the gate: ${passphrase}`,
+          `Link expires in ${ttl} minutes.`,
+          ``,
+          `— Vicit Llog`,
+        ].join('\n');
+        const r = await this.mail.sendMail({ to: g.email, subject, text });
+        if (r.ok) emailsSent.push(g.email);
+      }
+    }
+
     return {
       ...invite,
+      guestCount: guests.length,
+      visitors: createdVisitors,
       link,
       expiresInMinutes: ttl,
+      emailsSent,
     };
   }
 

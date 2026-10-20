@@ -141,6 +141,7 @@ model Visitor {
   inviteId    String
   invite      Invite      @relation(fields: [inviteId], references: [id])
   fullName    String
+  email       String?
   photoPath   String?
   qrCodeData  String?
   status      VisitStatus @default(INVITED)
