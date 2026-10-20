@@ -165,7 +165,6 @@ model BlacklistEntry {
   reason         String
   photoPath      String?
   isActive       Boolean      @default(true)
-  mustChangePassword Boolean   @default(true)
   createdById    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
