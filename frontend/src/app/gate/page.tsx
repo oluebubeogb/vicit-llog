@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { api, getUser } from '@/lib/api';
 import {
   ScanLine,
@@ -14,7 +14,6 @@ import {
 
 export default function GatePage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [code, setCode] = useState('');
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -36,12 +35,12 @@ export default function GatePage() {
     }
   }, [router]);
 
-  // Prefill from ?code= when coming from Visits table
+  // Prefill from ?code= when coming from Visits table (no useSearchParams — avoids Suspense build error)
   useEffect(() => {
-    const q = searchParams?.get('code');
+    if (typeof window === 'undefined') return;
+    const q = new URLSearchParams(window.location.search).get('code');
     if (q) {
       setCode(q);
-      // auto lookup
       (async () => {
         try {
           const data = await api.gateLookup(q.trim());
@@ -51,7 +50,7 @@ export default function GatePage() {
         }
       })();
     }
-  }, [searchParams]);
+  }, []);
 
   async function lookup(raw?: string) {
     const value = (raw ?? code).trim();
