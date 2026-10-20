@@ -39,6 +39,12 @@ services:
       ENABLE_PUSH: ${ENABLE_PUSH:-false}
       SMS_PROVIDER: ${SMS_PROVIDER:-}
       WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-}
+      ADMIN_PHONE: ${ADMIN_PHONE:-}
+      ORGANIZATION: ${ORGANIZATION:-}
+      ORGANIZATION_CODE: ${ORGANIZATION_CODE:-}
     volumes:
       - photos_data:/data/photos
       - reports_data:/data/reports

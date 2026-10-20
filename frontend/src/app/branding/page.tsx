@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { api } from '@/lib/api';
 import Link from 'next/link';
-import { ArrowLeft, Palette } from 'lucide-react';
+import { ArrowLeft, Palette, ImagePlus } from 'lucide-react';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export default function BrandingPage() {
   const [form, setForm] = useState({
@@ -17,6 +19,8 @@ export default function BrandingPage() {
   });
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api
@@ -28,7 +32,7 @@ export default function BrandingPage() {
           primaryColor: b.primaryColor || '#2563eb',
           secondaryColor: b.secondaryColor || '#1e40af',
           customDomain: b.customDomain || '',
-          requireApproval: b.requireApproval || false,
+          requireApproval: !!b.requireApproval,
           photoRetentionDays: b.photoRetentionDays ?? 90,
         }),
       )
@@ -38,10 +42,31 @@ export default function BrandingPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api.updateBranding(form);
-      setMsg('Branding saved');
+      await api.updateBranding({
+        name: form.name,
+        primaryColor: form.primaryColor,
+        secondaryColor: form.secondaryColor,
+        customDomain: form.customDomain,
+        requireApproval: form.requireApproval,
+        photoRetentionDays: form.photoRetentionDays,
+      });
+      setMsg('Settings saved');
     } catch (err: any) {
       setMsg(err.message);
+    }
+  }
+
+  async function onLogo(file: File) {
+    setUploading(true);
+    setMsg('');
+    try {
+      const res = await api.uploadLogo(file);
+      setForm((f) => ({ ...f, logoUrl: res.logoUrl || f.logoUrl }));
+      setMsg('Logo uploaded');
+    } catch (err: any) {
+      setMsg(err.message);
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -52,6 +77,12 @@ export default function BrandingPage() {
       </div>
     );
   }
+
+  const logoSrc = form.logoUrl
+    ? form.logoUrl.startsWith('http')
+      ? form.logoUrl
+      : `${API_URL}${form.logoUrl}`
+    : null;
 
   return (
     <div className="px-4 pt-6 pb-8">
@@ -76,16 +107,43 @@ export default function BrandingPage() {
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             className="w-full rounded-xl border px-4 py-3"
           />
+          <p className="mt-1 text-xs text-slate-400">
+            Defaults from ORGANIZATION env on first boot; editable anytime here.
+          </p>
         </div>
+
         <div>
-          <label className="mb-1 block text-sm font-medium">Logo URL</label>
-          <input
-            value={form.logoUrl}
-            onChange={(e) => setForm({ ...form, logoUrl: e.target.value })}
-            className="w-full rounded-xl border px-4 py-3"
-            placeholder="https://..."
-          />
+          <label className="mb-1 block text-sm font-medium">Logo</label>
+          <div className="flex items-center gap-4">
+            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border bg-slate-50">
+              {logoSrc ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoSrc} alt="Logo" className="h-full w-full object-contain" />
+              ) : (
+                <ImagePlus className="text-slate-300" size={28} />
+              )}
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {uploading ? 'Uploading…' : 'Pick image'}
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && onLogo(e.target.files[0])}
+              />
+              <p className="mt-1 text-xs text-slate-400">PNG or JPG, max 3MB</p>
+            </div>
+          </div>
         </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-sm font-medium">Primary colour</label>
@@ -106,6 +164,7 @@ export default function BrandingPage() {
             />
           </div>
         </div>
+
         <div>
           <label className="mb-1 block text-sm font-medium">Custom domain</label>
           <input
@@ -115,10 +174,9 @@ export default function BrandingPage() {
             placeholder="visitors.yourorg.com"
           />
         </div>
+
         <div>
-          <label className="mb-1 block text-sm font-medium">
-            Photo retention (days)
-          </label>
+          <label className="mb-1 block text-sm font-medium">Photo retention (days)</label>
           <input
             type="number"
             min={7}
@@ -130,6 +188,7 @@ export default function BrandingPage() {
             className="w-full rounded-xl border px-4 py-3"
           />
         </div>
+
         <label className="flex items-center gap-3 rounded-xl border px-4 py-3">
           <input
             type="checkbox"
@@ -139,10 +198,8 @@ export default function BrandingPage() {
           />
           <span className="text-sm font-medium">Require approval for invites</span>
         </label>
-        <button
-          type="submit"
-          className="w-full rounded-xl bg-brand-600 py-3.5 font-semibold text-white"
-        >
+
+        <button type="submit" className="w-full rounded-xl bg-brand-600 py-3.5 font-semibold text-white">
           Save Settings
         </button>
       </form>

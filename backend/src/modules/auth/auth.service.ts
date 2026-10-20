@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -31,23 +31,52 @@ export class AuthService {
       email: user.email,
       role: user.role,
       orgId: user.organisationId,
+      mustChangePassword: user.mustChangePassword,
     };
 
     return {
       accessToken: this.jwt.sign(payload),
+      mustChangePassword: user.mustChangePassword,
       user: {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
         role: user.role,
         portfolio: user.portfolio,
+        phone: user.phone,
+        mustChangePassword: user.mustChangePassword,
         organisation: {
           id: user.organisation.id,
           name: user.organisation.name,
           code: user.organisation.code,
+          logoUrl: user.organisation.logoUrl,
+          primaryColor: user.organisation.primaryColor,
         },
       },
     };
+  }
+
+  async changeOwnPassword(userId: string, currentPassword: string, newPassword: string) {
+    if (!newPassword || newPassword.length < 6) {
+      throw new BadRequestException('New password must be at least 6 characters');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) throw new BadRequestException('Current password is incorrect');
+
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      throw new BadRequestException('New password must be different from the current one');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash, mustChangePassword: false },
+    });
+
+    return { ok: true, message: 'Password updated' };
   }
 
   async validateUser(userId: string) {

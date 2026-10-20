@@ -7,10 +7,12 @@ export class CreateUserDto {
   @IsEmail()
   email: string;
 
-  @ApiProperty()
+  // Password optional — system generates Nigerian word if omitted
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  @MinLength(8)
-  password: string;
+  @MinLength(5)
+  password?: string;
 
   @ApiProperty()
   @IsString()

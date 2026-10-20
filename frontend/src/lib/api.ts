@@ -142,4 +142,22 @@ export const api = {
     request('/branding', { method: 'PATCH', body: JSON.stringify(data) }),
   health: () => request('/health'),
   cleanupPhotos: () => request('/health/cleanup-photos', { method: 'POST' }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+  bulkUsers: (rows: any[]) =>
+    request('/users/bulk', { method: 'POST', body: JSON.stringify({ rows }) }),
+  resetUserPassword: (id: string) =>
+    request(`/users/${id}/reset-password`, { method: 'POST' }),
+  updateUser: (id: string, data: any) =>
+    request(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getUserById: (id: string) => request(`/users/${id}`),
+  uploadLogo: async (file: File) => {
+    const form = new FormData();
+    form.append('logo', file);
+    return request('/branding/logo', { method: 'POST', body: form });
+  },
 };

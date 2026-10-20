@@ -103,6 +103,7 @@ model User {
   phone          String?
   permissions    String[]     @default([])
   isActive       Boolean      @default(true)
+  mustChangePassword Boolean   @default(true)
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
   invites        Invite[]     @relation("HostInvites")
@@ -164,6 +165,7 @@ model BlacklistEntry {
   reason         String
   photoPath      String?
   isActive       Boolean      @default(true)
+  mustChangePassword Boolean   @default(true)
   createdById    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt

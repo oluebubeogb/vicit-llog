@@ -41,11 +41,11 @@ export default function BottomNav() {
 
   if (!mounted) return null;
 
-  // Hide on public visitor page and login
   if (
     pathname?.startsWith('/visitor/') ||
     pathname === '/login' ||
-    pathname === '/'
+    pathname === '/' ||
+    pathname === '/change-password'
   ) {
     return null;
   }
@@ -54,7 +54,7 @@ export default function BottomNav() {
   const links = isGate ? gateLinks : staffLinks;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur bottom-nav safe-area">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 mt-4 border-t border-slate-200 bg-white/95 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur bottom-nav">
       <div className="mx-auto flex max-w-lg items-center justify-around px-2 pt-2">
         {links.map(({ href, icon: Icon, label }) => {
           const active = pathname === href || pathname?.startsWith(href + '/');
@@ -64,16 +64,10 @@ export default function BottomNav() {
               href={href}
               className={clsx(
                 'flex flex-col items-center gap-0.5 rounded-lg px-3 py-1.5 text-xs font-medium transition',
-                active
-                  ? 'text-brand-600'
-                  : 'text-slate-500 hover:text-slate-800',
+                active ? 'text-brand-600' : 'text-slate-500 hover:text-slate-800',
               )}
             >
-              <Icon
-                size={22}
-                strokeWidth={active ? 2.5 : 2}
-                className={active ? 'text-brand-600' : ''}
-              />
+              <Icon size={22} strokeWidth={active ? 2.5 : 2} />
               <span>{label}</span>
             </Link>
           );

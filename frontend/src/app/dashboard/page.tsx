@@ -25,6 +25,10 @@ export default function DashboardPage() {
       router.replace('/login');
       return;
     }
+    if (u.mustChangePassword) {
+      router.replace('/change-password');
+      return;
+    }
     setUserState(u);
     api
       .myInvites()

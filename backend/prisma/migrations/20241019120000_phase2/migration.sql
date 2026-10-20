@@ -99,3 +99,6 @@ ALTER TABLE "ApprovalWorkflow" ADD CONSTRAINT "ApprovalWorkflow_organisationId_f
 
 -- User phone for SMS/WhatsApp host alerts
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "phone" TEXT;
+
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN NOT NULL DEFAULT true;
+-- Existing seeded admin can keep current password behavior after first login flag clear via seed
