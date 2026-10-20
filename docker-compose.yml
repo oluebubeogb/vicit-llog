@@ -10,8 +10,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-vicit_llog}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # Do NOT publish 5432 on the host — Coolify / other apps often already use it.
-    # Backend reaches DB via internal Docker network: host "db", port 5432.
     expose:
       - "5432"
     healthcheck:
@@ -36,7 +34,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       INVITE_LINK_TTL_MINUTES: ${INVITE_LINK_TTL_MINUTES:-60}
-      PORT: 4000
+      PORT: "4000"
       PHOTO_RETENTION_DAYS: ${PHOTO_RETENTION_DAYS:-90}
       ENABLE_PUSH: ${ENABLE_PUSH:-false}
       SMS_PROVIDER: ${SMS_PROVIDER:-}
@@ -46,25 +44,25 @@ services:
       - reports_data:/data/reports
     expose:
       - "4000"
-    # Optional host bind only if you need direct access outside Coolify proxy:
-    # ports:
-    #   - "4000:4000"
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Vicit Llog}
     restart: unless-stopped
     depends_on:
       - backend
     environment:
+      # Runtime fallbacks (NEXT_PUBLIC_* are mainly build-time)
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Vicit Llog}
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
     expose:
       - "3000"
-    # Optional host bind only if you need direct access outside Coolify proxy:
-    # ports:
-    #   - "3000:3000"
 
 volumes:
   postgres_data:

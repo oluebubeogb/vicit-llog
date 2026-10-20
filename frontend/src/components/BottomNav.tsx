@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import {
   Home,
   UserPlus,
@@ -29,9 +30,16 @@ const gateLinks = [
 
 export default function BottomNav() {
   const pathname = usePathname();
-  const user = getUser();
-  const isGate = user?.role === 'GATE';
-  const links = isGate ? gateLinks : staffLinks;
+  const [role, setRole] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const u = getUser();
+    setRole(u?.role ?? null);
+  }, []);
+
+  if (!mounted) return null;
 
   // Hide on public visitor page and login
   if (
@@ -41,6 +49,9 @@ export default function BottomNav() {
   ) {
     return null;
   }
+
+  const isGate = role === 'GATE';
+  const links = isGate ? gateLinks : staffLinks;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur bottom-nav safe-area">
