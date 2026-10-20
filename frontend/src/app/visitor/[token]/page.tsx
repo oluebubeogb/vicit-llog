@@ -19,6 +19,20 @@ export default function VisitorPage() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
 
+  // The video element only exists after cameraOn becomes true. Attach the stream
+  // after React renders it; assigning srcObject inside startCamera races the render.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!cameraOn || !stream || !video) return;
+    video.srcObject = stream;
+    video.play().catch(() => {
+      setError('The camera opened but the preview could not start. Please try again.');
+    });
+    return () => {
+      video.srcObject = null;
+    };
+  }, [cameraOn, stream]);
+
   useEffect(() => {
     api
       .publicInvite(token)
@@ -33,23 +47,34 @@ export default function VisitorPage() {
   }, [token]);
 
   async function startCamera() {
+    setError('');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('This browser cannot access the camera. Open this page in a supported browser over HTTPS.');
+      return;
+    }
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } },
+        video: { facingMode: 'user' },
         audio: false,
       });
       setStream(s);
-      if (videoRef.current) {
-        videoRef.current.srcObject = s;
-      }
       setCameraOn(true);
-    } catch {
-      setError('Camera access denied. Please allow camera permission.');
+    } catch (err: any) {
+      const message = err?.name === 'NotAllowedError'
+        ? 'Camera permission was denied. Allow camera access in your browser settings and try again.'
+        : err?.name === 'NotFoundError'
+          ? 'No camera was found on this device.'
+          : err?.name === 'NotReadableError'
+            ? 'The camera is already in use by another app. Close it and try again.'
+            : 'Could not open the camera. Check browser permissions and try again.';
+      setError(message);
     }
   }
 
   function stopCamera() {
-    stream?.getTracks().forEach((t) => t.stop());
+    const activeStream = stream || (videoRef.current?.srcObject as MediaStream | null);
+    activeStream?.getTracks().forEach((t) => t.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
     setStream(null);
     setCameraOn(false);
   }
@@ -61,6 +86,11 @@ export default function VisitorPage() {
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) {
+      setError('The camera is not ready yet. Wait for your live image to appear, then try again.');
+      setUploading(false);
+      return;
+    }
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d')!;
@@ -176,6 +206,7 @@ export default function VisitorPage() {
               autoPlay
               playsInline
               muted
+              onLoadedMetadata={(event) => event.currentTarget.play().catch(() => {})}
               className="aspect-[3/4] w-full object-cover"
             />
           </div>
