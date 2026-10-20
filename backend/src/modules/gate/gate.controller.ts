@@ -22,6 +22,12 @@ export class GateController {
     return this.gateService.lookup(code);
   }
 
+  @Get('visits')
+  @ApiOperation({ summary: 'List visits for gate dashboard' })
+  visits(@CurrentUser() user: any, @Query('filter') filter?: string) {
+    return this.gateService.listVisits(user.orgId, filter);
+  }
+
   @Post('entry')
   @ApiOperation({ summary: 'Record visitor entry' })
   entry(@Body() dto: EntryDto, @CurrentUser() user: any) {

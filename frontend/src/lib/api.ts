@@ -92,6 +92,8 @@ export const api = {
   },
   gateLookup: (code: string) =>
     request(`/gate/lookup?code=${encodeURIComponent(code)}`),
+  gateVisits: (filter?: string) =>
+    request(`/gate/visits${filter ? `?filter=${encodeURIComponent(filter)}` : ''}`),
   recordEntry: (data: any) =>
     request('/gate/entry', { method: 'POST', body: JSON.stringify(data) }),
   recordExit: (visitorId: string, notes?: string) =>

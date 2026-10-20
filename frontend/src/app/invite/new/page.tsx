@@ -1,15 +1,83 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { ArrowLeft, Copy, Check, Download, User } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Download, User, ChevronDown, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 
-type Guest = { fullName: string; email: string; phone: string };
+type Guest = { fullName: string; email: string; phone: string; address: string };
 
 function emptyGuest(): Guest {
-  return { fullName: '', email: '', phone: '' };
+  return { fullName: '', email: '', phone: '', address: '' };
+}
+
+/** Flexible bulk parser — tolerates minor formatting mistakes */
+function parseBulkText(text: string): Guest[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const parsed: Guest[] = [];
+
+  for (const line of lines) {
+    // Skip header-ish lines
+    if (/^name\s*,\s*email/i.test(line) || /^#+/.test(line) || /^=+/.test(line)) continue;
+
+    // Comma or tab or pipe separated
+    if (/[,|\t]/.test(line)) {
+      const parts = line.split(/[,|\t]/).map((s) => s.trim()).filter((s, i, a) => s || i < a.length - 1);
+      // Detect which field is email / phone
+      let fullName = '';
+      let email = '';
+      let phone = '';
+      let address = '';
+      for (const part of parts) {
+        if (!part) continue;
+        if (!email && /@/.test(part) && /\./.test(part)) {
+          email = part.toLowerCase();
+        } else if (
+          !phone &&
+          /^[+]?[\d\s().-]{7,}$/.test(part.replace(/\s/g, ''))
+        ) {
+          phone = part;
+        } else if (!fullName) {
+          fullName = part;
+        } else {
+          // Remaining → address (join if multiple leftovers)
+          address = address ? `${address}, ${part}` : part;
+        }
+      }
+      if (fullName || email) {
+        parsed.push({
+          fullName: fullName || (email ? email.split('@')[0] : `Guest ${parsed.length + 1}`),
+          email,
+          phone,
+          address,
+        });
+      }
+    } else if (line.includes('@')) {
+      if (parsed.length && !parsed[parsed.length - 1].email) {
+        parsed[parsed.length - 1].email = line.toLowerCase();
+      } else {
+        parsed.push({
+          fullName: `Guest ${parsed.length + 1}`,
+          email: line.toLowerCase(),
+          phone: '',
+          address: '',
+        });
+      }
+    } else if (/^[+]?[\d\s().-]{7,}$/.test(line.replace(/\s/g, ''))) {
+      if (parsed.length && !parsed[parsed.length - 1].phone) {
+        parsed[parsed.length - 1].phone = line;
+      }
+    } else {
+      parsed.push({ fullName: line, email: '', phone: '', address: '' });
+    }
+  }
+
+  return parsed;
 }
 
 export default function NewInvitePage() {
@@ -19,20 +87,27 @@ export default function NewInvitePage() {
   const [expectedTime, setExpectedTime] = useState('');
   const [guestCount, setGuestCount] = useState(1);
   const [guests, setGuests] = useState<Guest[]>([emptyGuest()]);
+  const [openGuests, setOpenGuests] = useState<Record<number, boolean>>({ 0: true });
   const [mode, setMode] = useState('PEDESTRIAN');
   const [isOffline, setIsOffline] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
+  const [bulkText, setBulkText] = useState('');
 
-  // Keep guests array length in sync with guestCount
   useEffect(() => {
     setGuests((prev) => {
       const n = Math.max(1, Math.min(20, guestCount || 1));
       if (prev.length === n) return prev;
       if (prev.length < n) {
-        return [...prev, ...Array.from({ length: n - prev.length }, emptyGuest)];
+        const next = [...prev, ...Array.from({ length: n - prev.length }, emptyGuest)];
+        setOpenGuests((o) => {
+          const copy = { ...o };
+          for (let i = prev.length; i < n; i++) copy[i] = i === n - 1;
+          return copy;
+        });
+        return next;
       }
       return prev.slice(0, n);
     });
@@ -46,32 +121,17 @@ export default function NewInvitePage() {
     });
   }
 
-  /** Parse free-text: "Name" / "email" alternating lines, or "Name, email, phone" */
-  function parseBulkText(text: string) {
-    const lines = text
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    const parsed: Guest[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.includes(',')) {
-        const [fullName, email, phone] = line.split(',').map((s) => s.trim());
-        parsed.push({ fullName: fullName || '', email: email || '', phone: phone || '' });
-      } else if (line.includes('@')) {
-        // email line — attach to previous guest or start new
-        if (parsed.length && !parsed[parsed.length - 1].email) {
-          parsed[parsed.length - 1].email = line;
-        } else {
-          parsed.push({ fullName: `Guest ${parsed.length + 1}`, email: line, phone: '' });
-        }
-      } else {
-        parsed.push({ fullName: line, email: '', phone: '' });
-      }
-    }
+  function toggleGuest(i: number) {
+    setOpenGuests((prev) => ({ ...prev, [i]: !prev[i] }));
+  }
+
+  function applyBulk() {
+    if (!bulkText.trim()) return;
+    const parsed = parseBulkText(bulkText);
     if (parsed.length) {
       setGuestCount(parsed.length);
       setGuests(parsed);
+      setOpenGuests(Object.fromEntries(parsed.map((_, i) => [i, i === 0])));
     }
   }
 
@@ -85,6 +145,7 @@ export default function NewInvitePage() {
           fullName: g.fullName.trim() || 'Guest',
           email: g.email.trim() || undefined,
           phone: g.phone.trim() || undefined,
+          address: g.address.trim() || undefined,
         }))
         .filter((g) => g.fullName);
       let expectedAt: string | undefined;
@@ -119,23 +180,13 @@ export default function NewInvitePage() {
 
   function downloadSampleTxt() {
     const sample = [
-      'Vicit Llog — Sample invite guest list',
-      '=====================================',
-      'One guest per block. You can also paste into the bulk box:',
+      'Name, Email, Phone number, Address',
+      'Name, Email, Phone number, Address',
       '',
-      'Format A — comma separated:',
-      'Jane Doe, jane@example.com, +2348012345678',
-      'John Smith, john@example.com, +2348098765432',
+      'Jane Doe, jane@example.com, +2348012345678, 12 Admiralty Way Lagos',
+      'John Smith, john@example.com, +2348098765432, 5 Marina Road Abuja',
       '',
-      'Format B — name then email on next line:',
-      'Jane Doe',
-      'jane@example.com',
-      'John Smith',
-      'john@example.com',
-      '',
-      'After creating the invite, each guest with an email receives the registration link.',
-      'Share the same link or passphrase at the gate if email is not available.',
-      '',
+      'You may also use tabs or pipes as separators. Minor formatting errors are tolerated.',
     ].join('\n');
     const blob = new Blob([sample], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -250,58 +301,83 @@ export default function NewInvitePage() {
         </div>
 
         <div>
-          <label className="mb-1.5 block text-sm font-medium">
-            Bulk paste (optional)
-          </label>
+          <label className="mb-1.5 block text-sm font-medium">Bulk paste (optional)</label>
           <textarea
-            rows={3}
-            placeholder={'Jane Doe, jane@email.com, +234...\nJohn Smith\njohn@email.com'}
-            onBlur={(e) => {
-              if (e.target.value.trim()) parseBulkText(e.target.value);
-            }}
+            rows={4}
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            onBlur={applyBulk}
+            placeholder={'Name, Email, Phone number, Address\nName, Email, Phone number, Address'}
             className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
           />
           <p className="mt-1 text-xs text-slate-400">
-            Paste names/emails then leave the box — guests update automatically.
+            One guest per line. Leave the box to auto-fill the guest cards below.
           </p>
         </div>
 
-        {/* Stacked numbered guest cards */}
-        <div className="space-y-3">
-          {guests.map((g, i) => (
-            <div
-              key={i}
-              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-            >
-              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs text-white">
-                  {i + 1}
-                </span>
-                <User size={16} /> Guest {i + 1}
+        {/* Collapsible guest cards */}
+        <div className="space-y-2">
+          {guests.map((g, i) => {
+            const open = openGuests[i] !== false;
+            const summary =
+              g.fullName || g.email
+                ? [g.fullName, g.email].filter(Boolean).join(' · ')
+                : `Guest ${i + 1}`;
+            return (
+              <div
+                key={i}
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleGuest(i)}
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs text-white">
+                    {i + 1}
+                  </span>
+                  <User size={16} className="text-slate-400" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">
+                    {summary}
+                  </span>
+                  {open ? (
+                    <ChevronDown size={18} className="text-slate-400" />
+                  ) : (
+                    <ChevronRight size={18} className="text-slate-400" />
+                  )}
+                </button>
+                {open && (
+                  <div className="space-y-2 border-t border-slate-100 px-4 pb-4 pt-2">
+                    <input
+                      value={g.fullName}
+                      onChange={(e) => updateGuest(i, 'fullName', e.target.value)}
+                      placeholder="Full name"
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+                    <input
+                      type="email"
+                      value={g.email}
+                      onChange={(e) => updateGuest(i, 'email', e.target.value)}
+                      placeholder="Email (invite link sent here)"
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={g.phone}
+                      onChange={(e) => updateGuest(i, 'phone', e.target.value)}
+                      placeholder="Phone number"
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={g.address}
+                      onChange={(e) => updateGuest(i, 'address', e.target.value)}
+                      placeholder="Address"
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
               </div>
-              <div className="space-y-2">
-                <input
-                  value={g.fullName}
-                  onChange={(e) => updateGuest(i, 'fullName', e.target.value)}
-                  placeholder="Full name"
-                  className="w-full rounded-lg border px-3 py-2 text-sm"
-                />
-                <input
-                  type="email"
-                  value={g.email}
-                  onChange={(e) => updateGuest(i, 'email', e.target.value)}
-                  placeholder="Email (invite link sent here)"
-                  className="w-full rounded-lg border px-3 py-2 text-sm"
-                />
-                <input
-                  value={g.phone}
-                  onChange={(e) => updateGuest(i, 'phone', e.target.value)}
-                  placeholder="Phone (optional)"
-                  className="w-full rounded-lg border px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div>
@@ -326,7 +402,9 @@ export default function NewInvitePage() {
           />
           <div>
             <p className="text-sm font-medium">Offline / No-phone request</p>
-            <p className="text-xs text-slate-400">Requires admin approval (emails not sent until approved)</p>
+            <p className="text-xs text-slate-400">
+              Requires admin approval (emails not sent until approved)
+            </p>
           </div>
         </label>
 

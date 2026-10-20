@@ -28,6 +28,11 @@ export class GuestInputDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  address?: string;
 }
 
 export class CreateInviteDto {

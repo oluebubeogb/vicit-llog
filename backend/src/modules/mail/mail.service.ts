@@ -205,4 +205,102 @@ export class MailService {
     );
     return this.sendMail({ to: opts.to, subject, text, html });
   }
+
+  async sendVisitorQrEmail(opts: {
+    to: string;
+    guestName: string;
+    hostName: string;
+    purpose: string;
+    passphrase: string;
+    qrDataUrl: string;
+    orgName?: string;
+  }) {
+    const subject = `Your gate QR code — ${opts.purpose}`;
+    const text = [
+      `Hello ${opts.guestName},`,
+      `Your photo registration is complete.`,
+      `Host: ${opts.hostName}`,
+      `Purpose: ${opts.purpose}`,
+      `Gate passphrase: ${opts.passphrase}`,
+      `Show the QR code in this email (or on your registration page) at the gate.`,
+    ].join('\n');
+    const html = this.layout(
+      subject,
+      `
+      <p style="margin:0 0 12px;">Hello <strong>${opts.guestName}</strong>,</p>
+      <p style="margin:0 0 16px;color:#475569;">
+        Your photo is registered. Present this QR code or passphrase at the gate when you arrive.
+      </p>
+      <div style="text-align:center;margin:20px 0;">
+        <img src="${opts.qrDataUrl}" alt="Gate QR code" width="220" height="220" style="border-radius:12px;border:1px solid #e2e8f0;" />
+      </div>
+      ${this.codeBox('Gate passphrase', opts.passphrase)}
+      <p style="margin:0;font-size:13px;color:#64748b;text-align:center;">
+        Host: <strong>${opts.hostName}</strong>${opts.orgName ? ` · ${opts.orgName}` : ''}<br/>
+        Purpose: ${opts.purpose}
+      </p>
+      `,
+    );
+    return this.sendMail({ to: opts.to, subject, text, html });
+  }
+
+  async sendHostVisitorUpdate(opts: {
+    to: string;
+    hostName: string;
+    guestName: string;
+    purpose: string;
+    event: 'photo' | 'arrival' | 'exit';
+    orgName?: string;
+    at?: string | null;
+  }) {
+    const labels = {
+      photo: { title: 'Guest photo captured', verb: 'completed photo registration' },
+      arrival: { title: 'Visitor arrived', verb: 'has entered the premises' },
+      exit: { title: 'Visitor exited', verb: 'has left the premises' },
+    };
+    const L = labels[opts.event];
+    const subject = `${L.title}: ${opts.guestName}`;
+    const when = opts.at
+      ? new Date(opts.at).toLocaleString('en-GB', {
+          weekday: 'short',
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : new Date().toLocaleString('en-GB', {
+          weekday: 'short',
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+    const text = [
+      `Hello ${opts.hostName},`,
+      `${opts.guestName} ${L.verb}.`,
+      `Purpose: ${opts.purpose}`,
+      `Time: ${when}`,
+    ].join('\n');
+    const html = this.layout(
+      subject,
+      `
+      <p style="margin:0 0 12px;">Hello <strong>${opts.hostName}</strong>,</p>
+      <p style="margin:0 0 16px;color:#475569;">
+        <strong>${opts.guestName}</strong> ${L.verb}.
+      </p>
+      <table width="100%" style="background:#f8fafc;border-radius:12px;">
+        <tr><td style="padding:14px 16px;">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Purpose</div>
+          <div style="font-weight:600;margin-top:2px;">${opts.purpose}</div>
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-top:12px;">Time</div>
+          <div style="font-weight:600;margin-top:2px;">${when}</div>
+        </td></tr>
+      </table>
+      `,
+    );
+    return this.sendMail({ to: opts.to, subject, text, html });
+  }
+
 }

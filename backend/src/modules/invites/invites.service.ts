@@ -57,13 +57,14 @@ export class InvitesService {
     });
 
     // Build guest list from structured guests[] or legacy guestNames
-    type G = { fullName: string; email?: string; phone?: string };
+    type G = { fullName: string; email?: string; phone?: string; address?: string };
     let guests: G[] = [];
     if (dto.guests?.length) {
       guests = dto.guests.map((g) => ({
         fullName: g.fullName.trim(),
         email: g.email?.trim().toLowerCase() || undefined,
         phone: g.phone?.trim() || undefined,
+        address: g.address?.trim() || undefined,
       }));
     } else if (dto.guestNames?.length) {
       guests = dto.guestNames.map((n) => ({ fullName: n.trim() }));
@@ -81,6 +82,7 @@ export class InvitesService {
           fullName: g.fullName,
           email: g.email || null,
           phone: g.phone || null,
+          address: g.address || null,
         },
       });
       createdVisitors.push(v);
@@ -168,14 +170,20 @@ export class InvitesService {
       throw new BadRequestException('This invite has been revoked');
     }
 
-    if (invite.status === InviteStatus.EXPIRED || new Date() > invite.expiresAt) {
-      if (invite.status !== InviteStatus.EXPIRED) {
-        await this.prisma.invite.update({
-          where: { id: invite.id },
-          data: { status: InviteStatus.EXPIRED },
-        });
+    const expired =
+      invite.status === InviteStatus.EXPIRED || new Date() > invite.expiresAt;
+    if (expired) {
+      // Still allow viewing status if any visitor already registered a photo
+      const anyPhoto = invite.visitors?.some((v) => v.photoPath);
+      if (!anyPhoto) {
+        if (invite.status !== InviteStatus.EXPIRED) {
+          await this.prisma.invite.update({
+            where: { id: invite.id },
+            data: { status: InviteStatus.EXPIRED },
+          });
+        }
+        throw new BadRequestException('This invite link has expired');
       }
-      throw new BadRequestException('This invite link has expired');
     }
 
     return invite;
