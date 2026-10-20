@@ -105,12 +105,25 @@ export class GateService {
       details: { mode: dto.entryMode, notes: dto.notes },
     });
 
-    // Notify host
+    // Notify host (in-app + optional SMS/WhatsApp)
+    const host = await this.prisma.user.findUnique({
+      where: { id: visitor.invite.hostId },
+      select: { id: true, phone: true },
+    });
+    const channels: Array<'in_app' | 'sms' | 'whatsapp'> = ['in_app'];
+    if (process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== 'log' && host?.phone) {
+      channels.push('sms');
+    }
+    if (process.env.WHATSAPP_PROVIDER && process.env.WHATSAPP_PROVIDER !== 'log' && host?.phone) {
+      channels.push('whatsapp');
+    }
     await this.notifications.create({
       userId: visitor.invite.hostId,
       title: 'Visitor Arrived',
       body: `${visitor.fullName} has entered the premises.`,
       meta: { visitorId: visitor.id, inviteId: visitor.inviteId },
+      channels,
+      phone: host?.phone || undefined,
     });
 
     return updated;
@@ -146,11 +159,24 @@ export class GateService {
       details: { notes },
     });
 
+    const hostExit = await this.prisma.user.findUnique({
+      where: { id: visitor.invite.hostId },
+      select: { id: true, phone: true },
+    });
+    const channelsExit: Array<'in_app' | 'sms' | 'whatsapp'> = ['in_app'];
+    if (process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== 'log' && hostExit?.phone) {
+      channelsExit.push('sms');
+    }
+    if (process.env.WHATSAPP_PROVIDER && process.env.WHATSAPP_PROVIDER !== 'log' && hostExit?.phone) {
+      channelsExit.push('whatsapp');
+    }
     await this.notifications.create({
       userId: visitor.invite.hostId,
       title: 'Visitor Exited',
       body: `${visitor.fullName} has left the premises.`,
       meta: { visitorId: visitor.id, inviteId: visitor.inviteId },
+      channels: channelsExit,
+      phone: hostExit?.phone || undefined,
     });
 
     return updated;

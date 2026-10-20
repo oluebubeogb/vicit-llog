@@ -25,4 +25,9 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   portfolio?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  phone?: string;
 }

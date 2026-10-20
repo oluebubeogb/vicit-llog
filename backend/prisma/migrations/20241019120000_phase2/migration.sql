@@ -96,3 +96,6 @@ CREATE TABLE IF NOT EXISTS "ApprovalWorkflow" (
 );
 ALTER TABLE "ApprovalWorkflow" DROP CONSTRAINT IF EXISTS "ApprovalWorkflow_organisationId_fkey";
 ALTER TABLE "ApprovalWorkflow" ADD CONSTRAINT "ApprovalWorkflow_organisationId_fkey" FOREIGN KEY ("organisationId") REFERENCES "Organisation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- User phone for SMS/WhatsApp host alerts
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "phone" TEXT;
