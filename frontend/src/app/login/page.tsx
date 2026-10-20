@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, setToken, setUser } from '@/lib/api';
-import { Shield } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,8 +35,14 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-brand-800 to-brand-900 px-6 text-white">
       <div className="mb-8 flex flex-col items-center">
-        <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 backdrop-blur">
-          <Shield size={36} className="text-white" />
+        {/* App icon (same as taskbar / PWA) on a light background so blue logos stay visible */}
+        <div className="mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-lg shadow-black/20">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icon-192.png"
+            alt="Vicit Llog"
+            className="h-full w-full object-contain"
+          />
         </div>
         <h1 className="text-2xl font-bold tracking-tight">Vicit Llog</h1>
         <p className="mt-1 text-sm text-brand-100">Visitor Access Control</p>
