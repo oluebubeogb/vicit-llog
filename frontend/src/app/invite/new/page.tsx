@@ -15,6 +15,8 @@ function emptyGuest(): Guest {
 export default function NewInvitePage() {
   const router = useRouter();
   const [purpose, setPurpose] = useState('');
+  const [expectedDate, setExpectedDate] = useState('');
+  const [expectedTime, setExpectedTime] = useState('');
   const [guestCount, setGuestCount] = useState(1);
   const [guests, setGuests] = useState<Guest[]>([emptyGuest()]);
   const [mode, setMode] = useState('PEDESTRIAN');
@@ -85,6 +87,11 @@ export default function NewInvitePage() {
           phone: g.phone.trim() || undefined,
         }))
         .filter((g) => g.fullName);
+      let expectedAt: string | undefined;
+      if (expectedDate) {
+        const time = expectedTime || '09:00';
+        expectedAt = new Date(`${expectedDate}T${time}:00`).toISOString();
+      }
       const data = await api.createInvite({
         purpose,
         guestCount: clean.length || guestCount,
@@ -92,6 +99,7 @@ export default function NewInvitePage() {
         guestNames: clean.map((g) => g.fullName),
         expectedMode: mode,
         isOffline,
+        expectedAt,
       });
       setResult(data);
     } catch (err: any) {
@@ -195,6 +203,29 @@ export default function NewInvitePage() {
             className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
             required
           />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">Date *</label>
+            <input
+              type="date"
+              value={expectedDate}
+              onChange={(e) => setExpectedDate(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
+              required
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">Time *</label>
+            <input
+              type="time"
+              value={expectedTime}
+              onChange={(e) => setExpectedTime(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
+              required
+            />
+          </div>
         </div>
 
         <div>

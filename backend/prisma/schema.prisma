@@ -121,6 +121,7 @@ model Invite {
   guestCount     Int          @default(1)
   guestNames     String[]
   expectedMode   EntryMode?
+  expectedAt     DateTime?
   expiresAt      DateTime
   revivedAt      DateTime?
   hostId         String

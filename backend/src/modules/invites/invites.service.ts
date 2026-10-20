@@ -49,6 +49,7 @@ export class InvitesService {
         organisationId: orgId,
         isOffline: dto.isOffline || false,
         status: dto.isOffline ? InviteStatus.OFFLINE_PENDING : InviteStatus.ACTIVE,
+        ...(dto.expectedAt ? { expectedAt: new Date(dto.expectedAt) } : {}),
       },
       include: {
         host: { select: { id: true, fullName: true, email: true } },
@@ -72,7 +73,7 @@ export class InvitesService {
       }));
     }
 
-    const createdVisitors = [];
+    const createdVisitors: any[] = [];
     for (const g of guests) {
       const v = await this.prisma.visitor.create({
         data: {
@@ -101,22 +102,16 @@ export class InvitesService {
     if (!dto.isOffline) {
       for (const g of guests) {
         if (!g.email) continue;
-        const subject = `Visitor invite: ${dto.purpose}`;
-        const text = [
-          `Hello ${g.fullName},`,
-          ``,
-          `You have been invited by ${invite.host.fullName}.`,
-          `Purpose: ${dto.purpose}`,
-          ``,
-          `Open this link on your phone to register (photo + pass):`,
+        const r = await this.mail.sendInviteEmail({
+          to: g.email,
+          guestName: g.fullName,
+          hostName: invite.host.fullName,
+          purpose: dto.purpose,
           link,
-          ``,
-          `Backup passphrase at the gate: ${passphrase}`,
-          `Link expires in ${ttl} minutes.`,
-          ``,
-          `— Vicit Llog`,
-        ].join('\n');
-        const r = await this.mail.sendMail({ to: g.email, subject, text });
+          passphrase,
+          ttlMinutes: ttl,
+          expectedAt: dto.expectedAt || null,
+        });
         if (r.ok) emailsSent.push(g.email);
       }
     }

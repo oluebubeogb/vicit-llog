@@ -65,4 +65,9 @@ export class CreateInviteDto {
   @IsOptional()
   @IsBoolean()
   isOffline?: boolean;
+
+  @ApiPropertyOptional({ description: 'ISO date-time when visit is expected' })
+  @IsOptional()
+  @IsString()
+  expectedAt?: string;
 }
