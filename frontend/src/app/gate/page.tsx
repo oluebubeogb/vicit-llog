@@ -22,6 +22,7 @@ export default function GatePage() {
   const [entryMode, setEntryMode] = useState('PEDESTRIAN');
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState('');
+  const [previewPhoto, setPreviewPhoto] = useState<{ url: string; name: string } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -253,12 +254,27 @@ export default function GatePage() {
                   )}
                 </div>
                 {v.photoPath && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/visitors/photo/${v.photoPath}`}
-                    alt=""
-                    className="h-16 w-16 rounded-lg object-cover"
-                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPreviewPhoto({
+                        url: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/visitors/photo/${v.photoPath}`,
+                        name: v.fullName,
+                      })
+                    }
+                    className="group relative shrink-0 overflow-hidden rounded-xl ring-2 ring-slate-200 transition hover:ring-brand-500 focus:outline-none focus:ring-brand-500"
+                    title="Tap to enlarge photo"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/visitors/photo/${v.photoPath}`}
+                      alt={v.fullName}
+                      className="h-20 w-20 object-cover"
+                    />
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-[10px] font-semibold text-white opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
+                      View
+                    </span>
+                  </button>
                 )}
               </div>
 
@@ -302,6 +318,39 @@ export default function GatePage() {
           Enter passphrase, paste QR data, or tap the camera to scan.
         </p>
       )}
+
+      {/* Full-screen photo preview for gate verification */}
+      {previewPhoto && (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/85 p-4"
+          onClick={() => setPreviewPhoto(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Visitor photo preview"
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewPhoto(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white hover:bg-white/25"
+            aria-label="Close preview"
+          >
+            <X size={24} />
+          </button>
+          <p className="mb-3 text-center text-sm font-medium text-white/90">
+            {previewPhoto.name}
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewPhoto.url}
+            alt={previewPhoto.name}
+            className="max-h-[80vh] max-w-full rounded-2xl object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <p className="mt-4 text-xs text-white/60">Tap outside to close</p>
+        </div>
+      )}
+
     </div>
   );
 }
+

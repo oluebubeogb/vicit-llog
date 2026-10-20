@@ -63,7 +63,20 @@ export class MailService {
     </div>`;
   }
 
-  async sendMail(opts: { to: string; subject: string; text: string; html?: string }) {
+  async sendMail(opts: {
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+    attachments?: Array<{
+      filename?: string;
+      content?: Buffer | string;
+      path?: string;
+      cid?: string;
+      contentType?: string;
+      encoding?: string;
+    }>;
+  }) {
     if (!opts.to) {
       this.logger.warn('sendMail skipped: no recipient');
       return { ok: false, error: 'no recipient' };
@@ -88,6 +101,7 @@ export class MailService {
         subject: opts.subject,
         text: opts.text,
         html: opts.html || this.layout(opts.subject, `<p>${opts.text.replace(/\n/g, '<br/>')}</p>`),
+        attachments: opts.attachments || [],
       });
       this.logger.log(`Mail sent to ${opts.to} id=${info.messageId}`);
       return { ok: true, id: info.messageId };
@@ -224,6 +238,31 @@ export class MailService {
       `Gate passphrase: ${opts.passphrase}`,
       `Show the QR code in this email (or on your registration page) at the gate.`,
     ].join('\n');
+
+    // Embed QR as CID attachment — data: URLs are blocked by most email clients
+    let attachments: any[] = [];
+    let qrImgSrc = '';
+    const match = (opts.qrDataUrl || '').match(/^data:image\/(png|jpeg|jpg|gif);base64,(.+)$/i);
+    if (match) {
+      const ext = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
+      attachments = [
+        {
+          filename: `gate-qr.${ext === 'jpeg' ? 'jpg' : ext}`,
+          content: Buffer.from(match[2], 'base64'),
+          cid: 'visitor-qr@vicit',
+          contentType: `image/${ext}`,
+          contentDisposition: 'inline',
+        },
+      ];
+      qrImgSrc = 'cid:visitor-qr@vicit';
+    }
+
+    const qrBlock = qrImgSrc
+      ? `<div style="text-align:center;margin:20px 0;">
+        <img src="${qrImgSrc}" alt="Gate QR code" width="220" height="220" style="border-radius:12px;border:1px solid #e2e8f0;" />
+      </div>`
+      : `<p style="text-align:center;color:#64748b;font-size:13px;">Open your registration link to view the QR code on your phone.</p>`;
+
     const html = this.layout(
       subject,
       `
@@ -231,9 +270,7 @@ export class MailService {
       <p style="margin:0 0 16px;color:#475569;">
         Your photo is registered. Present this QR code or passphrase at the gate when you arrive.
       </p>
-      <div style="text-align:center;margin:20px 0;">
-        <img src="${opts.qrDataUrl}" alt="Gate QR code" width="220" height="220" style="border-radius:12px;border:1px solid #e2e8f0;" />
-      </div>
+      ${qrBlock}
       ${this.codeBox('Gate passphrase', opts.passphrase)}
       <p style="margin:0;font-size:13px;color:#64748b;text-align:center;">
         Host: <strong>${opts.hostName}</strong>${opts.orgName ? ` · ${opts.orgName}` : ''}<br/>
@@ -241,7 +278,7 @@ export class MailService {
       </p>
       `,
     );
-    return this.sendMail({ to: opts.to, subject, text, html });
+    return this.sendMail({ to: opts.to, subject, text, html, attachments });
   }
 
   async sendHostVisitorUpdate(opts: {
