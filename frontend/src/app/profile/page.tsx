@@ -19,6 +19,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [openingCamera, setOpeningCamera] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [camError, setCamError] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -60,17 +61,27 @@ export default function ProfilePage() {
     };
   }, []);
 
-  // The video element only exists after cameraOn becomes true. Attach the stream
-  // after React mounts that element; assigning it before then leaves a black preview.
+  // Attach stream after the <video> mounts (cameraOn becomes true).
   useEffect(() => {
-    if (!cameraOn || !videoRef.current || !streamRef.current) return;
-    const video = videoRef.current;
-    video.srcObject = streamRef.current;
-    video.play().catch(() => {
-      setCamError(
-        'The camera opened, but the preview could not start. Close other apps using the camera and try again.',
-      );
-    });
+    if (!cameraOn || !streamRef.current) return;
+    const stream = streamRef.current;
+    // Small delay so the video node is in the DOM (Safari / Firefox need this).
+    const t = window.setTimeout(() => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.srcObject = stream;
+      video.setAttribute('playsinline', 'true');
+      video.muted = true;
+      const playPromise = video.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise.catch(() => {
+          setCamError(
+            'The camera opened, but the preview could not start. Close other apps using the camera and try again.',
+          );
+        });
+      }
+    }, 50);
+    return () => window.clearTimeout(t);
   }, [cameraOn]);
 
   function logout() {
@@ -82,6 +93,53 @@ export default function ProfilePage() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setCameraOn(false);
+    setOpeningCamera(false);
+  }
+
+  /** getUserMedia with progressive constraint fallback + timeout (Safari/Firefox/mobile). */
+  async function requestCameraStream(): Promise<MediaStream> {
+    const constraintsList: MediaStreamConstraints[] = [
+      // Preferred: front camera, reasonable resolution
+      {
+        video: {
+          facingMode: { ideal: 'user' },
+          width: { ideal: 720 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      },
+      // Softer: any front-ish camera, no size
+      {
+        video: { facingMode: { ideal: 'user' } },
+        audio: false,
+      },
+      // Last resort: any camera
+      { video: true, audio: false },
+    ];
+
+    let lastError: any = null;
+    for (const constraints of constraintsList) {
+      try {
+        const stream = await Promise.race([
+          navigator.mediaDevices.getUserMedia(constraints),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(Object.assign(new Error('Camera request timed out'), { name: 'TimeoutError' })),
+              12000,
+            ),
+          ),
+        ]);
+        return stream;
+      } catch (err) {
+        lastError = err;
+        // Permission denied — do not keep trying
+        const name = (err as any)?.name;
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          throw err;
+        }
+      }
+    }
+    throw lastError || new Error('Could not open the camera');
   }
 
   async function startCamera() {
@@ -93,17 +151,18 @@ export default function ProfilePage() {
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      setCamError('This browser does not support camera access. Update your browser and try again.');
+      setCamError(
+        'This browser does not support camera access. Use an up-to-date Chrome, Safari, Firefox, or Edge over HTTPS.',
+      );
       return;
     }
 
+    setOpeningCamera(true);
     try {
-      // Stop any previous stream before requesting a fresh one.
       streamRef.current?.getTracks().forEach((track) => track.stop());
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
-        audio: false,
-      });
+      streamRef.current = null;
+
+      const stream = await requestCameraStream();
       streamRef.current = stream;
       setCameraOn(true);
     } catch (err: any) {
@@ -118,9 +177,17 @@ export default function ProfilePage() {
         setCamError(
           'The camera is busy or unavailable. Close other apps or browser tabs using it, then try again.',
         );
+      } else if (name === 'TimeoutError' || /timed out/i.test(err?.message || '')) {
+        setCamError(
+          'Camera took too long to respond. Close other apps using the camera, refresh the page, and try again. On some phones, only Safari or Chrome can use the camera.',
+        );
+      } else if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+        setCamError('This device cannot satisfy the camera settings. Try again or use a different browser.');
       } else {
         setCamError(err?.message || 'Could not open the camera. Check browser permissions.');
       }
+    } finally {
+      setOpeningCamera(false);
     }
   }
 
@@ -358,10 +425,20 @@ export default function ProfilePage() {
                 <button
                   type="button"
                   onClick={startCamera}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 font-semibold text-white hover:bg-brand-700"
+                  disabled={openingCamera}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
                 >
-                  <Camera size={20} />
-                  Open camera
+                  {openingCamera ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin" />
+                      Opening camera…
+                    </>
+                  ) : (
+                    <>
+                      <Camera size={20} />
+                      Open camera
+                    </>
+                  )}
                 </button>
               ) : (
                 <div className="flex gap-2">
