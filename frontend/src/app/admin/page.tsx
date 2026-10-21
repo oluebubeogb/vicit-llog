@@ -792,75 +792,294 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Audit detail */}
-      {detailAudit && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Audit entry</h2>
-              <button onClick={() => setDetailAudit(null)} className="rounded-full p-2 hover:bg-slate-100">
-                <X size={20} />
-              </button>
-            </div>
-            <dl className="space-y-3 text-sm">
-              <div>
-                <dt className="text-xs text-slate-400">Action</dt>
-                <dd className="font-medium">
-                  {String(detailAudit.action || '').replace(/_/g, ' ')}
-                </dd>
+      {/* Audit detail — full related record inline */}
+      {detailAudit && (() => {
+        const rel = detailAudit.related;
+        const entity = String(detailAudit.entity || '').toLowerCase();
+        const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+        const photo =
+          rel?.photoPath
+            ? `${API}/visitors/photo/${rel.photoPath}`
+            : rel?.avatarPath
+              ? `${API}/users/avatar/${rel.avatarPath}`
+              : null;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+            <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-bold">Audit entry</h2>
+                <button onClick={() => setDetailAudit(null)} className="rounded-full p-2 hover:bg-slate-100">
+                  <X size={20} />
+                </button>
               </div>
-              <div>
-                <dt className="text-xs text-slate-400">Entity</dt>
-                <dd>
-                  <span className="font-medium">{detailAudit.entity || '—'}</span>
-                  {detailAudit.entityId && entityHref(detailAudit.entity, detailAudit.entityId) ? (
-                    <a
-                      href={entityHref(detailAudit.entity, detailAudit.entityId)!}
-                      className="ml-2 text-brand-600 underline"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Open related record
-                    </a>
-                  ) : detailAudit.entityId ? (
-                    <span className="ml-2 font-mono text-xs text-slate-400">
-                      {String(detailAudit.entityId).slice(0, 8)}…
-                    </span>
-                  ) : null}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-400">Performed by</dt>
-                <dd>
-                  {detailAudit.user?.id ? (
-                    <a href={`/u/${detailAudit.user.id}`} className="font-medium text-brand-600 underline">
-                      {detailAudit.user.fullName}
-                    </a>
-                  ) : (
-                    detailAudit.user?.fullName || 'System'
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-400">When</dt>
-                <dd>{new Date(detailAudit.createdAt).toLocaleString()}</dd>
-              </div>
-              {formatAuditDetails(detailAudit.details).length > 0 && (
+
+              <dl className="mb-5 space-y-2 text-sm">
                 <div>
-                  <dt className="mb-1 text-xs text-slate-400">Details</dt>
-                  <dd className="space-y-1.5 rounded-xl border border-slate-100 bg-slate-50 p-3">
-                    {formatAuditDetails(detailAudit.details).map((row) => (
-                      <div key={row.label} className="flex justify-between gap-3 text-sm">
-                        <span className="text-slate-500">{row.label}</span>
-                        <span className="text-right font-medium text-slate-800">{row.value}</span>
-                      </div>
-                    ))}
+                  <dt className="text-xs text-slate-400">Action</dt>
+                  <dd className="font-medium">
+                    {String(detailAudit.action || '').replace(/_/g, ' ')}
                   </dd>
                 </div>
+                <div>
+                  <dt className="text-xs text-slate-400">When</dt>
+                  <dd>{new Date(detailAudit.createdAt).toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-400">Performed by</dt>
+                  <dd>
+                    {detailAudit.user?.id ? (
+                      <a href={`/u/${detailAudit.user.id}`} className="font-medium text-brand-600 underline">
+                        {detailAudit.user.fullName}
+                      </a>
+                    ) : (
+                      detailAudit.user?.fullName || 'System'
+                    )}
+                  </dd>
+                </div>
+                {formatAuditDetails(detailAudit.details).length > 0 && (
+                  <div>
+                    <dt className="mb-1 text-xs text-slate-400">Event details</dt>
+                    <dd className="space-y-1.5 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                      {formatAuditDetails(detailAudit.details).map((row) => (
+                        <div key={row.label} className="flex justify-between gap-3 text-sm">
+                          <span className="text-slate-500">{row.label}</span>
+                          <span className="text-right font-medium text-slate-800">{row.value}</span>
+                        </div>
+                      ))}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+
+              {rel && (
+                <>
+                  <hr className="mb-4 border-slate-100" />
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {entity === 'visitor'
+                      ? 'Visitor record'
+                      : entity === 'invite'
+                        ? 'Invite record'
+                        : entity === 'user'
+                          ? 'User record'
+                          : 'Related record'}
+                  </p>
+
+                  {photo && (
+                    <div className="mb-4 flex justify-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photo}
+                        alt=""
+                        className="h-28 w-28 rounded-2xl object-cover shadow-sm"
+                      />
+                    </div>
+                  )}
+
+                  {/* Visitor */}
+                  {entity === 'visitor' && (
+                    <dl className="space-y-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-slate-400">Name</dt>
+                        <dd className="font-medium">{rel.fullName}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Status</dt>
+                        <dd>{rel.status || '—'}</dd>
+                      </div>
+                      {rel.email && (
+                        <div>
+                          <dt className="text-xs text-slate-400">Email</dt>
+                          <dd>{rel.email}</dd>
+                        </div>
+                      )}
+                      {rel.phone && (
+                        <div>
+                          <dt className="text-xs text-slate-400">Phone</dt>
+                          <dd>{rel.phone}</dd>
+                        </div>
+                      )}
+                      {rel.address && (
+                        <div>
+                          <dt className="text-xs text-slate-400">Address</dt>
+                          <dd>{rel.address}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt className="text-xs text-slate-400">Purpose</dt>
+                        <dd>{rel.invite?.purpose || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Category</dt>
+                        <dd>{rel.invite?.category || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Host</dt>
+                        <dd>
+                          {rel.invite?.host?.id ? (
+                            <a href={`/u/${rel.invite.host.id}`} className="text-brand-600 underline">
+                              {rel.invite.host.fullName}
+                            </a>
+                          ) : (
+                            rel.invite?.host?.fullName || '—'
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Expected mode</dt>
+                        <dd>{rel.invite?.expectedMode || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Actual mode</dt>
+                        <dd>{rel.entryMode || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Entered</dt>
+                        <dd>
+                          {rel.enteredAt
+                            ? new Date(rel.enteredAt).toLocaleString()
+                            : '—'}
+
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Exited</dt>
+                        <dd>
+                          {rel.exitedAt
+                            ? new Date(rel.exitedAt).toLocaleString()
+                            : '—'}
+
+                        </dd>
+                      </div>
+                      {rel.deniedReason && (
+                        <div>
+                          <dt className="text-xs text-slate-400">Decline reason</dt>
+                          <dd className="text-red-700">{rel.deniedReason}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  )}
+
+                  {/* Invite */}
+                  {entity === 'invite' && (
+                    <dl className="space-y-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-slate-400">Purpose</dt>
+                        <dd className="font-medium">{rel.purpose || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Category</dt>
+                        <dd>{rel.category || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Status</dt>
+                        <dd>{rel.status || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Expected mode</dt>
+                        <dd>{rel.expectedMode || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Expected at</dt>
+                        <dd>
+                          {rel.expectedAt
+                            ? new Date(rel.expectedAt).toLocaleString()
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Host</dt>
+                        <dd>
+                          {rel.host?.id ? (
+                            <a href={`/u/${rel.host.id}`} className="text-brand-600 underline">
+                              {rel.host.fullName}
+                            </a>
+                          ) : (
+                            rel.host?.fullName || '—'
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Created</dt>
+                        <dd>
+                          {rel.createdAt
+                            ? new Date(rel.createdAt).toLocaleString()
+                            : '—'}
+                        </dd>
+                      </div>
+                      {Array.isArray(rel.visitors) && rel.visitors.length > 0 && (
+                        <div>
+                          <dt className="mb-1 text-xs text-slate-400">Guests</dt>
+                          <dd className="space-y-1.5">
+                            {rel.visitors.map((g: any) => (
+                              <div
+                                key={g.id}
+                                className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2"
+                              >
+                                {g.photoPath ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={`${API}/visitors/photo/${g.photoPath}`}
+                                    alt=""
+                                    className="h-8 w-8 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-400">
+                                    ?
+                                  </span>
+                                )}
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium">{g.fullName}</p>
+                                  <p className="text-xs text-slate-400">{g.status}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+                  )}
+
+                  {/* User */}
+                  {entity === 'user' && (
+                    <dl className="space-y-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-slate-400">Name</dt>
+                        <dd className="font-medium">{rel.fullName}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Email</dt>
+                        <dd>{rel.email || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Phone</dt>
+                        <dd>{rel.phone || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Portfolio</dt>
+                        <dd>{rel.portfolio || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Role</dt>
+                        <dd>{rel.role || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-slate-400">Active</dt>
+                        <dd>{rel.isActive ? 'Yes' : 'No'}</dd>
+                      </div>
+                    </dl>
+                  )}
+                </>
               )}
-            </dl>
+
+              {!rel && detailAudit.entityId && (
+                <p className="rounded-xl bg-slate-50 py-4 text-center text-xs text-slate-400">
+                  Related {detailAudit.entity || 'record'} is no longer available
+                </p>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
