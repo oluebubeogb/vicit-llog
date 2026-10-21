@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, getUser, setUser, clearToken } from '@/lib/api';
 import { isValidEmail } from '@/lib/email';
-import { detectHumanInVideo } from '@/lib/detectHuman';
 import { LogOut, User, ArrowLeft, Camera, X, Loader2 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -19,8 +18,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
-  const [openingCamera, setOpeningCamera] = useState(false);
-  const [capturing, setCapturing] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [camError, setCamError] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -56,33 +54,10 @@ export default function ProfilePage() {
 
   useEffect(() => {
     return () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
   }, []);
-
-  // Attach stream after the <video> mounts (cameraOn becomes true).
-  useEffect(() => {
-    if (!cameraOn || !streamRef.current) return;
-    const stream = streamRef.current;
-    // Small delay so the video node is in the DOM (Safari / Firefox need this).
-    const t = window.setTimeout(() => {
-      const video = videoRef.current;
-      if (!video) return;
-      video.srcObject = stream;
-      video.setAttribute('playsinline', 'true');
-      video.muted = true;
-      const playPromise = video.play();
-      if (playPromise && typeof playPromise.then === 'function') {
-        playPromise.catch(() => {
-          setCamError(
-            'The camera opened, but the preview could not start. Close other apps using the camera and try again.',
-          );
-        });
-      }
-    }, 50);
-    return () => window.clearTimeout(t);
-  }, [cameraOn]);
 
   function logout() {
     clearToken();
@@ -92,135 +67,77 @@ export default function ProfilePage() {
   function stopCamera() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    setCameraOn(false);
-    setOpeningCamera(false);
-  }
-
-  /** getUserMedia with progressive constraint fallback + timeout (Safari/Firefox/mobile). */
-  async function requestCameraStream(): Promise<MediaStream> {
-    const constraintsList: MediaStreamConstraints[] = [
-      // Preferred: front camera, reasonable resolution
-      {
-        video: {
-          facingMode: { ideal: 'user' },
-          width: { ideal: 720 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      },
-      // Softer: any front-ish camera, no size
-      {
-        video: { facingMode: { ideal: 'user' } },
-        audio: false,
-      },
-      // Last resort: any camera
-      { video: true, audio: false },
-    ];
-
-    let lastError: any = null;
-    for (const constraints of constraintsList) {
-      try {
-        const stream = await Promise.race([
-          navigator.mediaDevices.getUserMedia(constraints),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(Object.assign(new Error('Camera request timed out'), { name: 'TimeoutError' })),
-              12000,
-            ),
-          ),
-        ]);
-        return stream;
-      } catch (err) {
-        lastError = err;
-        // Permission denied — do not keep trying
-        const name = (err as any)?.name;
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          throw err;
-        }
-      }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
-    throw lastError || new Error('Could not open the camera');
+    setCameraOn(false);
   }
 
   async function startCamera() {
     setCamError('');
-    if (!window.isSecureContext) {
-      setCamError(
-        'Camera access requires a secure HTTPS connection (or localhost). Open Vicit using its HTTPS address, then allow camera access in your browser.',
-      );
-      return;
-    }
+    setBusy(true);
+
     if (!navigator.mediaDevices?.getUserMedia) {
-      setCamError(
-        'This browser does not support camera access. Use an up-to-date Chrome, Safari, Firefox, or Edge over HTTPS.',
-      );
+      setCamError('Camera is not supported in this browser.');
+      setBusy(false);
       return;
     }
 
-    setOpeningCamera(true);
     try {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
 
-      const stream = await requestCameraStream();
+      // Simplest possible request — works on almost every browser
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+
       streamRef.current = stream;
       setCameraOn(true);
+
+      // Attach after React paints the <video>
+      requestAnimationFrame(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        video.play().catch(() => {});
+      });
     } catch (err: any) {
-      const name = err?.name;
+      const name = err?.name || '';
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        setCamError(
-          'Camera permission was denied. Allow camera access for this site in your browser settings, then try again.',
-        );
-      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-        setCamError('No camera was found on this device.');
-      } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-        setCamError(
-          'The camera is busy or unavailable. Close other apps or browser tabs using it, then try again.',
-        );
-      } else if (name === 'TimeoutError' || /timed out/i.test(err?.message || '')) {
-        setCamError(
-          'Camera took too long to respond. Close other apps using the camera, refresh the page, and try again. On some phones, only Safari or Chrome can use the camera.',
-        );
-      } else if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
-        setCamError('This device cannot satisfy the camera settings. Try again or use a different browser.');
+        setCamError('Camera permission denied. Allow camera access and try again.');
+      } else if (name === 'NotFoundError') {
+        setCamError('No camera found on this device.');
       } else {
-        setCamError(err?.message || 'Could not open the camera. Check browser permissions.');
+        setCamError(err?.message || 'Could not open camera.');
       }
     } finally {
-      setOpeningCamera(false);
+      setBusy(false);
     }
   }
 
   async function captureAndUpload() {
-    if (!videoRef.current || !canvasRef.current) return;
-    setCapturing(true);
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    setBusy(true);
     setCamError('');
+
     try {
-      const ok = await detectHumanInVideo(videoRef.current);
-      if (!ok) {
-        setCamError(
-          'No person detected. Centre your face in the frame and try again — empty scenes cannot be used.',
-        );
-        setCapturing(false);
-        return;
-      }
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const size = Math.min(video.videoWidth, video.videoHeight) || 480;
-      canvas.width = size;
-      canvas.height = size;
+      const w = video.videoWidth || 640;
+      const h = video.videoHeight || 480;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas unavailable');
+      ctx.drawImage(video, 0, 0, w, h);
 
-      // Centre-crop square (same as visitor verification)
-      const sx = (video.videoWidth - size) / 2;
-      const sy = (video.videoHeight - size) / 2;
-      ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
-
-      const blob: Blob | null = await new Promise((res) =>
-        canvas.toBlob((b) => res(b), 'image/jpeg', 0.92),
+      const blob: Blob | null = await new Promise((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.9),
       );
       if (!blob) throw new Error('Could not capture image');
+
       const file = new File([blob], `avatar-${Date.now()}.jpg`, { type: 'image/jpeg' });
       const updated = await api.uploadAvatar(file);
       const merged = { ...user, ...updated };
@@ -230,9 +147,9 @@ export default function ProfilePage() {
       stopCamera();
       setPhotoOpen(false);
     } catch (err: any) {
-      setCamError(err.message || 'Capture failed');
+      setCamError(err?.message || 'Capture failed');
     } finally {
-      setCapturing(false);
+      setBusy(false);
     }
   }
 
@@ -280,10 +197,10 @@ export default function ProfilePage() {
           onClick={() => {
             setPhotoOpen(true);
             setCamError('');
-            setCameraOn(false);
+            stopCamera();
           }}
           className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-100 text-brand-700 ring-2 ring-transparent transition hover:ring-brand-300"
-          title="Take profile photo with camera"
+          title="Take profile photo"
         >
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -364,121 +281,108 @@ export default function ProfilePage() {
         Sign Out
       </button>
 
-      {/* Camera-only profile photo — same flow as visitor verification */}
+      {/* Simple camera-only modal */}
       {photoOpen && (
-        <div className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-black/85 p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4">
           <button
             type="button"
             onClick={() => {
               stopCamera();
               setPhotoOpen(false);
             }}
-            className="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white"
+            className="absolute right-4 top-4 rounded-full bg-white/20 p-2 text-white"
             aria-label="Close"
           >
             <X size={24} />
           </button>
-          <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl">
-            <div className="p-4 pb-0">
-              <h3 className="mb-1 flex items-center gap-2 text-sm font-bold text-slate-900">
-                <Camera size={16} className="text-brand-600" />
-                Profile photo
-              </h3>
-              <p className="mb-3 text-xs text-slate-500">
-                Face the camera in good light. Empty frames are rejected automatically. Camera only —
-                no file upload.
-              </p>
-            </div>
 
-            <div className="relative mx-4 aspect-square overflow-hidden rounded-xl bg-black">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
+            <p className="mb-3 text-center text-sm font-semibold text-slate-900">
+              Profile photo
+            </p>
+
+            <div className="relative mb-3 aspect-square overflow-hidden rounded-xl bg-slate-900">
               {cameraOn ? (
-                <>
-                  <video
-                    ref={videoRef}
-                    playsInline
-                    muted
-                    autoPlay
-                    className="h-full w-full object-cover scale-x-[-1]"
-                  />
-                  {/* Face guide oval — same as visitor page */}
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <div className="h-[70%] w-[55%] rounded-full border-2 border-white/50 shadow-[0_0_0_999px_rgba(0,0,0,0.35)]" />
-                  </div>
-                </>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-full w-full object-cover"
+                />
               ) : avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <User size={64} className="text-slate-500" />
+                <div className="flex h-full items-center justify-center">
+                  <User size={56} className="text-slate-500" />
                 </div>
               )}
               <canvas ref={canvasRef} className="hidden" />
             </div>
 
-            <div className="space-y-3 p-4">
-              {camError && (
-                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{camError}</p>
-              )}
+            {camError && (
+              <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-600">
+                {camError}
+              </p>
+            )}
 
-              {!cameraOn ? (
+            {!cameraOn ? (
+              <button
+                type="button"
+                onClick={startCamera}
+                disabled={busy}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 font-semibold text-white disabled:opacity-60"
+              >
+                {busy ? (
+                  <>
+                    <Loader2 size={20} className="animate-spin" /> Opening…
+                  </>
+                ) : (
+                  <>
+                    <Camera size={20} /> Open camera
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={startCamera}
-                  disabled={openingCamera}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+                  onClick={stopCamera}
+                  disabled={busy}
+                  className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600"
                 >
-                  {openingCamera ? (
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={captureAndUpload}
+                  disabled={busy}
+                  className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60"
+                >
+                  {busy ? (
                     <>
-                      <Loader2 size={20} className="animate-spin" />
-                      Opening camera…
+                      <Loader2 size={18} className="animate-spin" /> Saving…
                     </>
                   ) : (
                     <>
-                      <Camera size={20} />
-                      Open camera
+                      <Camera size={18} /> Capture
                     </>
                   )}
                 </button>
-              ) : (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={stopCamera}
-                    className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={captureAndUpload}
-                    disabled={capturing}
-                    className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60"
-                  >
-                    {capturing ? (
-                      <>
-                        <Loader2 size={18} className="animate-spin" /> Checking…
-                      </>
-                    ) : (
-                      <>
-                        <Camera size={18} /> Capture
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
+              </div>
+            )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  stopCamera();
-                  setPhotoOpen(false);
-                }}
-                className="w-full rounded-xl border py-2.5 text-sm font-medium text-slate-600"
-              >
-                Close
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                stopCamera();
+                setPhotoOpen(false);
+              }}
+              className="mt-2 w-full rounded-xl border py-2.5 text-sm font-medium text-slate-600"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}
