@@ -5,6 +5,147 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { ArrowLeft, Bell, X } from 'lucide-react';
 
+/** Map known meta.type values to friendly labels */
+const TYPE_LABELS: Record<string, string> = {
+  ARRIVAL: 'Visitor arrival',
+  EXIT: 'Visitor exit',
+  ENTRY_DENIED: 'Entry denied',
+  PHOTO_CAPTURED: 'Photo captured',
+  profile_edit: 'Profile edit request',
+};
+
+const CHANNEL_LABELS: Record<string, string> = {
+  in_app: 'In-app',
+  sms: 'SMS',
+  whatsapp: 'WhatsApp',
+};
+
+/** Keys we render explicitly; anything else is shown as a fallback row */
+const KNOWN_KEYS = new Set([
+  'type',
+  'phone',
+  'channels',
+  'inviteId',
+  'visitorId',
+  'requestId',
+  'status',
+  'delivery',
+]);
+
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')
+    .replace(/^\w/, (c) => c.toUpperCase())
+    .trim();
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  if (value === null || value === undefined || value === '') return null;
+  return (
+    <div className="flex flex-col gap-0.5 border-b border-slate-100 py-2 last:border-0 sm:flex-row sm:items-start sm:gap-3">
+      <span className="w-28 shrink-0 text-xs font-medium text-slate-500">{label}</span>
+      <span className="min-w-0 break-words text-sm text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+function NotificationDetails({ meta }: { meta: Record<string, any> }) {
+  if (!meta || typeof meta !== 'object') return null;
+
+  const typeLabel = meta.type
+    ? TYPE_LABELS[meta.type] || humanizeKey(String(meta.type))
+    : null;
+
+  const channels = Array.isArray(meta.channels)
+    ? meta.channels
+        .map((c: string) => CHANNEL_LABELS[c] || humanizeKey(c))
+        .join(', ')
+    : null;
+
+  const statusLabel =
+    meta.status != null
+      ? String(meta.status)
+          .replace(/_/g, ' ')
+          .replace(/^\w/, (c) => c.toUpperCase())
+      : null;
+
+  // Delivery summary (from SMS / WhatsApp fan-out)
+  let deliverySummary: string | null = null;
+  if (meta.delivery && typeof meta.delivery === 'object') {
+    const parts: string[] = [];
+    for (const [ch, result] of Object.entries(meta.delivery)) {
+      const r = result as any;
+      if (r?.ok === true) parts.push(`${CHANNEL_LABELS[ch] || ch}: sent`);
+      else if (r?.ok === false)
+        parts.push(
+          `${CHANNEL_LABELS[ch] || ch}: failed${r.error ? ` (${r.error})` : ''}`,
+        );
+      else parts.push(`${CHANNEL_LABELS[ch] || ch}: ${JSON.stringify(r)}`);
+    }
+    if (parts.length) deliverySummary = parts.join(' · ');
+  }
+
+  // Any extra keys not in the known set
+  const extras = Object.entries(meta).filter(([k]) => !KNOWN_KEYS.has(k));
+
+  return (
+    <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        Details
+      </p>
+      <div>
+        <DetailRow label="Event" value={typeLabel} />
+        <DetailRow label="Phone" value={meta.phone} />
+        <DetailRow label="Channels" value={channels} />
+        <DetailRow label="Status" value={statusLabel} />
+        <DetailRow
+          label="Visitor"
+          value={
+            meta.visitorId ? (
+              <span className="font-mono text-xs text-slate-600">
+                {String(meta.visitorId).slice(0, 8)}…
+              </span>
+            ) : null
+          }
+        />
+        <DetailRow
+          label="Invite"
+          value={
+            meta.inviteId ? (
+              <span className="font-mono text-xs text-slate-600">
+                {String(meta.inviteId).slice(0, 8)}…
+              </span>
+            ) : null
+          }
+        />
+        <DetailRow
+          label="Request"
+          value={
+            meta.requestId ? (
+              <span className="font-mono text-xs text-slate-600">
+                {String(meta.requestId).slice(0, 8)}…
+              </span>
+            ) : null
+          }
+        />
+        <DetailRow label="Delivery" value={deliverySummary} />
+        {extras.map(([key, val]) => (
+          <DetailRow
+            key={key}
+            label={humanizeKey(key)}
+            value={
+              typeof val === 'object' && val !== null
+                ? JSON.stringify(val)
+                : String(val)
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function NotificationsPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,14 +228,7 @@ export default function NotificationsPage() {
             </div>
             <p className="whitespace-pre-wrap text-sm text-slate-700">{selected.body}</p>
             {selected.meta && Object.keys(selected.meta).length > 0 && (
-              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Details
-                </p>
-                <pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-600">
-                  {JSON.stringify(selected.meta, null, 2)}
-                </pre>
-              </div>
+              <NotificationDetails meta={selected.meta} />
             )}
             <p className="mt-4 text-xs text-slate-400">
               {new Date(selected.createdAt).toLocaleString()}
