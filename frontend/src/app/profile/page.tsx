@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { api, getUser, setUser, clearToken } from '@/lib/api';
 import { isValidEmail } from '@/lib/email';
 import { detectHumanInVideo } from '@/lib/detectHuman';
-import { LogOut, User, ArrowLeft, Camera, X } from 'lucide-react';
+import { LogOut, User, ArrowLeft, Camera, X, Loader2 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -24,7 +24,6 @@ export default function ProfilePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const u = getUser();
@@ -68,7 +67,9 @@ export default function ProfilePage() {
     const video = videoRef.current;
     video.srcObject = streamRef.current;
     video.play().catch(() => {
-      setCamError('The camera opened, but the preview could not start. Close other apps using the camera and try again.');
+      setCamError(
+        'The camera opened, but the preview could not start. Close other apps using the camera and try again.',
+      );
     });
   }, [cameraOn]);
 
@@ -86,11 +87,13 @@ export default function ProfilePage() {
   async function startCamera() {
     setCamError('');
     if (!window.isSecureContext) {
-      setCamError('Camera access requires a secure HTTPS connection (or localhost). Open Vicit using its HTTPS address, then allow camera access in your browser.');
+      setCamError(
+        'Camera access requires a secure HTTPS connection (or localhost). Open Vicit using its HTTPS address, then allow camera access in your browser.',
+      );
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      setCamError('This browser does not support camera access. Update your browser or upload a profile photo instead.');
+      setCamError('This browser does not support camera access. Update your browser and try again.');
       return;
     }
 
@@ -98,7 +101,7 @@ export default function ProfilePage() {
       // Stop any previous stream before requesting a fresh one.
       streamRef.current?.getTracks().forEach((track) => track.stop());
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'user' }, width: { ideal: 720 }, height: { ideal: 720 } },
+        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
         audio: false,
       });
       streamRef.current = stream;
@@ -106,38 +109,18 @@ export default function ProfilePage() {
     } catch (err: any) {
       const name = err?.name;
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        setCamError('Camera permission was denied. Allow camera access for this site in your browser settings, then try again.');
+        setCamError(
+          'Camera permission was denied. Allow camera access for this site in your browser settings, then try again.',
+        );
       } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-        setCamError('No camera was found on this device. Connect a camera or upload a profile photo.');
+        setCamError('No camera was found on this device.');
       } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-        setCamError('The camera is busy or unavailable. Close other apps or browser tabs using it, then try again.');
+        setCamError(
+          'The camera is busy or unavailable. Close other apps or browser tabs using it, then try again.',
+        );
       } else {
-        setCamError(err?.message || 'Could not open the camera. Check browser permissions or upload a profile photo.');
+        setCamError(err?.message || 'Could not open the camera. Check browser permissions.');
       }
-    }
-  }
-
-  async function uploadSelectedPhoto(file?: File) {
-    if (!file) return;
-    setCamError('');
-    if (!file.type.startsWith('image/')) {
-      setCamError('Choose an image file such as JPG, PNG, or WEBP.');
-      return;
-    }
-    setCapturing(true);
-    try {
-      const updated = await api.uploadAvatar(file);
-      const merged = { ...user, ...updated };
-      setLocal(merged);
-      setUser(merged);
-      setMsg('Profile photo updated');
-      stopCamera();
-      setPhotoOpen(false);
-    } catch (err: any) {
-      setCamError(err?.message || 'Could not upload this photo. Please try another image.');
-    } finally {
-      setCapturing(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -161,9 +144,12 @@ export default function ProfilePage() {
       canvas.height = size;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas unavailable');
+
+      // Centre-crop square (same as visitor verification)
       const sx = (video.videoWidth - size) / 2;
       const sy = (video.videoHeight - size) / 2;
       ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
+
       const blob: Blob | null = await new Promise((res) =>
         canvas.toBlob((b) => res(b), 'image/jpeg', 0.92),
       );
@@ -207,9 +193,7 @@ export default function ProfilePage() {
     }
   }
 
-  const avatarUrl = user?.avatarPath
-    ? `${API}/users/avatar/${user.avatarPath}`
-    : null;
+  const avatarUrl = user?.avatarPath ? `${API}/users/avatar/${user.avatarPath}` : null;
 
   return (
     <div className="px-4 pt-6 pb-8">
@@ -232,7 +216,7 @@ export default function ProfilePage() {
             setCameraOn(false);
           }}
           className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-100 text-brand-700 ring-2 ring-transparent transition hover:ring-brand-300"
-          title="View or change photo"
+          title="Take profile photo with camera"
         >
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -313,6 +297,7 @@ export default function ProfilePage() {
         Sign Out
       </button>
 
+      {/* Camera-only profile photo — same flow as visitor verification */}
       {photoOpen && (
         <div className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-black/85 p-4">
           <button
@@ -327,69 +312,85 @@ export default function ProfilePage() {
             <X size={24} />
           </button>
           <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl">
-            <div className="relative flex aspect-square items-center justify-center bg-slate-900">
+            <div className="p-4 pb-0">
+              <h3 className="mb-1 flex items-center gap-2 text-sm font-bold text-slate-900">
+                <Camera size={16} className="text-brand-600" />
+                Profile photo
+              </h3>
+              <p className="mb-3 text-xs text-slate-500">
+                Face the camera in good light. Empty frames are rejected automatically. Camera only —
+                no file upload.
+              </p>
+            </div>
+
+            <div className="relative mx-4 aspect-square overflow-hidden rounded-xl bg-black">
               {cameraOn ? (
-                <video
-                  ref={videoRef}
-                  playsInline
-                  muted
-                  autoPlay
-                  className="h-full w-full object-cover"
-                />
+                <>
+                  <video
+                    ref={videoRef}
+                    playsInline
+                    muted
+                    autoPlay
+                    className="h-full w-full object-cover scale-x-[-1]"
+                  />
+                  {/* Face guide oval — same as visitor page */}
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="h-[70%] w-[55%] rounded-full border-2 border-white/50 shadow-[0_0_0_999px_rgba(0,0,0,0.35)]" />
+                  </div>
+                </>
               ) : avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
               ) : (
-                <User size={64} className="text-slate-500" />
+                <div className="flex h-full w-full items-center justify-center">
+                  <User size={64} className="text-slate-500" />
+                </div>
               )}
               <canvas ref={canvasRef} className="hidden" />
             </div>
-            <div className="space-y-2 p-4">
-              <p className="text-center text-sm font-semibold text-slate-900">
-                {user?.fullName}
-              </p>
-              <p className="text-center text-xs text-slate-400">
-                Live camera only — a person must be visible in the frame
-              </p>
+
+            <div className="space-y-3 p-4">
               {camError && (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800">
-                  {camError}
-                </p>
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{camError}</p>
               )}
+
               {!cameraOn ? (
                 <button
                   type="button"
                   onClick={startCamera}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 font-semibold text-white"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 font-semibold text-white hover:bg-brand-700"
                 >
-                  <Camera size={18} /> Open camera
+                  <Camera size={20} />
+                  Open camera
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={captureAndUpload}
-                  disabled={capturing}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60"
-                >
-                  <Camera size={18} />
-                  {capturing ? 'Checking…' : 'Capture photo'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={captureAndUpload}
+                    disabled={capturing}
+                    className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60"
+                  >
+                    {capturing ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" /> Checking…
+                      </>
+                    ) : (
+                      <>
+                        <Camera size={18} /> Capture
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => uploadSelectedPhoto(e.target.files?.[0])}
-              />
-              <button
-                type="button"
-                disabled={capturing}
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full rounded-xl border py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
-              >
-                {capturing ? 'Uploading…' : 'Upload a photo instead'}
-              </button>
+
               <button
                 type="button"
                 onClick={() => {
