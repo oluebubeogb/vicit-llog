@@ -160,7 +160,7 @@ export default function GatePage() {
         }, 500);
       } else {
         setScanError(
-          'QR scanner not supported in this browser. Paste QR data or type the passphrase instead.',
+          'QR scanner not supported in this browser (common on iOS). Paste the QR data or type the passphrase instead.',
         );
       }
     } catch {
@@ -190,19 +190,19 @@ export default function GatePage() {
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
           placeholder="Passphrase or QR data"
-          className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-lg font-mono tracking-wide outline-none focus:border-brand-500"
+          className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-3.5 text-base font-mono tracking-wide outline-none focus:border-brand-500 sm:px-4 sm:text-lg"
           onKeyDown={(e) => e.key === 'Enter' && lookup()}
         />
         <button
           onClick={() => lookup()}
           disabled={loading}
-          className="rounded-xl bg-brand-600 px-4 py-3.5 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+          className="shrink-0 rounded-xl bg-brand-600 px-3 py-3.5 font-semibold text-white hover:bg-brand-700 disabled:opacity-60 sm:px-4"
         >
           <Search size={22} />
         </button>
         <button
           onClick={() => (scanning ? stopScanner() : startScanner())}
-          className={`rounded-xl px-4 py-3.5 font-semibold text-white ${
+          className={`shrink-0 rounded-xl px-3 py-3.5 font-semibold text-white sm:px-4 ${
             scanning
               ? 'bg-red-600 hover:bg-red-700'
               : 'bg-emerald-600 hover:bg-emerald-700'

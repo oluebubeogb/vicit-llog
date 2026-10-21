@@ -84,8 +84,8 @@ function parseBulkText(text: string): Guest[] {
 
 export default function NewInvitePage() {
   const router = useRouter();
-  const [purpose, setPurpose] = useState('');
-  const [category, setCategory] = useState<'PERSONAL' | 'OFFICIAL'>('OFFICIAL');
+  const [purpose, setPurpose] = useState<'PERSONAL' | 'OFFICIAL'>('OFFICIAL');
+  const [description, setDescription] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
   const [expectedTime, setExpectedTime] = useState('');
   const [guestCount, setGuestCount] = useState(1);
@@ -98,6 +98,22 @@ export default function NewInvitePage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [bulkText, setBulkText] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
+  const placeholders = [
+    'Official: Meeting with Finance team to review Q3 budget',
+    'Official: Vendor delivery of office supplies',
+    'Personal: Family visit for birthday celebration',
+    'Personal: Friend picking up documents',
+  ];
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setPlaceholderIndex((i) => (i + 1) % placeholders.length);
+    }, 3500);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     setGuests((prev) => {
@@ -164,12 +180,12 @@ export default function NewInvitePage() {
         expectedAt = new Date(`${expectedDate}T${time}:00`).toISOString();
       }
       const data = await api.createInvite({
-        purpose,
+        purpose: description.trim(),
         guestCount: clean.length || guestCount,
         guests: clean,
         guestNames: clean.map((g) => g.fullName),
         expectedMode: mode,
-        category,
+        category: purpose,
         isOffline,
         expectedAt,
       });
@@ -293,26 +309,27 @@ export default function NewInvitePage() {
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
           <label className="mb-1.5 block text-sm font-medium">Purpose *</label>
-          <input
-            value={purpose}
-            onChange={(e) => setPurpose(e.target.value)}
-            placeholder="e.g. Meeting with HR"
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
-            required
-          />
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">Category *</label>
           <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value as 'PERSONAL' | 'OFFICIAL')}
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value as 'PERSONAL' | 'OFFICIAL')}
             className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 outline-none focus:border-brand-500"
             required
           >
             <option value="OFFICIAL">Official</option>
             <option value="PERSONAL">Personal</option>
           </select>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-medium">Description *</label>
+          <textarea
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={placeholders[placeholderIndex]}
+            className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
+            required
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -339,16 +356,7 @@ export default function NewInvitePage() {
         </div>
 
         <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <label className="text-sm font-medium">Number of guests</label>
-            <button
-              type="button"
-              onClick={downloadSampleTxt}
-              className="flex items-center gap-1 text-xs font-medium text-brand-600"
-            >
-              <Download size={14} /> Sample invite .txt
-            </button>
-          </div>
+          <label className="mb-1.5 block text-sm font-medium">Number of guests</label>
           <input
             type="number"
             min={1}
@@ -360,18 +368,38 @@ export default function NewInvitePage() {
         </div>
 
         <div>
-          <label className="mb-1.5 block text-sm font-medium">Bulk paste (optional)</label>
-          <textarea
-            rows={4}
-            value={bulkText}
-            onChange={(e) => setBulkText(e.target.value)}
-            onBlur={applyBulk}
-            placeholder={'Name, Email, Phone number, Address\nName, Email, Phone number, Address'}
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
-          />
-          <p className="mt-1 text-xs text-slate-400">
-            One guest per line. Leave the box to auto-fill the guest cards below.
-          </p>
+          <div className="mb-1.5 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setBulkOpen((o) => !o)}
+              className="flex items-center gap-1 text-sm font-medium text-slate-700"
+            >
+              {bulkOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              Bulk paste (optional)
+            </button>
+            <button
+              type="button"
+              onClick={downloadSampleTxt}
+              className="flex items-center gap-1 text-xs font-medium text-brand-600"
+            >
+              <Download size={14} /> Sample invite .txt
+            </button>
+          </div>
+          {bulkOpen && (
+            <>
+              <textarea
+                rows={4}
+                value={bulkText}
+                onChange={(e) => setBulkText(e.target.value)}
+                onBlur={applyBulk}
+                placeholder={'Name, Email, Phone number, Address\nName, Email, Phone number, Address'}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                One guest per line. Leave the box to auto-fill the guest cards below.
+              </p>
+            </>
+          )}
         </div>
 
         {/* Collapsible guest cards */}

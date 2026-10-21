@@ -39,9 +39,20 @@ export default function BottomNav() {
 
   useEffect(() => {
     setMounted(true);
+    const refresh = () => {
+      const u = getUser();
+      setRole(u?.role ?? null);
+    };
+    refresh();
+    // Re-sync role on route changes and when storage is updated (login / logout)
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, []);
+
+  useEffect(() => {
     const u = getUser();
     setRole(u?.role ?? null);
-  }, []);
+  }, [pathname]);
 
   useEffect(() => {
     const u = getUser();

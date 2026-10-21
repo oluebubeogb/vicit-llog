@@ -156,11 +156,10 @@ export default function ProfilePage() {
       );
       if (!blob) throw new Error('Could not capture image');
       const file = new File([blob], `avatar-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const updated = await api.uploadAvatar(file);
-      const merged = { ...user, ...updated };
-      setLocal(merged);
-      setUser(merged);
-      setMsg('Profile photo updated');
+      const { avatarPath } = await api.uploadAvatar(file);
+      await api.requestProfileEdit({ avatarPath });
+      setPending(true);
+      setMsg('Profile photo submitted — pending admin approval.');
       stopCamera();
       setPhotoOpen(false);
     } catch (err: any) {
@@ -273,7 +272,7 @@ export default function ProfilePage() {
         {msg && (
           <p
             className={`rounded-lg px-3 py-2 text-sm ${
-              pending || msg.includes('updated')
+              pending || msg.includes('pending') || msg.includes('updated')
                 ? 'bg-amber-50 text-amber-800'
                 : 'bg-red-50 text-red-600'
             }`}

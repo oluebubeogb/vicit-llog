@@ -10,6 +10,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { Role } from '@prisma/client';
 import { generateNigerianPassword } from '../../common/utils/password-words';
 import { MailService } from '../mail/mail.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -38,6 +39,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private mail: MailService,
+    private notifications: NotificationsService,
   ) {}
 
   async create(dto: CreateUserDto, orgId: string) {
@@ -293,7 +295,7 @@ export class UsersService {
       });
     }
 
-    return (this.prisma as any).profileEditRequest.update({
+    const updated = await (this.prisma as any).profileEditRequest.update({
       where: { id },
       data: {
         status: approve ? 'APPROVED' : 'DECLINED',
@@ -302,6 +304,18 @@ export class UsersService {
         reviewNote: note || null,
       },
     });
+
+    // Notify the user of the decision (works for GATE, STAFF, ADMIN, etc.)
+    const statusText = approve ? 'approved' : 'declined';
+    const noteText = note ? ` Note: ${note}` : '';
+    await this.notifications.create({
+      userId: req.userId,
+      title: `Profile edit ${statusText}`,
+      body: `Your profile changes have been ${statusText}.${noteText}`,
+      meta: { type: 'profile_edit', requestId: id, status: updated.status },
+    });
+
+    return updated;
   }
 
 
@@ -463,11 +477,8 @@ export class UsersService {
     const ext = path.extname(file.originalname || '') || '.jpg';
     const filename = `avatar-${userId.slice(0, 8)}-${uuidv4()}${ext}`;
     fs.writeFileSync(path.join(dir, filename), file.buffer);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { avatarPath: filename },
-    });
-    return this.findById(userId);
+    // Do not apply immediately — return path so client can submit via profile edit request
+    return { avatarPath: filename };
   }
 
   getAvatarPath(filename: string) {

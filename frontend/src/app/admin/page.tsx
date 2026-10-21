@@ -865,7 +865,7 @@ export default function AdminPage() {
                   </p>
 
                   {photo && (
-                    <div className="mb-4 flex justify-center">
+                    <div className="mb-4 flex justify-start">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={photo}
