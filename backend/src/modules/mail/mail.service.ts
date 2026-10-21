@@ -31,6 +31,7 @@ export class MailService {
     return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="color-scheme" content="light"/><meta name="supported-color-schemes" content="light"/>
 <title>${title}</title></head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 16px;">
@@ -86,6 +87,7 @@ export class MailService {
       cid?: string;
       contentType?: string;
       encoding?: string;
+      contentDisposition?: 'inline' | 'attachment';
     }>;
   }) {
     if (!opts.to) {
@@ -237,7 +239,14 @@ export class MailService {
     hostName: string;
     purpose: string;
     passphrase: string;
-    qrDataUrl: string;
+    /** Raw PNG bytes (preferred) */
+    qrPng?: Buffer;
+    /** Legacy: data:image/png;base64,... */
+    qrDataUrl?: string;
+    /** Public hosted PNG (fallback for clients that hide inline images) */
+    qrImageUrl?: string;
+    /** Visitor page link — QR is always shown there too */
+    registrationLink?: string;
     orgName?: string;
   }) {
     const subject = `Your gate QR code — ${opts.purpose}`;
@@ -247,32 +256,55 @@ export class MailService {
       `Host: ${opts.hostName}`,
       `Purpose: ${opts.purpose}`,
       `Gate passphrase: ${opts.passphrase}`,
-      `Show the QR code in this email (or on your registration page) at the gate.`,
-    ].join('\n');
+      `Show the QR code in this email (attached as gate-qr.png) or on your registration page at the gate.`,
+      opts.registrationLink ? `Your registration page (shows the QR): ${opts.registrationLink}` : '',
+      opts.qrImageUrl ? `QR image: ${opts.qrImageUrl}` : '',
+      `If the QR will not scan, tell the gate officer your passphrase.`,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
-    // Embed QR as CID attachment — data: URLs are blocked by most email clients
-    let attachments: any[] = [];
-    let qrImgSrc = '';
-    const match = (opts.qrDataUrl || '').match(/^data:image\/(png|jpeg|jpg|gif);base64,(.+)$/i);
-    if (match) {
-      const ext = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
-      attachments = [
-        {
-          filename: `gate-qr.${ext === 'jpeg' ? 'jpg' : ext}`,
-          content: Buffer.from(match[2], 'base64'),
-          cid: 'visitor-qr@vicit',
-          contentType: `image/${ext}`,
-          contentDisposition: 'inline',
-        },
-      ];
-      qrImgSrc = 'cid:visitor-qr@vicit';
+    // Embed QR as a CID inline attachment — data: URIs are blocked by Gmail, Outlook and
+    // many mobile clients; CID images render in Apple Mail (iPhone), Gmail and Outlook.
+    let png: Buffer | null = opts.qrPng || null;
+    if (!png) {
+      const match = (opts.qrDataUrl || '').match(/^data:image\/png;base64,(.+)$/i);
+      if (match) png = Buffer.from(match[1], 'base64');
     }
+    const attachments: any[] = png
+      ? [
+          {
+            filename: 'gate-qr.png',
+            content: png,
+            cid: 'visitor-qr@vicit',
+            contentType: 'image/png',
+            contentDisposition: 'inline',
+          },
+        ]
+      : [];
 
-    const qrBlock = qrImgSrc
-      ? `<div style="text-align:center;margin:20px 0;">
-        <img src="${qrImgSrc}" alt="Gate QR code" width="220" height="220" style="border-radius:12px;border:1px solid #e2e8f0;" />
-      </div>`
-      : `<p style="text-align:center;color:#64748b;font-size:13px;">Open your registration link to view the QR code on your phone.</p>`;
+    // White padded cell with bgcolor attr so dark-mode clients keep the QR on white.
+    // No border-radius on the image itself (can clip the quiet zone in some clients).
+    const qrBlock = png
+      ? `<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:20px auto;">
+          <tr><td bgcolor="#ffffff" style="background:#ffffff;padding:12px;border:1px solid #e2e8f0;border-radius:12px;">
+            <img src="cid:visitor-qr@vicit" alt="Gate QR code" width="240" height="240"
+              style="display:block;width:240px;height:240px;max-width:240px;background:#ffffff;border:0;outline:none;image-rendering:pixelated;" />
+          </td></tr>
+        </table>`
+      : '';
+    const links: string[] = [];
+    if (opts.registrationLink) {
+      links.push(`<a href="${opts.registrationLink}" style="color:${this.brand().color};">open your registration page</a>`);
+    }
+    if (opts.qrImageUrl) {
+      links.push(`<a href="${opts.qrImageUrl}" style="color:${this.brand().color};">open the QR image</a>`);
+    }
+    const fallback = `<p style="text-align:center;color:#64748b;font-size:13px;margin:0 0 8px;">
+        ${png ? 'QR not showing?' : 'Your QR code is ready.'}
+        ${links.length ? ` You can ${links.join(' or ')}.` : ' Open your registration link to view it on your phone.'}
+        <br/>Tip: turn your screen brightness up at the gate.
+      </p>`;
 
     const html = this.layout(
       subject,
@@ -282,6 +314,7 @@ export class MailService {
         Your photo is registered. Present this QR code or passphrase at the gate when you arrive.
       </p>
       ${qrBlock}
+      ${fallback}
       ${this.codeBox('Gate passphrase', opts.passphrase)}
       <p style="margin:0;font-size:13px;color:#64748b;text-align:center;">
         Host: <strong>${opts.hostName}</strong>${opts.orgName ? ` · ${opts.orgName}` : ''}<br/>

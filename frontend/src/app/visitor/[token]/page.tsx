@@ -16,7 +16,14 @@ import {
   AlertCircle,
   Loader2,
   ShieldCheck,
+  Download,
 } from 'lucide-react';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+/** Hosted PNG of the gate QR (works for "save image", sharing, offline screenshots). */
+function qrPngUrl(token: string, visitorId: string) {
+  return `${API_URL}/visitors/qr/${encodeURIComponent(token)}/${encodeURIComponent(visitorId)}.png`;
+}
 
 type Visitor = {
   id: string;
@@ -529,15 +536,35 @@ export default function VisitorPage() {
             </div>
             {qr && (
               <div className="mb-4 flex flex-col items-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={qr}
-                  alt="Gate QR code"
-                  className="h-52 w-52 rounded-xl border border-slate-100 bg-white p-2 shadow-sm"
-                />
+                {/* Always black-on-white, never inverted by dark mode, crisp pixels, big
+                    enough for older phone cameras to lock on from arm's length. */}
+                <div
+                  className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
+                  style={{ colorScheme: 'light', backgroundColor: '#ffffff' }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={qr}
+                    alt="Gate QR code"
+                    width={512}
+                    height={512}
+                    draggable={false}
+                    className="block h-auto w-[min(72vw,288px)] bg-white"
+                    style={{ imageRendering: 'pixelated', filter: 'none' }}
+                  />
+                </div>
                 <p className="mt-2 flex items-center gap-1 text-xs text-slate-500">
-                  <QrCode size={12} /> Show this QR at the gate
+                  <QrCode size={12} /> Show this QR at the gate · turn screen brightness up
                 </p>
+                <a
+                  href={selected ? qrPngUrl(token, selected.id) : qr}
+                  download="gate-qr.png"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Download size={14} /> Save QR image
+                </a>
               </div>
             )}
             {passphrase && (
@@ -545,8 +572,11 @@ export default function VisitorPage() {
                 <p className="mb-1 flex items-center justify-center gap-1 text-xs uppercase tracking-wide text-slate-400">
                   <KeyRound size={12} /> Passphrase (backup)
                 </p>
-                <p className="font-mono text-xl font-bold tracking-wider text-slate-900">
+                <p className="select-all font-mono text-xl font-bold tracking-wider text-slate-900">
                   {passphrase}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  If the QR will not scan, tell the gate officer this passphrase.
                 </p>
               </div>
             )}

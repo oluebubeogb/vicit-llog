@@ -11,7 +11,11 @@ import { InviteStatus, VisitStatus } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import * as QRCode from 'qrcode';
+import { buildGateQrPayload, renderQrDataUrl, renderQrPng } from '../../common/utils/qr';
+
+function isLocalUrl(u: string) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(u);
+}
 
 @Injectable()
 export class VisitorsService {
@@ -66,12 +70,8 @@ export class VisitorsService {
 
     fs.writeFileSync(filepath, file.buffer);
 
-    const qrPayload = JSON.stringify({
-      v: visitorId,
-      p: invite.passphrase,
-      t: invite.token.slice(0, 8),
-    });
-    const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 300, margin: 2 });
+    const qrPayload = buildGateQrPayload(visitorId, invite.passphrase, invite.token);
+    const qrDataUrl = await renderQrDataUrl(qrPayload);
 
     const updated = await this.prisma.visitor.update({
       where: { id: visitorId },
@@ -129,13 +129,21 @@ export class VisitorsService {
     }
 
     if (visitor.email) {
+      const frontend = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+      const apiPublic = (process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
       await this.mail.sendVisitorQrEmail({
         to: visitor.email,
         guestName: visitor.fullName,
         hostName: invite.host.fullName,
         purpose: invite.purpose,
         passphrase: invite.passphrase,
-        qrDataUrl,
+        qrPng: await renderQrPng(qrPayload),
+        // Links in emails must be reachable from the visitor's phone — skip localhost URLs.
+        qrImageUrl:
+          apiPublic && !isLocalUrl(apiPublic)
+            ? `${apiPublic}/visitors/qr/${invite.token}/${visitorId}.png`
+            : undefined,
+        registrationLink: frontend ? `${frontend}/visitor/${invite.token}` : undefined,
         orgName: invite.organisation?.name,
       });
     }
@@ -146,6 +154,24 @@ export class VisitorsService {
       qrCodeData: qrDataUrl,
       message: 'Photo captured successfully. Show QR or passphrase at the gate.',
     };
+  }
+
+  /**
+   * Fresh, scan-optimised QR PNG for a registered visitor. Public but gated by the
+   * unguessable invite token (same access level as the visitor page itself).
+   * Used for the email "open image" link and the "Download QR" button.
+   */
+  async getQrPng(token: string, visitorId: string): Promise<Buffer> {
+    const invite = await this.prisma.invite.findUnique({
+      where: { token },
+      include: { visitors: { where: { id: visitorId } } },
+    });
+    const visitor = invite?.visitors?.[0];
+    if (!invite || !visitor) throw new NotFoundException('QR code not found');
+    if (!visitor.photoPath) {
+      throw new BadRequestException('Photo not captured yet — QR is issued after registration');
+    }
+    return renderQrPng(buildGateQrPayload(visitor.id, invite.passphrase, invite.token));
   }
 
   async getPhoto(filename: string) {

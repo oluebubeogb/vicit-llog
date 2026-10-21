@@ -74,3 +74,20 @@ vicit-llog/
 └── README.md
 ```
 
+
+## Gate QR scanning (iPhone / Android / desktop)
+
+* The gate scanner works on iOS Safari, iOS home-screen (PWA) mode (iOS 13.4+), Android Chrome,
+  Firefox and desktop browsers. It uses the native `BarcodeDetector` where available and falls
+  back to a pure-JS decoder (jsQR) elsewhere — notably on every iPhone/iPad.
+* **Live camera requires HTTPS** (browsers block the camera on `http://` except `localhost`).
+  Serve the frontend over HTTPS in production, or officers can only use "Scan from photo" and
+  passphrase entry.
+* Fallbacks on the gate page: *Scan from photo* (take or choose a picture) and manual passphrase
+  entry. The gate accepts the QR JSON, a `/visitor/<token>` link, a bare token/visitor id, or the
+  passphrase in any case / spacing.
+* QR codes are generated with error-correction M, a 4-module quiet zone, 512 px, black on opaque
+  white (`backend/src/common/utils/qr.ts`). Visitor emails embed the QR as a CID inline PNG plus
+  links to the registration page and a hosted PNG (`GET /visitors/qr/:token/:visitorId.png`; set
+  `API_PUBLIC_URL`).
+* Round-trip test (no DB needed): `cd backend && npm run test:qr`

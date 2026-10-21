@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
-import * as QRCode from 'qrcode';
+import { buildGateQrPayload, renderQrDataUrl } from '../../common/utils/qr';
 import { isValidEmail } from '../../common/utils/email';
 
 @Injectable()
@@ -192,6 +192,18 @@ export class InvitesService {
           });
         }
         throw new BadRequestException('This invite link has expired');
+      }
+    }
+
+    // Re-render QR codes on read so every visitor (including those registered before the
+    // scan-compatibility fix, whose stored image had a too-small quiet zone) gets a
+    // scan-friendly code. Cheap: a few ms per visitor.
+    for (const v of invite.visitors || []) {
+      if (!v.photoPath) continue;
+      try {
+        v.qrCodeData = await renderQrDataUrl(buildGateQrPayload(v.id, invite.passphrase, invite.token));
+      } catch {
+        // keep stored image
       }
     }
 

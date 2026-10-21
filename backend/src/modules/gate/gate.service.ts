@@ -9,6 +9,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
 import { EntryMode, VisitStatus } from '@prisma/client';
 import { EntryDto } from './dto/entry.dto';
+import { parseGateCode } from '../../common/utils/qr';
 
 @Injectable()
 export class GateService {
@@ -20,32 +21,52 @@ export class GateService {
   ) {}
 
   async lookup(passphraseOrQr: string) {
-    // Try passphrase first
-    let invite = await this.prisma.invite.findFirst({
-      where: { passphrase: passphraseOrQr.toUpperCase() },
-      include: {
-        visitors: true,
-        host: { select: { id: true, fullName: true, email: true } },
-        organisation: { select: { name: true } },
-      },
-    });
+    // Accept every form a QR / officer can produce: QR JSON, /visitor/<token> URL,
+    // bare token or visitor id, passphrase in any case / spacing.
+    const parsed = parseGateCode(passphraseOrQr);
+    if (!parsed.passphrase && !parsed.token && !parsed.visitorId) {
+      throw new BadRequestException('Scan a QR code or enter a passphrase');
+    }
 
-    // Try parsing QR JSON
-    if (!invite) {
-      try {
-        const parsed = JSON.parse(passphraseOrQr);
-        if (parsed.p) {
-          invite = await this.prisma.invite.findFirst({
-            where: { passphrase: parsed.p },
-            include: {
-              visitors: true,
-              host: { select: { id: true, fullName: true, email: true } },
-              organisation: { select: { name: true } },
-            },
-          });
+    const include = {
+      visitors: true,
+      host: { select: { id: true, fullName: true, email: true } },
+      organisation: { select: { name: true } },
+    } as const;
+
+    let invite: any = null;
+    let scannedVisitorId: string | null = null;
+
+    if (parsed.passphrase) {
+      invite = await this.prisma.invite.findFirst({
+        where: { passphrase: parsed.passphrase },
+        include,
+      });
+      // Legacy/raw value (e.g. stored with unusual characters) — exact match as typed
+      if (!invite && typeof passphraseOrQr === 'string') {
+        invite = await this.prisma.invite.findFirst({
+          where: { passphrase: passphraseOrQr.trim().toUpperCase() },
+          include,
+        });
+      }
+    }
+
+    if (!invite && parsed.token) {
+      invite = await this.prisma.invite.findUnique({ where: { token: parsed.token }, include });
+    }
+
+    if (parsed.visitorId) {
+      if (!invite) {
+        const v = await this.prisma.visitor.findUnique({
+          where: { id: parsed.visitorId },
+          select: { id: true, inviteId: true },
+        });
+        if (v) {
+          invite = await this.prisma.invite.findUnique({ where: { id: v.inviteId }, include });
         }
-      } catch {
-        // not JSON
+      }
+      if (invite?.visitors?.some((v: any) => v.id === parsed.visitorId)) {
+        scannedVisitorId = parsed.visitorId;
       }
     }
 
@@ -53,11 +74,12 @@ export class GateService {
 
     return {
       inviteId: invite.id,
+      scannedVisitorId,
       purpose: invite.purpose,
       expectedMode: invite.expectedMode,
       host: invite.host,
       organisation: invite.organisation,
-      visitors: invite.visitors.map((v) => ({
+      visitors: invite.visitors.map((v: any) => ({
         id: v.id,
         fullName: v.fullName,
         photoPath: v.photoPath,
