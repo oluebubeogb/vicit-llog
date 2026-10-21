@@ -24,6 +24,7 @@ export default function ProfilePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const u = getUser();
@@ -54,8 +55,22 @@ export default function ProfilePage() {
   }, [router]);
 
   useEffect(() => {
-    return () => stopCamera();
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
   }, []);
+
+  // The video element only exists after cameraOn becomes true. Attach the stream
+  // after React mounts that element; assigning it before then leaves a black preview.
+  useEffect(() => {
+    if (!cameraOn || !videoRef.current || !streamRef.current) return;
+    const video = videoRef.current;
+    video.srcObject = streamRef.current;
+    video.play().catch(() => {
+      setCamError('The camera opened, but the preview could not start. Close other apps using the camera and try again.');
+    });
+  }, [cameraOn]);
 
   function logout() {
     clearToken();
@@ -70,19 +85,59 @@ export default function ProfilePage() {
 
   async function startCamera() {
     setCamError('');
+    if (!window.isSecureContext) {
+      setCamError('Camera access requires a secure HTTPS connection (or localhost). Open Vicit using its HTTPS address, then allow camera access in your browser.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamError('This browser does not support camera access. Update your browser or upload a profile photo instead.');
+      return;
+    }
+
     try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
+      // Stop any previous stream before requesting a fresh one.
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'user' }, width: { ideal: 720 }, height: { ideal: 720 } },
         audio: false,
       });
-      streamRef.current = s;
-      if (videoRef.current) {
-        videoRef.current.srcObject = s;
-        await videoRef.current.play();
-      }
+      streamRef.current = stream;
       setCameraOn(true);
-    } catch {
-      setCamError('Camera access denied. Allow camera to capture a live photo.');
+    } catch (err: any) {
+      const name = err?.name;
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        setCamError('Camera permission was denied. Allow camera access for this site in your browser settings, then try again.');
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        setCamError('No camera was found on this device. Connect a camera or upload a profile photo.');
+      } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+        setCamError('The camera is busy or unavailable. Close other apps or browser tabs using it, then try again.');
+      } else {
+        setCamError(err?.message || 'Could not open the camera. Check browser permissions or upload a profile photo.');
+      }
+    }
+  }
+
+  async function uploadSelectedPhoto(file?: File) {
+    if (!file) return;
+    setCamError('');
+    if (!file.type.startsWith('image/')) {
+      setCamError('Choose an image file such as JPG, PNG, or WEBP.');
+      return;
+    }
+    setCapturing(true);
+    try {
+      const updated = await api.uploadAvatar(file);
+      const merged = { ...user, ...updated };
+      setLocal(merged);
+      setUser(merged);
+      setMsg('Profile photo updated');
+      stopCamera();
+      setPhotoOpen(false);
+    } catch (err: any) {
+      setCamError(err?.message || 'Could not upload this photo. Please try another image.');
+    } finally {
+      setCapturing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -320,6 +375,21 @@ export default function ProfilePage() {
                   {capturing ? 'Checking…' : 'Capture photo'}
                 </button>
               )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => uploadSelectedPhoto(e.target.files?.[0])}
+              />
+              <button
+                type="button"
+                disabled={capturing}
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full rounded-xl border py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
+              >
+                {capturing ? 'Uploading…' : 'Upload a photo instead'}
+              </button>
               <button
                 type="button"
                 onClick={() => {
