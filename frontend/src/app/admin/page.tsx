@@ -187,6 +187,37 @@ export default function AdminPage() {
     }
   }
 
+  function formatAuditDetails(details: any): { label: string; value: string }[] {
+    if (!details || typeof details !== 'object') return [];
+    const rows: { label: string; value: string }[] = [];
+    for (const [k, v] of Object.entries(details)) {
+      if (v === null || v === undefined || v === '') continue;
+      const label = k
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/^./, (s) => s.toUpperCase())
+        .trim();
+      let value: string;
+      if (typeof v === 'object') {
+        value = Object.entries(v as object)
+          .map(([ik, iv]) => `${ik}: ${iv}`)
+          .join(', ');
+      } else {
+        value = String(v);
+      }
+      rows.push({ label, value });
+    }
+    return rows;
+  }
+
+  function entityHref(entity?: string, entityId?: string) {
+    if (!entityId) return null;
+    const e = (entity || '').toLowerCase();
+    if (e === 'visitor') return `/visitors?id=${entityId}`;
+    if (e === 'invite') return `/visitors?invite=${entityId}`;
+    if (e === 'user') return `/u/${entityId}`;
+    return null;
+  }
+
   return (
     <div className="px-4 pt-6 pb-8">
       <div className="mb-6 flex items-center gap-3">
@@ -467,9 +498,12 @@ export default function AdminPage() {
               onClick={() => setDetailAudit(a)}
               className="rounded-xl border bg-white p-3 text-sm row-hover"
             >
-              <p className="font-medium">{a.action}</p>
+              <p className="font-medium">{String(a.action || '').replace(/_/g, ' ')}</p>
               <p className="text-xs text-slate-500">
-                {a.user?.fullName || 'System'} · {new Date(a.createdAt).toLocaleString()}
+                {a.entity || '—'}
+                {a.user?.fullName ? ` · ${a.user.fullName}` : ' · System'}
+                {' · '}
+                {new Date(a.createdAt).toLocaleString()}
               </p>
             </li>
           ))}
@@ -614,7 +648,7 @@ export default function AdminPage() {
               <div><dt className="text-xs text-slate-400">Purpose</dt><dd className="font-medium">{detailInvite.purpose}</dd></div>
               <div><dt className="text-xs text-slate-400">Category</dt><dd>{detailInvite.category || '—'}</dd></div>
               <div><dt className="text-xs text-slate-400">Status</dt><dd>{detailInvite.status}</dd></div>
-              <div><dt className="text-xs text-slate-400">Host</dt><dd>{detailInvite.host?.fullName}</dd></div>
+              <div><dt className="text-xs text-slate-400">Host</dt><dd>{detailInvite.host?.id ? <a href={`/u/${detailInvite.host.id}`} className="text-brand-600 underline">{detailInvite.host.fullName}</a> : detailInvite.host?.fullName}</dd></div>
               <div><dt className="text-xs text-slate-400">Passphrase</dt><dd className="font-mono">{detailInvite.passphrase}</dd></div>
               <div><dt className="text-xs text-slate-400">Expires</dt><dd>{detailInvite.expiresAt ? new Date(detailInvite.expiresAt).toLocaleString() : '—'}</dd></div>
               <div><dt className="text-xs text-slate-400">Created</dt><dd>{new Date(detailInvite.createdAt).toLocaleString()}</dd></div>
@@ -658,18 +692,58 @@ export default function AdminPage() {
                 <X size={20} />
               </button>
             </div>
-            <dl className="space-y-2 text-sm">
-              <div><dt className="text-xs text-slate-400">Action</dt><dd className="font-medium">{detailAudit.action}</dd></div>
-              <div><dt className="text-xs text-slate-400">Entity</dt><dd>{detailAudit.entity}{detailAudit.entityId ? ` · ${detailAudit.entityId}` : ''}</dd></div>
-              <div><dt className="text-xs text-slate-400">User</dt><dd>{detailAudit.user?.fullName || 'System'}</dd></div>
-              <div><dt className="text-xs text-slate-400">When</dt><dd>{new Date(detailAudit.createdAt).toLocaleString()}</dd></div>
-              {detailAudit.details && (
+            <dl className="space-y-3 text-sm">
+              <div>
+                <dt className="text-xs text-slate-400">Action</dt>
+                <dd className="font-medium">
+                  {String(detailAudit.action || '').replace(/_/g, ' ')}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-400">Entity</dt>
+                <dd>
+                  <span className="font-medium">{detailAudit.entity || '—'}</span>
+                  {detailAudit.entityId && entityHref(detailAudit.entity, detailAudit.entityId) ? (
+                    <a
+                      href={entityHref(detailAudit.entity, detailAudit.entityId)!}
+                      className="ml-2 text-brand-600 underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Open related record
+                    </a>
+                  ) : detailAudit.entityId ? (
+                    <span className="ml-2 font-mono text-xs text-slate-400">
+                      {String(detailAudit.entityId).slice(0, 8)}…
+                    </span>
+                  ) : null}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-400">Performed by</dt>
+                <dd>
+                  {detailAudit.user?.id ? (
+                    <a href={`/u/${detailAudit.user.id}`} className="font-medium text-brand-600 underline">
+                      {detailAudit.user.fullName}
+                    </a>
+                  ) : (
+                    detailAudit.user?.fullName || 'System'
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-400">When</dt>
+                <dd>{new Date(detailAudit.createdAt).toLocaleString()}</dd>
+              </div>
+              {formatAuditDetails(detailAudit.details).length > 0 && (
                 <div>
-                  <dt className="text-xs text-slate-400">Details</dt>
-                  <dd>
-                    <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-50 p-3 text-xs">
-                      {JSON.stringify(detailAudit.details, null, 2)}
-                    </pre>
+                  <dt className="mb-1 text-xs text-slate-400">Details</dt>
+                  <dd className="space-y-1.5 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    {formatAuditDetails(detailAudit.details).map((row) => (
+                      <div key={row.label} className="flex justify-between gap-3 text-sm">
+                        <span className="text-slate-500">{row.label}</span>
+                        <span className="text-right font-medium text-slate-800">{row.value}</span>
+                      </div>
+                    ))}
                   </dd>
                 </div>
               )}

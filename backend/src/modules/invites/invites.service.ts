@@ -142,7 +142,7 @@ export class InvitesService {
       where: { hostId },
       include: {
         visitors: true,
-        host: { select: { fullName: true } },
+        host: { select: { id: true, fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -153,7 +153,7 @@ export class InvitesService {
       where: { organisationId: orgId },
       include: {
         visitors: true,
-        host: { select: { fullName: true, email: true } },
+        host: { select: { id: true, fullName: true, email: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -164,7 +164,7 @@ export class InvitesService {
       where: { token },
       include: {
         visitors: true,
-        host: { select: { fullName: true, email: true } },
+        host: { select: { id: true, fullName: true, email: true } },
         organisation: { select: { name: true } },
       },
     });

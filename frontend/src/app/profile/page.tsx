@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, getUser, setUser, clearToken } from '@/lib/api';
 import { isValidEmail } from '@/lib/email';
-import { LogOut, User, ArrowLeft, Camera } from 'lucide-react';
+import { LogOut, User, ArrowLeft, Camera, X } from 'lucide-react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -14,6 +16,9 @@ export default function ProfilePage() {
   const [msg, setMsg] = useState('');
   const [pending, setPending] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const u = getUser();
@@ -28,16 +33,19 @@ export default function ProfilePage() {
       portfolio: u.portfolio || '',
       email: u.email || '',
     });
-    api.me().then((me) => {
-      setLocal({ ...u, ...me });
-      setUser({ ...u, ...me });
-      setForm({
-        fullName: me.fullName || '',
-        phone: me.phone || '',
-        portfolio: me.portfolio || '',
-        email: me.email || '',
-      });
-    }).catch(() => {});
+    api
+      .me()
+      .then((me) => {
+        setLocal({ ...u, ...me });
+        setUser({ ...u, ...me });
+        setForm({
+          fullName: me.fullName || '',
+          phone: me.phone || '',
+          portfolio: me.portfolio || '',
+          email: me.email || '',
+        });
+      })
+      .catch(() => {});
   }, [router]);
 
   function logout() {
@@ -69,6 +77,27 @@ export default function ProfilePage() {
     }
   }
 
+  async function onAvatarFile(file: File) {
+    setUploading(true);
+    setMsg('');
+    try {
+      const updated = await api.uploadAvatar(file);
+      const merged = { ...user, ...updated };
+      setLocal(merged);
+      setUser(merged);
+      setMsg('Profile photo updated');
+      setPhotoOpen(false);
+    } catch (err: any) {
+      setMsg(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const avatarUrl = user?.avatarPath
+    ? `${API}/users/avatar/${user.avatarPath}`
+    : null;
+
   return (
     <div className="px-4 pt-6 pb-8">
       <div className="mb-6 flex items-center gap-3">
@@ -82,27 +111,33 @@ export default function ProfilePage() {
       </div>
 
       <div className="mb-6 flex items-center gap-4 rounded-2xl border bg-white p-5 shadow-sm card-hover">
-        <div className="relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-brand-100 text-brand-700">
-          {user?.avatarPath ? (
+        <button
+          type="button"
+          onClick={() => setPhotoOpen(true)}
+          className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-100 text-brand-700 ring-2 ring-transparent transition hover:ring-brand-300"
+          title="View or change photo"
+        >
+          {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`${process.env.NEXT_PUBLIC_API_URL || ''}/visitors/photo/${user.avatarPath}`}
-              alt=""
-              className="h-full w-full object-cover"
-            />
+            <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
           ) : (
             <User size={28} />
           )}
           <span className="absolute bottom-0 right-0 rounded-full bg-white p-1 shadow">
             <Camera size={12} className="text-slate-500" />
           </span>
-        </div>
+        </button>
         <div>
           <p className="text-lg font-semibold">{user?.fullName}</p>
           <p className="text-sm text-slate-500">{user?.email}</p>
           <p className="text-xs text-slate-400">
             {user?.role} · {user?.organisation?.name}
           </p>
+          {user?.id && (
+            <Link href={`/u/${user.id}`} className="mt-1 inline-block text-xs text-brand-600">
+              View public profile
+            </Link>
+          )}
         </div>
       </div>
 
@@ -141,7 +176,9 @@ export default function ProfilePage() {
         {msg && (
           <p
             className={`rounded-lg px-3 py-2 text-sm ${
-              pending ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-600'
+              pending || msg.includes('updated')
+                ? 'bg-amber-50 text-amber-800'
+                : 'bg-red-50 text-red-600'
             }`}
           >
             {msg}
@@ -163,6 +200,66 @@ export default function ProfilePage() {
         <LogOut size={18} />
         Sign Out
       </button>
+
+      {/* Photo preview + change */}
+      {photoOpen && (
+        <div
+          className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-black/85 p-4"
+          onClick={() => setPhotoOpen(false)}
+        >
+          <button
+            type="button"
+            onClick={() => setPhotoOpen(false)}
+            className="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white"
+            aria-label="Close"
+          >
+            <X size={24} />
+          </button>
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex aspect-square items-center justify-center bg-slate-100">
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <User size={64} className="text-slate-300" />
+              )}
+            </div>
+            <div className="space-y-2 p-4">
+              <p className="text-center font-semibold text-slate-900">
+                {user?.fullName}
+              </p>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 font-semibold text-white disabled:opacity-60"
+              >
+                <Camera size={18} />
+                {uploading ? 'Uploading…' : 'Change picture'}
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) =>
+                  e.target.files?.[0] && onAvatarFile(e.target.files[0])
+                }
+              />
+              <button
+                type="button"
+                onClick={() => setPhotoOpen(false)}
+                className="w-full rounded-xl border py-2.5 text-sm font-medium text-slate-600"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

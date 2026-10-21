@@ -12,6 +12,7 @@ import {
   X,
   Ban,
 } from 'lucide-react';
+import PersonLink from '@/components/PersonLink';
 
 export default function GatePage() {
   const router = useRouter();
@@ -234,7 +235,9 @@ export default function GatePage() {
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="text-sm text-slate-400">Host</p>
-            <p className="font-semibold text-slate-900">{result.host?.fullName}</p>
+            <p className="font-semibold text-slate-900">
+              <PersonLink id={result.host?.id} name={result.host?.fullName} className="font-semibold text-slate-900" />
+            </p>
             <p className="mt-2 text-sm text-slate-400">Purpose</p>
             <p className="text-slate-800">{result.purpose}</p>
           </div>

@@ -73,6 +73,12 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   me: () => request('/users/me'),
+  publicProfile: (id: string) => request(`/users/public/${id}`),
+  uploadAvatar: async (file: File) => {
+    const form = new FormData();
+    form.append('avatar', file);
+    return request('/users/me/avatar', { method: 'POST', body: form });
+  },
   createInvite: (data: any) =>
     request('/invites', { method: 'POST', body: JSON.stringify(data) }),
   myInvites: () => request('/invites/mine'),

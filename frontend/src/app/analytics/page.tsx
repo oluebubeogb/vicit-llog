@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import Link from 'next/link';
 import { ArrowLeft, BarChart3, Users, LogIn, LogOut, Clock, X } from 'lucide-react';
+import PersonLink from '@/components/PersonLink';
 
 type Drill = {
   title: string;
@@ -286,7 +287,12 @@ export default function AnalyticsPage() {
               </div>
               <div>
                 <dt className="text-xs text-slate-400">Host</dt>
-                <dd>{detail.invite?.host?.fullName || '—'}</dd>
+                <dd>
+                  <PersonLink
+                    id={detail.invite?.host?.id}
+                    name={detail.invite?.host?.fullName}
+                  />
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-400">Expected mode</dt>

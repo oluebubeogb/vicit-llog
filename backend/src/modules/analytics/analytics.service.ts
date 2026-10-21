@@ -148,7 +148,7 @@ export class AnalyticsService {
             purpose: true,
             category: true,
             expectedMode: true,
-            host: { select: { fullName: true, email: true } },
+            host: { select: { id: true, fullName: true, email: true } },
             createdAt: true,
           },
         },

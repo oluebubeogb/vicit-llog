@@ -10,6 +10,9 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { Role } from '@prisma/client';
 import { generateNigerianPassword } from '../../common/utils/password-words';
 import { MailService } from '../mail/mail.service';
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { isValidEmail } from '../../common/utils/email';
 
 const userSelect = {
@@ -299,6 +302,75 @@ export class UsersService {
         reviewNote: note || null,
       },
     });
+  }
+
+
+  async getPublicProfile(userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, isActive: true },
+      select: {
+        id: true,
+        fullName: true,
+        phone: true,
+        portfolio: true,
+        avatarPath: true,
+        organisation: { select: { name: true } },
+      },
+    });
+    if (!user) throw new NotFoundException('Profile not found');
+
+    const guests = await this.prisma.visitor.findMany({
+      where: { invite: { hostId: userId } },
+      select: {
+        id: true,
+        fullName: true,
+        status: true,
+        photoPath: true,
+        enteredAt: true,
+        exitedAt: true,
+        createdAt: true,
+        invite: { select: { purpose: true, category: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      phone: user.phone,
+      portfolio: user.portfolio,
+      avatarPath: user.avatarPath,
+      organisationName: user.organisation?.name,
+      guests,
+    };
+  }
+
+  async uploadAvatar(userId: string, file: Express.Multer.File) {
+    if (!file?.buffer?.length) throw new BadRequestException('No image provided');
+    const dir = path.join(process.env.PHOTO_STORAGE_PATH || '/data/photos', 'avatars');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const ext = path.extname(file.originalname || '') || '.jpg';
+    const filename = `avatar-${userId.slice(0, 8)}-${uuidv4()}${ext}`;
+    fs.writeFileSync(path.join(dir, filename), file.buffer);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarPath: filename },
+    });
+    return this.findById(userId);
+  }
+
+  getAvatarPath(filename: string) {
+    const safe = path.basename(filename);
+    const filepath = path.join(
+      process.env.PHOTO_STORAGE_PATH || '/data/photos',
+      'avatars',
+      safe,
+    );
+    if (!fs.existsSync(filepath)) {
+      throw new NotFoundException('Avatar not found');
+    }
+    return filepath;
   }
 
 }

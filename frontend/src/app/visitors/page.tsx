@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api, getUser } from '@/lib/api';
 import Link from 'next/link';
 import { ArrowLeft, UserPlus, X } from 'lucide-react';
+import PersonLink from '@/components/PersonLink';
 
 export default function VisitorsPage() {
   const [invites, setInvites] = useState<any[]>([]);
@@ -133,7 +134,9 @@ export default function VisitorsPage() {
               {detail.host?.fullName && (
                 <div>
                   <dt className="text-xs text-slate-400">Host</dt>
-                  <dd>{detail.host.fullName}</dd>
+                  <dd>
+                    <PersonLink id={detail.host?.id} name={detail.host?.fullName} />
+                  </dd>
                 </div>
               )}
               <div>

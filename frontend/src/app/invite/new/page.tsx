@@ -258,13 +258,6 @@ export default function NewInvitePage() {
               <Share2 size={16} />
             </button>
           </div>
-          <button
-            type="button"
-            onClick={shareInvite}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 font-semibold text-white"
-          >
-            <Share2 size={18} /> Share invite
-          </button>
           <div className="rounded-xl bg-white p-3">
             <p className="text-xs text-slate-500">Passphrase (gate backup)</p>
             <p className="font-mono text-lg font-bold tracking-wider">{result.passphrase}</p>

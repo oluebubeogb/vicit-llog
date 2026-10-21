@@ -62,6 +62,7 @@ export default function BottomNav() {
 
   if (
     pathname?.startsWith('/visitor/') ||
+    pathname?.startsWith('/u/') ||
     pathname === '/login' ||
     pathname === '/' ||
     pathname === '/change-password'

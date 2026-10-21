@@ -30,7 +30,7 @@ export class AuditService {
       take: limit,
       orderBy: { createdAt: 'desc' },
       include: {
-        user: { select: { fullName: true, email: true } },
+        user: { select: { id: true, fullName: true, email: true } },
       },
     });
   }
