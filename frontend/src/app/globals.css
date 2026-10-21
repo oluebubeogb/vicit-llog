@@ -31,8 +31,8 @@ body {
 
 /* Subtle interactive affordance */
 .card-hover {
-  @apply transition duration-150 hover:border-brand-200 hover:shadow-md;
+  @apply transition duration-150 hover:border-brand-100 hover:shadow-md;
 }
 .row-hover {
-  @apply transition duration-150 hover:bg-slate-50 active:bg-slate-100 cursor-pointer;
+  @apply cursor-pointer transition duration-150 hover:bg-slate-50 active:bg-slate-100;
 }
