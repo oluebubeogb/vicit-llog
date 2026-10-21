@@ -17,8 +17,14 @@ export class AnalyticsController {
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Admin analytics dashboard' })
-  dashboard(@CurrentUser() user: any, @Query('days') days?: string) {
-    return this.analytics.dashboard(user.orgId, days ? parseInt(days, 10) : 30);
+  dashboard(
+    @CurrentUser() user: any,
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const d = Math.min(366, Math.max(1, days ? parseInt(days, 10) || 30 : 30));
+    return this.analytics.dashboard(user.orgId, d, from, to);
   }
 
   @Get('visitors')
@@ -30,12 +36,17 @@ export class AnalyticsController {
     @Query('purpose') purpose?: string,
     @Query('entryMode') entryMode?: string,
     @Query('status') status?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.analytics.listVisitors(user.orgId, days ? parseInt(days, 10) : 30, {
+    const d = Math.min(366, Math.max(1, days ? parseInt(days, 10) || 30 : 30));
+    return this.analytics.listVisitors(user.orgId, d, {
       metric,
       purpose,
       entryMode,
       status,
+      from,
+      to,
     });
   }
 }

@@ -2,14 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import Link from 'next/link';
-import { ArrowLeft, Ban, Plus } from 'lucide-react';
+import { Ban, Plus, ShieldCheck, ShieldOff } from 'lucide-react';
+import PageHeader from '@/components/ui/PageHeader';
+import Collapse from '@/components/ui/Collapse';
+import StatusPill from '@/components/ui/StatusPill';
+import Tooltip from '@/components/ui/Tooltip';
+import { Empty, Notice, SkeletonList } from '@/components/ui/Bits';
+import { relTime } from '@/lib/format';
 
 export default function BlacklistPage() {
   const [items, setItems] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ fullName: '', idNumber: '', phone: '', reason: '' });
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   function load() {
@@ -28,12 +33,12 @@ export default function BlacklistPage() {
     e.preventDefault();
     try {
       await api.addBlacklist(form);
-      setMsg('Added to blacklist');
+      setMsg({ tone: 'success', text: 'Added to blacklist — gate officers will be alerted on a match' });
       setShowForm(false);
       setForm({ fullName: '', idNumber: '', phone: '', reason: '' });
       load();
     } catch (err: any) {
-      setMsg(err.message);
+      setMsg({ tone: 'error', text: err.message });
     }
   }
 
@@ -42,93 +47,72 @@ export default function BlacklistPage() {
     load();
   }
 
-  return (
-    <div className="px-4 pt-6 pb-8">
-      <div className="mb-6 flex items-center gap-3">
-        <Link href="/admin" className="rounded-full p-2 hover:bg-slate-100">
-          <ArrowLeft size={20} />
-        </Link>
-        <h1 className="flex items-center gap-2 text-xl font-bold">
-          <Ban size={22} /> Blacklist
-        </h1>
-      </div>
+  const active = items.filter((i) => i.isActive);
+  const lifted = items.filter((i) => !i.isActive);
 
-      <button
-        onClick={() => setShowForm(!showForm)}
-        className="mb-4 flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white"
-      >
-        <Plus size={16} /> Add Entry
-      </button>
+  return (
+    <div className="page">
+      <PageHeader
+        back="/admin"
+        icon={<Ban size={20} />}
+        title="Blacklist"
+        subtitle={loading ? 'Loading…' : `${active.length} active · ${lifted.length} lifted`}
+        info="People who must not be admitted. Registrations matching a name, phone or ID are flagged at the gate and in analytics."
+        actions={
+          <button onClick={() => setShowForm(!showForm)} className="btn-danger !px-3">
+            <Plus size={16} /> Add
+          </button>
+        }
+      />
 
       {msg && (
-        <p className="mb-3 rounded-lg bg-slate-100 px-3 py-2 text-sm">{msg}</p>
+        <Notice tone={msg.tone} onClose={() => setMsg(null)}>
+          {msg.text}
+        </Notice>
       )}
 
-      {showForm && (
-        <form onSubmit={add} className="mb-4 space-y-3 rounded-xl border p-4">
-          <input
-            placeholder="Full name"
-            value={form.fullName}
-            onChange={(e) => setForm({ ...form, fullName: e.target.value })}
-            className="w-full rounded-lg border px-3 py-2"
-          />
-          <input
-            placeholder="ID number"
-            value={form.idNumber}
-            onChange={(e) => setForm({ ...form, idNumber: e.target.value })}
-            className="w-full rounded-lg border px-3 py-2"
-          />
-          <input
-            placeholder="Phone"
-            value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            className="w-full rounded-lg border px-3 py-2"
-          />
-          <input
-            placeholder="Reason *"
-            value={form.reason}
-            onChange={(e) => setForm({ ...form, reason: e.target.value })}
-            className="w-full rounded-lg border px-3 py-2"
-            required
-          />
-          <button type="submit" className="w-full rounded-lg bg-red-600 py-2 text-white">
-            Add to Blacklist
+      <Collapse open={showForm}>
+        <form onSubmit={add} className="surface mb-4 space-y-2.5 !border-rose-100">
+          <p className="section-title !text-rose-600">New entry</p>
+          <input placeholder="Full name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className="input" />
+          <div className="grid grid-cols-2 gap-2">
+            <input placeholder="ID number" value={form.idNumber} onChange={(e) => setForm({ ...form, idNumber: e.target.value })} className="input" />
+            <input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input" />
+          </div>
+          <input placeholder="Reason (required)" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} className="input" required />
+          <button type="submit" className="btn-danger w-full">
+            Add to blacklist
           </button>
         </form>
-      )}
+      </Collapse>
 
       {loading ? (
-        <p className="text-slate-400">Loading…</p>
+        <SkeletonList rows={4} />
       ) : items.length === 0 ? (
-        <p className="rounded-xl bg-slate-100 py-12 text-center text-slate-500">
-          No blacklist entries
-        </p>
+        <Empty icon={<ShieldCheck size={24} />} title="No blacklist entries" hint="Nobody is currently barred from entry." />
       ) : (
-        <ul className="space-y-2">
-          {items.map((item) => (
-            <li
-              key={item.id}
-              className={`rounded-xl border p-3 ${
-                item.isActive ? 'bg-white' : 'bg-slate-50 opacity-60'
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-medium">{item.fullName || item.idNumber || item.phone}</p>
-                  <p className="text-xs text-slate-500">{item.reason}</p>
-                  {item.idNumber && (
-                    <p className="text-xs text-slate-400">ID: {item.idNumber}</p>
-                  )}
-                </div>
-                {item.isActive && (
-                  <button
-                    onClick={() => deactivate(item.id)}
-                    className="rounded-lg bg-slate-200 px-2 py-1 text-xs"
-                  >
-                    Deactivate
-                  </button>
-                )}
+        <ul className="rows stagger">
+          {[...active, ...lifted].map((item) => (
+            <li key={item.id} className={`flex items-center gap-3 px-3.5 py-3 ${item.isActive ? '' : 'opacity-60'}`}>
+              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${item.isActive ? 'from-rose-100 to-rose-50 text-rose-600' : 'from-slate-100 to-slate-50 text-slate-400'}`}>
+                <Ban size={17} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-slate-800">{item.fullName || item.idNumber || item.phone}</p>
+                <p className="truncate text-xs text-rose-700/80">{item.reason}</p>
+                <p className="truncate text-[11px] text-slate-400">
+                  {[item.idNumber && `ID ${item.idNumber}`, item.phone, item.createdAt && `added ${relTime(item.createdAt)}`].filter(Boolean).join(' · ')}
+                </p>
               </div>
+              {item.isActive ? (
+                <Tooltip content="Lift this entry — the person can be admitted again">
+                  <button onClick={() => deactivate(item.id)} className="btn-ghost !px-2.5 !py-1.5 !text-xs">
+                    <ShieldOff size={13} /> Lift
+                  </button>
+                </Tooltip>
+              ) : (
+                <StatusPill label="Lifted" tone="slate" />
+              )}
             </li>
           ))}
         </ul>

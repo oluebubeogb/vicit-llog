@@ -1,42 +1,82 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { api } from '@/lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { api, getUser } from '@/lib/api';
 import { isValidEmail } from '@/lib/email';
 import {
-  ArrowLeft,
-  UserPlus,
+  Activity,
   BarChart3,
   Ban,
+  Check,
+  ChevronRight,
+  ClipboardList,
+  Download,
+  Eye,
+  FileSpreadsheet,
+  History,
+  KeyRound,
+  Mail,
   MapPin,
   Palette,
-  Download,
-  Activity,
+  Pencil,
+  Phone,
+  Search,
+  Shield,
+  Sparkles,
   Upload,
-  KeyRound,
-  X,
   UserCog,
-  Check,
+  UserPlus,
+  Users,
+  Wrench,
+  X,
 } from 'lucide-react';
+import PageHeader from '@/components/ui/PageHeader';
+import Sheet from '@/components/ui/Sheet';
+import StatusPill from '@/components/ui/StatusPill';
+import Avatar from '@/components/ui/Avatar';
+import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
+import Collapse from '@/components/ui/Collapse';
+import { Empty, Field, Fields, Notice } from '@/components/ui/Bits';
+import PersonLink from '@/components/PersonLink';
+import { InviteDetail, InviteRow, VisitorCard } from '@/components/InviteBits';
+import { AUDIT_TILE, auditMeta, fieldLabel, fmtValue } from '@/components/AuditBits';
+import { avatarUrl, fmtDate, inviteStatus, photoUrl, plural, relTime, titleCase } from '@/lib/format';
+
+type Tab = 'tools' | 'users' | 'invites' | 'audit';
+const PENDING = ['OFFLINE_PENDING', 'AWAITING_APPROVAL'];
+
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative h-7 w-12 shrink-0 rounded-full transition duration-300 disabled:opacity-50 ${
+        checked ? 'bg-gradient-to-r from-emerald-400 to-emerald-600 shadow-[0_6px_16px_-6px_rgb(5_150_105/0.7)]' : 'bg-slate-200'
+      }`}
+    >
+      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all duration-300 ${checked ? 'left-6' : 'left-1'}`} />
+    </button>
+  );
+}
 
 export default function AdminPage() {
+  const [me, setMe] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [invites, setInvites] = useState<any[]>([]);
   const [audit, setAudit] = useState<any[]>([]);
-  const [tab, setTab] = useState<'tools' | 'users' | 'invites' | 'audit'>('tools');
+  const [tab, setTab] = useState<Tab>('tools');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    email: '',
-    fullName: '',
-    role: 'STAFF',
-    portfolio: '',
-    phone: '',
-  });
-  const [msg, setMsg] = useState('');
+  const [form, setForm] = useState({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '' });
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error' | 'brand'; text: string } | null>(null);
   const [oncePassword, setOncePassword] = useState<string | null>(null);
   const [health, setHealth] = useState<any>(null);
   const [selected, setSelected] = useState<any | null>(null);
+  const [original, setOriginal] = useState<any | null>(null);
+  const [saving, setSaving] = useState(false);
   const [bulkResult, setBulkResult] = useState<any | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [showExport, setShowExport] = useState(false);
@@ -49,41 +89,59 @@ export default function AdminPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [detailInvite, setDetailInvite] = useState<any | null>(null);
   const [detailAudit, setDetailAudit] = useState<any | null>(null);
-  const [overlayMsg, setOverlayMsg] = useState('');
+  const [overlayMsg, setOverlayMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [userQ, setUserQ] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'ALL' | 'ADMIN' | 'STAFF' | 'GATE'>('ALL');
+  const [auditFilter, setAuditFilter] = useState<'all' | 'gate' | 'invites' | 'people' | 'security'>('all');
+
+  const ok = (text: string) => setMsg({ tone: 'success', text });
+  const fail = (text: string) => setMsg({ tone: 'error', text });
 
   function loadUsers() {
     api.users().then(setUsers).catch(() => {});
   }
 
   useEffect(() => {
+    setMe(getUser());
     loadUsers();
     api.allInvites().then(setInvites).catch(() => {});
     api.audit().then(setAudit).catch(() => {});
     api.health().then(setHealth).catch(() => {});
     api.listProfileEdits().then(setProfileEdits).catch(() => {});
+    if (typeof window !== 'undefined') {
+      const t = new URLSearchParams(window.location.search).get('tab') as Tab | null;
+      if (t && ['tools', 'users', 'invites', 'audit'].includes(t)) setTab(t);
+    }
   }, []);
 
   async function createUser(e: React.FormEvent) {
     e.preventDefault();
     if (!isValidEmail(form.email)) {
-      setMsg('Please enter a valid email address that can receive mail.');
+      fail('Please enter a valid email address that can receive mail.');
       return;
     }
     try {
       const res = await api.createUser(form);
-      setMsg('User created');
+      ok(`${form.fullName} was added`);
       setOncePassword(res.initialPassword);
       setShowForm(false);
       setForm({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '' });
       loadUsers();
     } catch (err: any) {
-      setMsg(err.message);
+      fail(err.message);
     }
   }
 
   async function approve(id: string) {
-    await api.approveOffline(id);
-    setInvites(await api.allInvites());
+    try {
+      const res = await api.approveOffline(id);
+      const list = await api.allInvites();
+      setInvites(list);
+      setDetailInvite((d: any) => (d && d.id === id ? list.find((x: any) => x.id === id) || null : d));
+      ok(res?.emailsSent ? 'Invite approved — guests have been emailed their link' : 'Invite approved');
+    } catch (err: any) {
+      fail(err.message);
+    }
   }
 
   async function exportCsv() {
@@ -97,9 +155,9 @@ export default function AdminPage() {
       a.click();
       URL.revokeObjectURL(url);
       setShowExport(false);
-      setMsg('CSV exported');
+      ok('CSV exported');
     } catch (err: any) {
-      setMsg(err.message);
+      fail(err.message);
     }
   }
 
@@ -107,50 +165,41 @@ export default function AdminPage() {
     const text = await file.text();
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) {
-      setMsg('CSV needs a header and at least one row');
+      fail('CSV needs a header and at least one row');
       return;
     }
     const header = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/"/g, ''));
     const idx = (name: string) => header.indexOf(name);
-    const rows = lines.slice(1).map((line) => {
-      const cols = line.match(/("([^"]|"")*"|[^,]*)/g)?.map((c) => c.replace(/^"|"$/g, '').replace(/""/g, '"').trim()) || [];
-      return {
-        fullName: cols[idx('fullname')] || cols[0] || '',
-        email: cols[idx('email')] || cols[1] || '',
-        role: cols[idx('role')] || 'STAFF',
-        portfolio: cols[idx('portfolio')] || '',
-        phone: cols[idx('phone')] || '',
-      };
-    }).filter((r) => r.email);
+    const rows = lines
+      .slice(1)
+      .map((line) => {
+        const cols = line.match(/("([^"]|"")*"|[^,]*)/g)?.map((c) => c.replace(/^"|"$/g, '').replace(/""/g, '"').trim()) || [];
+        return {
+          fullName: cols[idx('fullname')] || cols[0] || '',
+          email: cols[idx('email')] || cols[1] || '',
+          role: cols[idx('role')] || 'STAFF',
+          portfolio: cols[idx('portfolio')] || '',
+          phone: cols[idx('phone')] || '',
+        };
+      })
+      .filter((r) => r.email);
 
     try {
       const res = await api.bulkUsers(rows);
       setBulkResult(res);
-      setMsg(`Bulk: ${res.createdCount} created, ${res.errorCount} errors`);
+      setMsg({ tone: res.errorCount ? 'brand' : 'success', text: `Bulk import: ${res.createdCount} created, ${res.errorCount} errors` });
       loadUsers();
     } catch (err: any) {
-      setMsg(err.message);
+      fail(err.message);
     }
   }
 
-  function downloadCredentialsCsv() {
-    if (!bulkResult?.credentialsCsv) return;
-    const blob = new Blob([bulkResult.credentialsCsv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `staff-credentials-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function downloadTemplate() {
-    const csv = 'fullName,email,role,portfolio,phone\nJane Doe,jane@org.com,STAFF,HR,+2348012345678\n';
+  function download(name: string, csv: string) {
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'staff-import-template.csv';
+    a.download = name;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -162,310 +211,280 @@ export default function AdminPage() {
       const m = res.initialPassword
         ? `Password reset for ${res.email}. Temporary password shown below — copy it now.`
         : `Password reset for ${res.email}. A temporary password was emailed to the user.`;
-      setOverlayMsg(m);
-      setMsg(m);
+      setOverlayMsg({ tone: 'success', text: m });
       setSelected((s: any) => (s ? { ...s, mustChangePassword: true } : s));
     } catch (err: any) {
-      setOverlayMsg(err.message);
+      setOverlayMsg({ tone: 'error', text: err.message });
     }
   }
+
+  function openUser(u: any) {
+    setSelected({ ...u });
+    setOriginal({ ...u });
+    setOverlayMsg(null);
+    setOncePassword(null);
+  }
+
+  const EDIT_FIELDS = ['fullName', 'email', 'phone', 'portfolio', 'role', 'isActive'] as const;
+  const dirty = selected && original ? EDIT_FIELDS.filter((k) => (selected[k] ?? '') !== (original[k] ?? '')) : [];
+  const isSelf = selected && me && selected.id === me.id;
 
   async function saveSelected(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) return;
+    if (!selected || !dirty.length) return;
+    if (dirty.includes('email') && !isValidEmail(selected.email || '')) {
+      setOverlayMsg({ tone: 'error', text: 'Please enter a valid email address.' });
+      return;
+    }
+    setSaving(true);
     try {
-      const updated = await api.updateUser(selected.id, {
-        fullName: selected.fullName,
-        phone: selected.phone,
-        portfolio: selected.portfolio,
-        role: selected.role,
-        isActive: selected.isActive,
-      });
-      setMsg('User updated');
-      setSelected(updated);
+      const patch: any = {};
+      for (const k of dirty) patch[k] = selected[k];
+      const updated = await api.updateUser(selected.id, patch);
+      setOverlayMsg({ tone: 'success', text: `Saved ${dirty.map((k) => fieldLabel(k).toLowerCase()).join(', ')}` });
+      setSelected({ ...selected, ...updated });
+      setOriginal({ ...selected, ...updated });
       loadUsers();
+      api.audit().then(setAudit).catch(() => {});
     } catch (err: any) {
-      setMsg(err.message);
+      setOverlayMsg({ tone: 'error', text: err.message });
+    } finally {
+      setSaving(false);
     }
   }
 
-  function formatAuditDetails(details: any): { label: string; value: string }[] {
-    if (!details || typeof details !== 'object') return [];
-    const rows: { label: string; value: string }[] = [];
-    for (const [k, v] of Object.entries(details)) {
-      if (v === null || v === undefined || v === '') continue;
-      const label = k
-        .replace(/([A-Z])/g, ' $1')
-        .replace(/^./, (s) => s.toUpperCase())
-        .trim();
-      let value: string;
-      if (typeof v === 'object') {
-        value = Object.entries(v as object)
-          .map(([ik, iv]) => `${ik}: ${iv}`)
-          .join(', ');
-      } else {
-        value = String(v);
-      }
-      rows.push({ label, value });
-    }
-    return rows;
-  }
+  const filteredUsers = useMemo(() => {
+    const t = userQ.trim().toLowerCase();
+    return users.filter(
+      (u) =>
+        (roleFilter === 'ALL' || u.role === roleFilter) &&
+        (!t || `${u.fullName} ${u.email} ${u.phone || ''} ${u.portfolio || ''}`.toLowerCase().includes(t)),
+    );
+  }, [users, userQ, roleFilter]);
 
-  function entityHref(entity?: string, entityId?: string) {
-    if (!entityId) return null;
-    const e = (entity || '').toLowerCase();
-    if (e === 'visitor') return `/visitors?id=${entityId}`;
-    if (e === 'invite') return `/visitors?invite=${entityId}`;
-    if (e === 'user') return `/u/${entityId}`;
-    return null;
-  }
+  const filteredAudit = useMemo(
+    () => audit.filter((a) => auditFilter === 'all' || auditMeta(a).group === auditFilter),
+    [audit, auditFilter],
+  );
+
+  const pendingInvites = invites.filter((i) => PENDING.includes(i.status));
+  const pendingEdits = profileEdits.filter((e) => e.status === 'PENDING');
+
+  const TABS: { k: Tab; l: string; icon: any; n?: number }[] = [
+    { k: 'tools', l: 'Tools', icon: Wrench, n: pendingEdits.length || undefined },
+    { k: 'users', l: 'Users', icon: Users },
+    { k: 'invites', l: 'Invites', icon: ClipboardList, n: pendingInvites.length || undefined },
+    { k: 'audit', l: 'Audit', icon: History },
+  ];
+
+  const tools = [
+    { href: '/analytics', l: 'Analytics', tip: 'Charts for visits, peak hours, hosts and gates', icon: BarChart3, tone: 'from-brand-50 to-brand-100 text-brand-600' },
+    { href: '/blacklist', l: 'Blacklist', tip: 'People who must be stopped at the gate', icon: Ban, tone: 'from-rose-50 to-rose-100 text-rose-600' },
+    { href: '/locations', l: 'Locations', tip: 'Sites and the gates officers scan at', icon: MapPin, tone: 'from-emerald-50 to-emerald-100 text-emerald-600' },
+    { href: '/branding', l: 'Branding', tip: 'Name, logo, colours and approval rules', icon: Palette, tone: 'from-violet-50 to-violet-100 text-violet-600' },
+  ];
+
+  /* ------------------------------------------------------------ */
+  const audRel = detailAudit?.related;
+  const audEntity = String(detailAudit?.entity || '').toLowerCase();
+  const audM = detailAudit ? auditMeta(detailAudit) : null;
+  const changes: [string, { from: any; to: any }][] =
+    detailAudit?.details?.changes && typeof detailAudit.details.changes === 'object' ? Object.entries(detailAudit.details.changes) : [];
+  const extraDetails: [string, any][] = detailAudit?.details
+    ? Object.entries(detailAudit.details).filter(([k, v]) => k !== 'changes' && v !== null && v !== undefined && v !== '' && k !== 'inviteId')
+    : [];
 
   return (
-    <div className="px-4 pt-6 pb-8">
-      <div className="mb-6 flex items-center gap-3">
-        <Link href="/dashboard" className="rounded-full p-2 hover:bg-slate-100">
-          <ArrowLeft size={20} />
-        </Link>
-        <h1 className="text-xl font-bold">Admin</h1>
-      </div>
+    <div className="page">
+      <PageHeader
+        back="/dashboard"
+        icon={<Shield size={20} />}
+        title="Admin"
+        eyebrow={me?.organisation?.name}
+        subtitle="Control centre"
+        info="Manage people, approve invites, export reports and review every action taken on Vicit."
+      />
 
-      <div className="mb-6 grid grid-cols-2 gap-3">
-        <Link href="/analytics" className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm">
-          <BarChart3 size={22} className="text-brand-600" />
-          <span className="text-xs font-semibold">Analytics</span>
-        </Link>
-        <Link href="/blacklist" className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm">
-          <Ban size={22} className="text-red-600" />
-          <span className="text-xs font-semibold">Blacklist</span>
-        </Link>
-        <Link href="/locations" className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm">
-          <MapPin size={22} className="text-emerald-600" />
-          <span className="text-xs font-semibold">Locations</span>
-        </Link>
-        <Link href="/branding" className="flex flex-col items-center gap-1.5 rounded-2xl border bg-white p-4 shadow-sm">
-          <Palette size={22} className="text-violet-600" />
-          <span className="text-xs font-semibold">Branding</span>
-        </Link>
-      </div>
-
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(['tools', 'users', 'invites', 'audit'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize ${
-              tab === t ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {t}
-          </button>
+      <div className="stagger mb-5 grid grid-cols-4 gap-2">
+        {tools.map((t) => (
+          <Tooltip key={t.href} content={t.tip}>
+            <Link href={t.href} className="card card-art group flex flex-col items-center gap-1.5 px-1 py-3">
+              <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${t.tone} transition duration-300 group-hover:-rotate-6 group-hover:scale-110`}>
+                <t.icon size={19} />
+              </span>
+              <span className="text-[11px] font-semibold text-slate-700">{t.l}</span>
+            </Link>
+          </Tooltip>
         ))}
       </div>
 
+      <div className="mb-4">
+        <div className="segmented grid w-full grid-cols-4">
+          {TABS.map((t) => (
+            <button key={t.k} type="button" data-active={tab === t.k} onClick={() => setTab(t.k)} className="!flex items-center justify-center gap-1 !px-1.5">
+              <t.icon size={14} className="hidden min-[400px]:block" /> {t.l}
+              {t.n ? (
+                <span className={`rounded-full px-1.5 text-[10px] font-bold ${tab === t.k ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-700'}`}>{t.n}</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {msg && (
-        <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">{msg}</p>
+        <Notice tone={msg.tone} onClose={() => setMsg(null)}>
+          {msg.text}
+        </Notice>
       )}
 
-      {oncePassword && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+      {oncePassword && !selected && (
+        <div className="animate-in mb-4 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-soft">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className="text-sm font-semibold text-amber-900">Temporary password (copy now)</p>
-              <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-amber-950">
-                {oncePassword}
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+                <KeyRound size={15} /> Temporary password
+                <InfoTip text="Shown only once. The user must change it on first sign-in." />
               </p>
-              <p className="mt-1 text-xs text-amber-800">
-                Shown only once. User must change it on first sign-in.
-              </p>
+              <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-amber-950">{oncePassword}</p>
             </div>
-            <button onClick={() => setOncePassword(null)} className="p-1 text-amber-700">
-              <X size={18} />
+            <button onClick={() => setOncePassword(null)} className="icon-btn" aria-label="Dismiss">
+              <X size={16} />
             </button>
           </div>
         </div>
       )}
 
+      {/* ------------------------------ TOOLS ------------------------------ */}
       {tab === 'tools' && (
-        <div className="space-y-3">
+        <div className="stagger space-y-3">
           {health && (
-            <div className="rounded-xl border bg-white p-4 card-hover">
-              <div className="mb-2 flex items-center gap-2">
-                <Activity size={18} />
-                <span className="font-semibold">System Health</span>
-                <span
-                  className={`ml-auto rounded-full px-2 py-0.5 text-xs font-medium ${
-                    health.status === 'healthy'
-                      ? 'bg-emerald-50 text-emerald-700'
-                      : 'bg-amber-50 text-amber-700'
-                  }`}
-                >
-                  {health.status}
+            <div className="card card-art p-4">
+              <div className="flex items-center gap-3">
+                <span className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-600">
+                  <Activity size={19} />
+                  <span className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-white ${health.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`} />
                 </span>
+                <div className="flex-1">
+                  <p className="font-semibold text-slate-800">System health</p>
+                  <p className="text-xs text-slate-500">Database and photo storage</p>
+                </div>
+                <StatusPill label={titleCase(health.status)} tone={health.status === 'healthy' ? 'emerald' : 'amber'} />
               </div>
-              <p className="text-xs text-slate-500">
-                DB: {health.checks?.database} · Photos: {health.checks?.photoCount}
-              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="tile">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">Database</p>
+                  <p className="text-sm font-bold capitalize text-slate-800">{health.checks?.database}</p>
+                </div>
+                <div className="tile">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">Stored photos</p>
+                  <p className="text-sm font-bold text-slate-800">{health.checks?.photoCount ?? '—'}</p>
+                </div>
+              </div>
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => setShowExport(true)}
-            className="w-full rounded-xl border bg-white p-4 text-left shadow-sm card-hover"
-          >
-            <div className="mb-1 flex items-center gap-2">
-              <Download size={18} className="text-brand-600" />
-              <span className="font-semibold">Export Visits CSV</span>
-            </div>
-            <p className="text-xs text-slate-500">
-              Choose columns, then download a report with natural dates and gate officers.
-            </p>
-          </button>
-                    <div className="rounded-xl border bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <UserCog size={18} className="text-violet-600" />
-              <span className="font-semibold">Profile change requests</span>
-              <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium">
-                {profileEdits.filter((e) => e.status === 'PENDING').length} pending
+
+          <button type="button" onClick={() => setShowExport(true)} className="card card-art group flex w-full items-center gap-3 p-4 text-left">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 text-brand-600 transition group-hover:scale-110">
+              <FileSpreadsheet size={19} />
+            </span>
+            <span className="flex-1">
+              <span className="flex items-center gap-1.5 font-semibold text-slate-800">
+                Export visits
+                <InfoTip text="Choose columns, then download a CSV with natural dates and gate officers." />
               </span>
+              <span className="block text-xs text-slate-500">{exportCols.length} columns selected</span>
+            </span>
+            <ChevronRight size={16} className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-500" />
+          </button>
+
+          <div className="surface">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-50 to-violet-100 text-violet-600">
+                <UserCog size={18} />
+              </span>
+              <span className="font-semibold text-slate-800">Profile change requests</span>
+              <StatusPill className="ml-auto" label={`${pendingEdits.length} pending`} tone={pendingEdits.length ? 'amber' : 'slate'} />
             </div>
             {(() => {
-              const pending = profileEdits.filter((e) => e.status === 'PENDING');
-              if (!pending.length) {
-                return <p className="text-xs text-slate-400">No pending profile edits</p>;
-              }
-              const allSelected =
-                pending.length > 0 && pending.every((e) => selectedEdits.includes(e.id));
-              function toggle(id: string) {
-                setSelectedEdits((prev) =>
-                  prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-                );
-              }
-              function toggleAll() {
-                setSelectedEdits(allSelected ? [] : pending.map((e) => e.id));
-              }
+              const pending = pendingEdits;
+              if (!pending.length) return <p className="tile-muted text-center text-xs text-slate-500">No pending profile edits — you’re all caught up.</p>;
+              const allSelected = pending.every((e) => selectedEdits.includes(e.id));
+              const toggle = (id: string) => setSelectedEdits((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
               async function bulk(approve: boolean) {
                 if (!selectedEdits.length) return;
                 setBulkBusy(true);
                 try {
                   await api.bulkReviewProfileEdits(selectedEdits, approve);
                   setProfileEdits(await api.listProfileEdits());
+                  ok(approve ? `Approved ${selectedEdits.length} change(s)` : `Declined ${selectedEdits.length} change(s)`);
                   setSelectedEdits([]);
-                  setMsg(
-                    approve
-                      ? `Approved ${selectedEdits.length} change(s)`
-                      : `Declined ${selectedEdits.length} change(s)`,
-                  );
                 } catch (err: any) {
-                  setMsg(err.message);
+                  fail(err.message);
                 } finally {
                   setBulkBusy(false);
                 }
               }
-              function fieldRows(before: any, after: any) {
-                const keys = Array.from(
-                  new Set([...Object.keys(before || {}), ...Object.keys(after || {})]),
-                ).filter((k) => k !== 'avatarPath');
-                return keys
+              const fieldRows = (before: any, after: any) =>
+                Array.from(new Set([...Object.keys(before || {}), ...Object.keys(after || {})]))
+                  .filter((k) => k !== 'avatarPath')
                   .filter((k) => String(before?.[k] ?? '') !== String(after?.[k] ?? ''))
-                  .map((k) => ({
-                    key: k,
-                    from: before?.[k] ?? '—',
-                    to: after?.[k] ?? '—',
-                  }));
-              }
+                  .map((k) => ({ key: k, from: before?.[k] ?? '—', to: after?.[k] ?? '—' }));
               return (
                 <div className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                  <div className="tile flex flex-wrap items-center gap-2 !py-2">
                     <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={toggleAll}
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                      />
+                      <input type="checkbox" checked={allSelected} onChange={() => setSelectedEdits(allSelected ? [] : pending.map((e) => e.id))} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
                       Select all
                     </label>
-                    <span className="text-xs text-slate-400">
-                      {selectedEdits.length} selected
-                    </span>
+                    <span className="text-xs text-slate-400">{selectedEdits.length} selected</span>
                     <div className="ml-auto flex gap-2">
-                      <button
-                        type="button"
-                        disabled={!selectedEdits.length || bulkBusy}
-                        onClick={() => bulk(true)}
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-                      >
-                        Approve selected
+                      <button type="button" disabled={!selectedEdits.length || bulkBusy} onClick={() => bulk(true)} className="btn-success !px-3 !py-1.5 !text-xs">
+                        Approve
                       </button>
-                      <button
-                        type="button"
-                        disabled={!selectedEdits.length || bulkBusy}
-                        onClick={() => bulk(false)}
-                        className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 disabled:opacity-40"
-                      >
-                        Decline selected
+                      <button type="button" disabled={!selectedEdits.length || bulkBusy} onClick={() => bulk(false)} className="btn-ghost !px-3 !py-1.5 !text-xs !text-rose-600">
+                        Decline
                       </button>
                     </div>
                   </div>
-                  <ul className="space-y-2">
+                  <ul className="rows">
                     {pending.map((e) => {
                       const rows = fieldRows(e.before, e.after);
                       const checked = selectedEdits.includes(e.id);
+                      const who = users.find((x) => x.id === e.userId)?.fullName || e.before?.fullName;
                       return (
-                        <li
-                          key={e.id}
-                          className={`rounded-xl border p-3 text-sm transition ${
-                            checked
-                              ? 'border-brand-200 bg-brand-50/40'
-                              : 'border-slate-100 bg-slate-50'
-                          }`}
-                        >
-                          <div className="mb-2 flex items-start gap-3">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggle(e.id)}
-                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
-                            />
+                        <li key={e.id} className={`p-3 text-sm ${checked ? '!bg-brand-50' : ''}`}>
+                          <div className="flex items-start gap-3">
+                            <input type="checkbox" checked={checked} onChange={() => toggle(e.id)} className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600" />
+                            <Avatar name={who} size={32} />
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs text-slate-400">
-                                {new Date(e.createdAt).toLocaleString()}
-                              </p>
-                              {rows.length === 0 ? (
-                                <p className="mt-1 text-xs text-slate-500">No field changes listed</p>
-                              ) : (
-                                <div className="mt-1.5 space-y-1">
-                                  {rows.map((r) => (
-                                    <div
-                                      key={r.key}
-                                      className="flex flex-wrap items-baseline gap-x-2 text-xs"
-                                    >
-                                      <span className="font-medium capitalize text-slate-500">
-                                        {r.key}
-                                      </span>
-                                      <span className="text-slate-400 line-through">
-                                        {String(r.from)}
-                                      </span>
+                              <p className="font-semibold text-slate-800">{who || 'Staff member'}</p>
+                              <p className="text-[11px] text-slate-400">{relTime(e.createdAt)}</p>
+                              <div className="mt-1.5 space-y-1">
+                                {rows.length === 0 ? (
+                                  <p className="text-xs text-slate-500">No field changes listed</p>
+                                ) : (
+                                  rows.map((r) => (
+                                    <div key={r.key} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                                      <span className="font-medium text-slate-500">{fieldLabel(r.key)}</span>
+                                      <span className="text-slate-400 line-through decoration-rose-300">{String(r.from)}</span>
                                       <span className="text-slate-300">→</span>
-                                      <span className="font-medium text-slate-800">
-                                        {String(r.to)}
-                                      </span>
+                                      <span className="font-semibold text-emerald-700">{String(r.to)}</span>
                                     </div>
-                                  ))}
-                                </div>
-                              )}
+                                  ))
+                                )}
+                              </div>
                             </div>
                           </div>
-                          <div className="ml-7 flex gap-2">
+                          <div className="ml-7 mt-2 flex gap-2">
                             <button
                               type="button"
                               onClick={async () => {
                                 await api.reviewProfileEdit(e.id, true);
                                 setProfileEdits(await api.listProfileEdits());
                                 setSelectedEdits((s) => s.filter((x) => x !== e.id));
-                                setMsg('Profile change approved');
+                                ok('Profile change approved');
                               }}
-                              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white"
+                              className="btn-success flex-1 !py-2 !text-xs"
                             >
                               <Check size={14} /> Approve
                             </button>
@@ -475,9 +494,9 @@ export default function AdminPage() {
                                 await api.reviewProfileEdit(e.id, false);
                                 setProfileEdits(await api.listProfileEdits());
                                 setSelectedEdits((s) => s.filter((x) => x !== e.id));
-                                setMsg('Profile change declined');
+                                ok('Profile change declined');
                               }}
-                              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 py-2 text-xs font-semibold text-red-600"
+                              className="btn-ghost flex-1 !py-2 !text-xs !text-rose-600"
                             >
                               Decline
                             </button>
@@ -493,594 +512,512 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* ------------------------------ USERS ------------------------------ */}
       {tab === 'users' && (
-        <div>
-          <div className="mb-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white"
-            >
-              <UserPlus size={16} /> Add Staff
+        <div className="animate-in">
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            <button onClick={() => setShowForm(!showForm)} className="btn-primary !px-2">
+              <UserPlus size={16} /> Add staff
             </button>
-            <button
-              onClick={downloadTemplate}
-              className="flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-medium"
-            >
-              <Download size={16} /> CSV Template
-            </button>
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-medium"
-            >
-              <Upload size={16} /> Bulk CSV
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(e) => e.target.files?.[0] && onBulkFile(e.target.files[0])}
-            />
+            <Tooltip content="Download a CSV template for bulk import">
+              <button onClick={() => download('staff-import-template.csv', 'fullName,email,role,portfolio,phone\nJane Doe,jane@org.com,STAFF,HR,+2348012345678\n')} className="btn-ghost !px-2">
+                <Download size={16} /> Template
+              </button>
+            </Tooltip>
+            <Tooltip content="Upload a CSV to create many users at once">
+              <button onClick={() => fileRef.current?.click()} className="btn-ghost !px-2">
+                <Upload size={16} /> Bulk CSV
+              </button>
+            </Tooltip>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && onBulkFile(e.target.files[0])} />
           </div>
 
           {bulkResult?.credentialsCsv && (
-            <button
-              onClick={downloadCredentialsCsv}
-              className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white"
-            >
+            <button onClick={() => download(`staff-credentials-${Date.now()}.csv`, bulkResult.credentialsCsv)} className="btn-success mb-3 w-full">
               <Download size={16} /> Download credentials CSV ({bulkResult.createdCount})
             </button>
           )}
 
-          {showForm && (
-            <form onSubmit={createUser} className="mb-4 space-y-3 rounded-xl border p-4">
-              <input placeholder="Full name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className="w-full rounded-lg border px-3 py-2" required />
-              <input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full rounded-lg border px-3 py-2" required />
-              <input placeholder="Phone (+234…)" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full rounded-lg border px-3 py-2" />
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full rounded-lg border px-3 py-2">
+          <Collapse open={showForm}>
+            <form onSubmit={createUser} className="surface mb-4 space-y-3">
+              <p className="flex items-center gap-1.5 font-semibold text-slate-800">
+                <Sparkles size={15} className="text-brand-500" /> New team member
+                <InfoTip text="A password is auto-generated (5-letter Nigerian word) and shown once after creation." />
+              </p>
+              <input placeholder="Full name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className="input" required />
+              <input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input" required />
+              <input placeholder="Phone (+234…)" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input" />
+              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="input">
                 <option value="STAFF">Staff</option>
-                <option value="GATE">Gate Officer</option>
+                <option value="GATE">Gate officer</option>
                 <option value="ADMIN">Admin</option>
               </select>
-              <input placeholder="Portfolio / Dept" value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} className="w-full rounded-lg border px-3 py-2" />
-              <p className="text-xs text-slate-500">Password is auto-generated (5-letter Nigerian word) and shown once.</p>
-              <button type="submit" className="w-full rounded-lg bg-brand-600 py-2 text-white">Create</button>
+              <input placeholder="Portfolio / department" value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} className="input" />
+              <button type="submit" className="btn-primary w-full">
+                Create user
+              </button>
             </form>
-          )}
+          </Collapse>
 
-          <ul className="space-y-2">
-            {users.map((u) => (
-              <li
-                key={u.id}
-                onClick={() => setSelected(u)}
-                className="cursor-pointer rounded-xl border bg-white p-3 active:bg-slate-50"
-              >
-                <p className="font-medium">{u.fullName}</p>
-                <p className="text-xs text-slate-500">
-                  {u.email} · {u.role}
-                  {u.phone ? ` · ${u.phone}` : ''}
-                  {u.mustChangePassword ? ' · must change password' : ''}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+          <div className="mb-3 space-y-2">
+            <label className="relative block">
+              <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input className="input !py-2.5 pl-10" placeholder="Search name, email, phone" value={userQ} onChange={(e) => setUserQ(e.target.value)} />
+            </label>
+            <div className="segmented">
+              {(['ALL', 'ADMIN', 'STAFF', 'GATE'] as const).map((r) => (
+                <button key={r} type="button" data-active={roleFilter === r} onClick={() => setRoleFilter(r)}>
+                  {r === 'ALL' ? `All ${users.length}` : r === 'GATE' ? 'Gate' : titleCase(r)}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {tab === 'invites' && (
-        <ul className="space-y-2">
-          {invites.map((inv) => (
-            <li
-              key={inv.id}
-              onClick={() => setDetailInvite(inv)}
-              className="rounded-xl border bg-white p-3 row-hover"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">{inv.purpose}</p>
-                  <p className="text-xs text-slate-500">
-                    {inv.host?.fullName} · {inv.status}
-                    {inv.category ? ` · ${inv.category}` : ''}
-                  </p>
-                </div>
-                {inv.status === 'OFFLINE_PENDING' && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      approve(inv.id);
-                    }}
-                    className="rounded-lg bg-emerald-600 px-3 py-1 text-xs text-white"
-                  >
-                    Approve
+          {filteredUsers.length === 0 ? (
+            <Empty icon={<Users size={24} />} title="No users match" />
+          ) : (
+            <ul className="rows stagger">
+              {filteredUsers.map((u) => (
+                <li key={u.id} className="group flex items-center gap-3 px-3.5 py-3">
+                  <button type="button" onClick={() => openUser(u)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <span className="relative">
+                      <Avatar name={u.fullName} src={avatarUrl(u.avatarPath)} size={42} />
+                      <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${u.isActive === false ? 'bg-slate-300' : 'bg-emerald-500'}`} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold text-slate-800 transition group-hover:text-brand-700">{u.fullName}</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {u.email}
+                        {u.portfolio ? ` · ${u.portfolio}` : ''}
+                      </span>
+                      <span className="mt-1 flex flex-wrap gap-1">
+                          <StatusPill status={u.role} className="!py-0 !text-[10px]" />
+                          {u.isActive === false && <StatusPill label="Deactivated" tone="slate" className="!py-0 !text-[10px]" />}
+                          {u.mustChangePassword && <StatusPill label="Temp password" tone="amber" className="!py-0 !text-[10px]" />}
+                        </span>
+                    </span>
                   </button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {tab === 'audit' && (
-        <ul className="space-y-2">
-          {audit.map((a) => (
-            <li
-              key={a.id}
-              onClick={() => setDetailAudit(a)}
-              className="rounded-xl border bg-white p-3 text-sm row-hover"
-            >
-              <p className="font-medium">{String(a.action || '').replace(/_/g, ' ')}</p>
-              <p className="text-xs text-slate-500">
-                {a.entity || '—'}
-                {a.user?.fullName ? ` · ${a.user.fullName}` : ' · System'}
-                {' · '}
-                {new Date(a.createdAt).toLocaleString()}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {/* User detail sheet */}
-      {selected && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Staff details</h2>
-              <button onClick={() => { setSelected(null); setOverlayMsg(''); setOncePassword(null); }} className="rounded-full p-2 hover:bg-slate-100">
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={saveSelected} className="space-y-3">
-              <input
-                value={selected.fullName || ''}
-                onChange={(e) => setSelected({ ...selected, fullName: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2"
-                placeholder="Full name"
-              />
-              <input value={selected.email || ''} disabled className="w-full rounded-lg border bg-slate-50 px-3 py-2 text-slate-500" />
-              <input
-                value={selected.phone || ''}
-                onChange={(e) => setSelected({ ...selected, phone: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2"
-                placeholder="Phone"
-              />
-              <input
-                value={selected.portfolio || ''}
-                onChange={(e) => setSelected({ ...selected, portfolio: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2"
-                placeholder="Portfolio"
-              />
-              <select
-                value={selected.role}
-                onChange={(e) => setSelected({ ...selected, role: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2"
-              >
-                <option value="STAFF">Staff</option>
-                <option value="GATE">Gate</option>
-                <option value="ADMIN">Admin</option>
-              </select>
-              <p className="text-xs text-slate-500">
-                Passwords are never shown after save. Use reset to issue a new temporary password.
-              </p>
-              <button type="submit" className="w-full rounded-xl bg-brand-600 py-3 font-semibold text-white">
-                Save details
-              </button>
-              {overlayMsg && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                  {overlayMsg}
-                </div>
-              )}
-              {oncePassword && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <p className="text-xs font-semibold text-amber-900">Temporary password (copy now)</p>
-                  <p className="mt-1 font-mono text-xl font-bold tracking-widest">{oncePassword}</p>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => resetPw(selected.id)}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 py-3 font-semibold text-amber-900"
-              >
-                <KeyRound size={18} /> Reset password
-              </button>
-            </form>
-          </div>
+                  <Tooltip content="Preview profile">
+                    <Link href={`/u/${u.id}`} className="icon-btn" aria-label={`Preview ${u.fullName}`}>
+                      <Eye size={16} />
+                    </Link>
+                  </Tooltip>
+                  <Tooltip content="Edit user">
+                    <button type="button" onClick={() => openUser(u)} className="icon-btn" aria-label={`Edit ${u.fullName}`}>
+                      <Pencil size={15} />
+                    </button>
+                  </Tooltip>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
-      {/* Export columns modal */}
-      {showExport && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Export Visits CSV</h2>
-              <button onClick={() => setShowExport(false)} className="rounded-full p-2 hover:bg-slate-100">
-                <X size={20} />
-              </button>
+      {/* ------------------------------ INVITES ------------------------------ */}
+      {tab === 'invites' && (
+        <div className="animate-in space-y-4">
+          {pendingInvites.length > 0 && (
+            <div className="surface !border-amber-200/70 !p-3">
+              <p className="section-title !text-amber-700">Awaiting your approval</p>
+              <ul className="rows">
+                {pendingInvites.map((inv) => (
+                  <li key={inv.id} className="flex items-center gap-2 pr-3">
+                    <div className="min-w-0 flex-1">
+                      <ul>
+                        <InviteRow inv={inv} showHost onClick={() => setDetailInvite(inv)} />
+                      </ul>
+                    </div>
+                    <Tooltip content={inv.status === 'OFFLINE_PENDING' ? 'Approve walk-in' : 'Approve and email guests'}>
+                      <button onClick={() => approve(inv.id)} className="btn-success !px-3 !py-1.5 !text-xs">
+                        <Check size={14} /> Approve
+                      </button>
+                    </Tooltip>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <p className="mb-3 text-sm text-slate-500">Select columns to include</p>
-            <div className="space-y-2">
-              {[
-                ['fullName', 'Visitor name'],
-                ['email', 'Email'],
-                ['phone', 'Phone'],
-                ['status', 'Status'],
-                ['purpose', 'Purpose'],
-                ['category', 'Category'],
-                ['host', 'Host'],
-                ['entryMode', 'Entry mode'],
-                ['enteredAt', 'Entered'],
-                ['exitedAt', 'Exited'],
-                ['deniedAt', 'Declined at'],
-                ['deniedReason', 'Decline reason'],
-                ['entryOfficer', 'Entry gate officer'],
-                ['exitOfficer', 'Exit gate officer'],
-                ['createdAt', 'Registered'],
-              ].map(([id, label]) => (
-                <label key={id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={exportCols.includes(id)}
-                    onChange={(e) => {
-                      setExportCols((prev) =>
-                        e.target.checked ? [...prev, id] : prev.filter((c) => c !== id),
-                      );
-                    }}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={exportCsv}
-              disabled={!exportCols.length}
-              className="mt-4 w-full rounded-xl bg-brand-600 py-3 font-semibold text-white disabled:opacity-50"
-            >
-              Download CSV
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Invite detail */}
-      {detailInvite && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Invite details</h2>
-              <button onClick={() => setDetailInvite(null)} className="rounded-full p-2 hover:bg-slate-100">
-                <X size={20} />
-              </button>
-            </div>
-            <dl className="space-y-2 text-sm">
-              <div><dt className="text-xs text-slate-400">Purpose</dt><dd className="font-medium">{detailInvite.purpose}</dd></div>
-              <div><dt className="text-xs text-slate-400">Category</dt><dd>{detailInvite.category || '—'}</dd></div>
-              <div><dt className="text-xs text-slate-400">Status</dt><dd>{detailInvite.status}</dd></div>
-              <div><dt className="text-xs text-slate-400">Host</dt><dd>{detailInvite.host?.id ? <a href={`/u/${detailInvite.host.id}`} className="text-brand-600 underline">{detailInvite.host.fullName}</a> : detailInvite.host?.fullName}</dd></div>
-              <div><dt className="text-xs text-slate-400">Passphrase</dt><dd className="font-mono">{detailInvite.passphrase}</dd></div>
-              <div><dt className="text-xs text-slate-400">Expires</dt><dd>{detailInvite.expiresAt ? new Date(detailInvite.expiresAt).toLocaleString() : '—'}</dd></div>
-              <div><dt className="text-xs text-slate-400">Created</dt><dd>{new Date(detailInvite.createdAt).toLocaleString()}</dd></div>
-            </dl>
-            <div className="mt-4 space-y-2">
-              <p className="text-xs font-semibold uppercase text-slate-400">Guests</p>
-              {(detailInvite.visitors || []).map((v: any) => (
-                <div key={v.id} className="rounded-lg border p-2 text-sm">
-                  <p className="font-medium">{v.fullName}</p>
-                  <p className="text-xs text-slate-500">{v.status}{v.email ? ` · ${v.email}` : ''}</p>
-                </div>
-              ))}
-            </div>
-            {(detailInvite.status === 'EXPIRED' ||
-              (detailInvite.expiresAt && new Date(detailInvite.expiresAt) < new Date())) &&
-              !(detailInvite.visitors || []).every((v: any) => v.photoPath) && (
-              <button
-                type="button"
-                onClick={async () => {
-                  await api.reviveInvite(detailInvite.id);
-                  setInvites(await api.allInvites());
-                  setDetailInvite(null);
-                  setMsg('Invite link revived');
-                }}
-                className="mt-4 w-full rounded-xl bg-brand-600 py-3 font-semibold text-white"
-              >
-                Revive expired link
-              </button>
+          )}
+          <div>
+            <p className="section-title">All invites · {invites.length}</p>
+            {invites.length === 0 ? (
+              <Empty icon={<ClipboardList size={24} />} title="No invites yet" />
+            ) : (
+              <ul className="rows stagger">
+                {invites.map((inv) => (
+                  <InviteRow key={inv.id} inv={inv} showHost onClick={() => setDetailInvite(inv)} />
+                ))}
+              </ul>
             )}
           </div>
         </div>
       )}
 
-      {/* Audit detail — full related record inline */}
-      {detailAudit && (() => {
-        const rel = detailAudit.related;
-        const entity = String(detailAudit.entity || '').toLowerCase();
-        const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-        const photo =
-          rel?.photoPath
-            ? `${API}/visitors/photo/${rel.photoPath}`
-            : rel?.avatarPath
-              ? `${API}/users/avatar/${rel.avatarPath}`
-              : null;
-        return (
-          <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-            <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-bold">Audit entry</h2>
-                <button onClick={() => setDetailAudit(null)} className="rounded-full p-2 hover:bg-slate-100">
-                  <X size={20} />
+      {/* ------------------------------ AUDIT ------------------------------ */}
+      {tab === 'audit' && (
+        <div className="animate-in">
+          <div className="-mx-4 mb-3 overflow-x-auto px-4">
+            <div className="segmented">
+              {(
+                [
+                  ['all', 'All'],
+                  ['gate', 'Gate'],
+                  ['invites', 'Invites'],
+                  ['people', 'People'],
+                  ['security', 'Security'],
+                ] as const
+              ).map(([k, l]) => (
+                <button key={k} type="button" data-active={auditFilter === k} onClick={() => setAuditFilter(k)}>
+                  {l}
                 </button>
-              </div>
-
-              <dl className="mb-5 space-y-2 text-sm">
-                <div>
-                  <dt className="text-xs text-slate-400">Action</dt>
-                  <dd className="font-medium">
-                    {String(detailAudit.action || '').replace(/_/g, ' ')}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-slate-400">When</dt>
-                  <dd>{new Date(detailAudit.createdAt).toLocaleString()}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-slate-400">Performed by</dt>
-                  <dd>
-                    {detailAudit.user?.id ? (
-                      <a href={`/u/${detailAudit.user.id}`} className="font-medium text-brand-600 underline">
-                        {detailAudit.user.fullName}
-                      </a>
-                    ) : (
-                      detailAudit.user?.fullName || 'System'
-                    )}
-                  </dd>
-                </div>
-                {formatAuditDetails(detailAudit.details).length > 0 && (
-                  <div>
-                    <dt className="mb-1 text-xs text-slate-400">Event details</dt>
-                    <dd className="space-y-1.5 rounded-xl border border-slate-100 bg-slate-50 p-3">
-                      {formatAuditDetails(detailAudit.details).map((row) => (
-                        <div key={row.label} className="flex justify-between gap-3 text-sm">
-                          <span className="text-slate-500">{row.label}</span>
-                          <span className="text-right font-medium text-slate-800">{row.value}</span>
-                        </div>
-                      ))}
-                    </dd>
-                  </div>
-                )}
-              </dl>
-
-              {rel && (
-                <>
-                  <hr className="mb-4 border-slate-100" />
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    {entity === 'visitor'
-                      ? 'Visitor record'
-                      : entity === 'invite'
-                        ? 'Invite record'
-                        : entity === 'user'
-                          ? 'User record'
-                          : 'Related record'}
-                  </p>
-
-                  {photo && (
-                    <div className="mb-4 flex justify-start">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={photo}
-                        alt=""
-                        className="h-28 w-28 rounded-2xl object-cover shadow-sm"
-                      />
-                    </div>
-                  )}
-
-                  {/* Visitor */}
-                  {entity === 'visitor' && (
-                    <dl className="space-y-2 text-sm">
-                      <div>
-                        <dt className="text-xs text-slate-400">Name</dt>
-                        <dd className="font-medium">{rel.fullName}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Status</dt>
-                        <dd>{rel.status || '—'}</dd>
-                      </div>
-                      {rel.email && (
-                        <div>
-                          <dt className="text-xs text-slate-400">Email</dt>
-                          <dd>{rel.email}</dd>
-                        </div>
-                      )}
-                      {rel.phone && (
-                        <div>
-                          <dt className="text-xs text-slate-400">Phone</dt>
-                          <dd>{rel.phone}</dd>
-                        </div>
-                      )}
-                      {rel.address && (
-                        <div>
-                          <dt className="text-xs text-slate-400">Address</dt>
-                          <dd>{rel.address}</dd>
-                        </div>
-                      )}
-                      <div>
-                        <dt className="text-xs text-slate-400">Purpose</dt>
-                        <dd>{rel.invite?.purpose || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Category</dt>
-                        <dd>{rel.invite?.category || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Host</dt>
-                        <dd>
-                          {rel.invite?.host?.id ? (
-                            <a href={`/u/${rel.invite.host.id}`} className="text-brand-600 underline">
-                              {rel.invite.host.fullName}
-                            </a>
-                          ) : (
-                            rel.invite?.host?.fullName || '—'
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Expected mode</dt>
-                        <dd>{rel.invite?.expectedMode || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Actual mode</dt>
-                        <dd>{rel.entryMode || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Entered</dt>
-                        <dd>
-                          {rel.enteredAt
-                            ? new Date(rel.enteredAt).toLocaleString()
-                            : '—'}
-
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Exited</dt>
-                        <dd>
-                          {rel.exitedAt
-                            ? new Date(rel.exitedAt).toLocaleString()
-                            : '—'}
-
-                        </dd>
-                      </div>
-                      {rel.deniedReason && (
-                        <div>
-                          <dt className="text-xs text-slate-400">Decline reason</dt>
-                          <dd className="text-red-700">{rel.deniedReason}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  )}
-
-                  {/* Invite */}
-                  {entity === 'invite' && (
-                    <dl className="space-y-2 text-sm">
-                      <div>
-                        <dt className="text-xs text-slate-400">Purpose</dt>
-                        <dd className="font-medium">{rel.purpose || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Category</dt>
-                        <dd>{rel.category || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Status</dt>
-                        <dd>{rel.status || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Expected mode</dt>
-                        <dd>{rel.expectedMode || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Expected at</dt>
-                        <dd>
-                          {rel.expectedAt
-                            ? new Date(rel.expectedAt).toLocaleString()
-                            : '—'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Host</dt>
-                        <dd>
-                          {rel.host?.id ? (
-                            <a href={`/u/${rel.host.id}`} className="text-brand-600 underline">
-                              {rel.host.fullName}
-                            </a>
-                          ) : (
-                            rel.host?.fullName || '—'
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Created</dt>
-                        <dd>
-                          {rel.createdAt
-                            ? new Date(rel.createdAt).toLocaleString()
-                            : '—'}
-                        </dd>
-                      </div>
-                      {Array.isArray(rel.visitors) && rel.visitors.length > 0 && (
-                        <div>
-                          <dt className="mb-1 text-xs text-slate-400">Guests</dt>
-                          <dd className="space-y-1.5">
-                            {rel.visitors.map((g: any) => (
-                              <div
-                                key={g.id}
-                                className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2"
-                              >
-                                {g.photoPath ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={`${API}/visitors/photo/${g.photoPath}`}
-                                    alt=""
-                                    className="h-8 w-8 rounded-full object-cover"
-                                  />
-                                ) : (
-                                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-400">
-                                    ?
-                                  </span>
-                                )}
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium">{g.fullName}</p>
-                                  <p className="text-xs text-slate-400">{g.status}</p>
-                                </div>
-                              </div>
-                            ))}
-                          </dd>
-                        </div>
-                      )}
-                    </dl>
-                  )}
-
-                  {/* User */}
-                  {entity === 'user' && (
-                    <dl className="space-y-2 text-sm">
-                      <div>
-                        <dt className="text-xs text-slate-400">Name</dt>
-                        <dd className="font-medium">{rel.fullName}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Email</dt>
-                        <dd>{rel.email || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Phone</dt>
-                        <dd>{rel.phone || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Portfolio</dt>
-                        <dd>{rel.portfolio || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Role</dt>
-                        <dd>{rel.role || '—'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-400">Active</dt>
-                        <dd>{rel.isActive ? 'Yes' : 'No'}</dd>
-                      </div>
-                    </dl>
-                  )}
-                </>
-              )}
-
-              {!rel && detailAudit.entityId && (
-                <p className="rounded-xl bg-slate-50 py-4 text-center text-xs text-slate-400">
-                  Related {detailAudit.entity || 'record'} is no longer available
-                </p>
-              )}
+              ))}
             </div>
           </div>
-        );
-      })()}
+          {filteredAudit.length === 0 ? (
+            <Empty icon={<History size={24} />} title="No activity recorded" />
+          ) : (
+            <ul className="rows stagger">
+              {filteredAudit.map((a) => {
+                const m = auditMeta(a);
+                return (
+                  <li key={a.id}>
+                    <button type="button" onClick={() => setDetailAudit(a)} className="row-link group items-start">
+                      <span className="relative mt-0.5">
+                        <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ring-1 ${AUDIT_TILE[m.tone]} transition duration-300 group-hover:scale-105`}>
+                          {m.icon}
+                        </span>
+                        <Avatar name={a.user?.fullName || 'System'} src={avatarUrl(a.user?.avatarPath)} size={20} className="!absolute -bottom-1.5 -right-1.5 !text-[8px]" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{m.label}</span>
+                          <Tooltip content={fmtDate(a.createdAt)}>
+                            <span className="ml-auto shrink-0 text-[11px] text-slate-400">{relTime(a.createdAt)}</span>
+                          </Tooltip>
+                        </span>
+                        <span className="mt-0.5 line-clamp-2 block text-sm font-medium text-slate-800">{m.text(a)}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* ------------------------------ USER EDIT SHEET ------------------------------ */}
+      <Sheet
+        open={!!selected}
+        onClose={() => {
+          setSelected(null);
+          setOverlayMsg(null);
+          setOncePassword(null);
+        }}
+        icon={<Pencil size={18} />}
+        title={original?.fullName || 'Edit user'}
+        subtitle={
+          original && (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <StatusPill status={original.role} />
+              <span className="whitespace-nowrap text-xs text-slate-400">
+                {[original.createdAt && `Joined ${relTime(original.createdAt)}`, original._count?.invites != null && plural(original._count.invites, 'invite')].filter(Boolean).join(' · ')}
+              </span>
+            </span>
+          )
+        }
+        footer={
+          selected && (
+            <div className="flex gap-2">
+              <Link href={`/u/${selected.id}`} className="btn-ghost">
+                <Eye size={16} /> Preview
+              </Link>
+              <button type="submit" form="user-edit" disabled={!dirty.length || saving} className="btn-primary flex-1">
+                {saving ? 'Saving…' : dirty.length ? `Save ${dirty.length} change${dirty.length > 1 ? 's' : ''}` : 'No changes'}
+              </button>
+            </div>
+          )
+        }
+      >
+        {selected && (
+          <form id="user-edit" onSubmit={saveSelected} className="space-y-3">
+            {overlayMsg && <Notice tone={overlayMsg.tone}>{overlayMsg.text}</Notice>}
+            <div className="flex items-center gap-3 tile">
+              <Avatar name={selected.fullName} src={avatarUrl(selected.avatarPath)} size={52} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-slate-800">{selected.fullName || '—'}</p>
+                <p className="truncate text-xs text-slate-500">{selected.email}</p>
+              </div>
+            </div>
+            <label className="block">
+              <span className="label">Full name</span>
+              <input value={selected.fullName || ''} onChange={(e) => setSelected({ ...selected, fullName: e.target.value })} className="input" required />
+            </label>
+            <label className="block">
+              <span className="label">
+                <Mail size={13} /> Email
+                <InfoTip text="Used to sign in and to receive invites and alerts. Must be unique." />
+              </span>
+              <input type="email" value={selected.email || ''} onChange={(e) => setSelected({ ...selected, email: e.target.value })} className="input" required />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="label">
+                  <Phone size={13} /> Phone
+                </span>
+                <input value={selected.phone || ''} onChange={(e) => setSelected({ ...selected, phone: e.target.value })} className="input" placeholder="+234…" />
+              </label>
+              <label className="block">
+                <span className="label">Portfolio</span>
+                <input value={selected.portfolio || ''} onChange={(e) => setSelected({ ...selected, portfolio: e.target.value })} className="input" placeholder="Department" />
+              </label>
+            </div>
+            <div>
+              <span className="label">
+                Role
+                <InfoTip text={isSelf ? 'You cannot change your own role.' : 'Admins manage everything; gate officers scan and admit; staff invite guests.'} />
+              </span>
+              <div className="segmented w-full">
+                {(['STAFF', 'GATE', 'ADMIN'] as const).map((r) => (
+                  <button key={r} type="button" disabled={!!isSelf} data-active={selected.role === r} onClick={() => setSelected({ ...selected, role: r })} className="flex-1 disabled:opacity-50">
+                    {r === 'GATE' ? 'Gate officer' : titleCase(r)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="tile-muted flex items-center gap-3">
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-slate-800">Account active</p>
+                <p className="text-xs text-slate-500">{selected.isActive === false ? 'This user cannot sign in.' : 'This user can sign in.'}</p>
+              </div>
+              <Tooltip content={isSelf ? 'You cannot deactivate yourself' : selected.isActive === false ? 'Reactivate account' : 'Deactivate account'}>
+                <span>
+                  <Toggle checked={selected.isActive !== false} disabled={!!isSelf} onChange={(v) => setSelected({ ...selected, isActive: v })} />
+                </span>
+              </Tooltip>
+            </div>
+            {dirty.length > 0 && (
+              <div className="animate-in rounded-2xl border border-brand-100 bg-brand-50/60 p-3 text-xs">
+                <p className="mb-1 font-semibold text-brand-800">Pending changes</p>
+                {dirty.map((k) => (
+                  <p key={k} className="text-slate-600">
+                    <span className="font-medium">{fieldLabel(k)}:</span>{' '}
+                    <span className="text-slate-400 line-through">{fmtValue(original?.[k])}</span> → <span className="font-semibold text-emerald-700">{fmtValue(selected[k])}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+            <div className="border-t border-slate-100 pt-3">
+              {oncePassword && (
+                <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs font-semibold text-amber-900">Temporary password (copy now)</p>
+                  <p className="mt-1 font-mono text-xl font-bold tracking-widest">{oncePassword}</p>
+                </div>
+              )}
+              <button type="button" onClick={() => resetPw(selected.id)} className="btn w-full border border-amber-200 bg-gradient-to-r from-amber-50 to-white text-amber-900 hover:border-amber-300 hover:from-amber-100">
+                <KeyRound size={17} /> Reset password
+                <InfoTip text="Issues a new temporary password. Passwords are never shown after save." />
+              </button>
+            </div>
+          </form>
+        )}
+      </Sheet>
+
+      {/* ------------------------------ EXPORT SHEET ------------------------------ */}
+      <Sheet
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        icon={<FileSpreadsheet size={20} />}
+        title="Export visits"
+        subtitle="Pick the columns for your CSV"
+        footer={
+          <button type="button" onClick={exportCsv} disabled={!exportCols.length} className="btn-primary w-full">
+            <Download size={16} /> Download CSV
+          </button>
+        }
+      >
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            ['fullName', 'Visitor name'],
+            ['email', 'Email'],
+            ['phone', 'Phone'],
+            ['status', 'Status'],
+            ['purpose', 'Purpose'],
+            ['category', 'Category'],
+            ['host', 'Host'],
+            ['entryMode', 'Entry mode'],
+            ['enteredAt', 'Entered'],
+            ['exitedAt', 'Exited'],
+            ['deniedAt', 'Declined at'],
+            ['deniedReason', 'Decline reason'],
+            ['entryOfficer', 'Entry officer'],
+            ['exitOfficer', 'Exit officer'],
+            ['createdAt', 'Registered'],
+          ].map(([id, label]) => {
+            const on = exportCols.includes(id);
+            return (
+              <label key={id} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${on ? 'border-brand-200 bg-brand-50 text-brand-800' : 'border-slate-200 bg-white text-slate-600 hover:border-brand-100'}`}>
+                <input type="checkbox" checked={on} onChange={(e) => setExportCols((p) => (e.target.checked ? [...p, id] : p.filter((c) => c !== id)))} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+      </Sheet>
+
+      {/* ------------------------------ INVITE SHEET ------------------------------ */}
+      <Sheet
+        open={!!detailInvite}
+        onClose={() => setDetailInvite(null)}
+        tone={detailInvite && PENDING.includes(detailInvite.status) ? 'amber' : 'brand'}
+        icon={<ClipboardList size={20} />}
+        title={detailInvite?.purpose}
+        subtitle={detailInvite && <StatusPill status={inviteStatus(detailInvite)} />}
+        footer={
+          detailInvite &&
+          (PENDING.includes(detailInvite.status) ? (
+            <button type="button" onClick={() => approve(detailInvite.id)} className="btn-success w-full">
+              <Check size={16} /> Approve {detailInvite.status === 'OFFLINE_PENDING' ? 'walk-in' : 'and email guests'}
+            </button>
+          ) : (detailInvite.status === 'EXPIRED' || (detailInvite.expiresAt && new Date(detailInvite.expiresAt) < new Date())) &&
+            !(detailInvite.visitors || []).every((v: any) => v.photoPath) ? (
+            <button
+              type="button"
+              onClick={async () => {
+                await api.reviveInvite(detailInvite.id);
+                setInvites(await api.allInvites());
+                setDetailInvite(null);
+                ok('Invite link revived');
+              }}
+              className="btn-primary w-full"
+            >
+              Revive expired link
+            </button>
+          ) : undefined)
+        }
+      >
+        {detailInvite && <InviteDetail inv={detailInvite} />}
+      </Sheet>
+
+      {/* ------------------------------ AUDIT SHEET ------------------------------ */}
+      <Sheet open={!!detailAudit} onClose={() => setDetailAudit(null)} tone={audM?.tone} icon={audM?.icon} title={audM?.label} subtitle={detailAudit && `${fmtDate(detailAudit.createdAt)} · ${relTime(detailAudit.createdAt)}`}>
+        {detailAudit && audM && (
+          <div className="space-y-4">
+            <div className="card card-art p-4">
+              <p className="text-[15px] font-medium leading-relaxed text-slate-800">{audM.text(detailAudit)}</p>
+              <div className="mt-3 flex items-center gap-2.5 border-t border-slate-100 pt-3">
+                <Avatar name={detailAudit.user?.fullName || 'System'} src={avatarUrl(detailAudit.user?.avatarPath)} size={34} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] uppercase tracking-wider text-slate-400">Performed by</p>
+                  <p className="truncate text-sm font-semibold">
+                    {detailAudit.user?.id ? <PersonLink id={detailAudit.user.id} name={detailAudit.user.fullName} /> : 'System (automatic)'}
+                  </p>
+                </div>
+                {detailAudit.user?.role && <StatusPill status={detailAudit.user.role} />}
+              </div>
+            </div>
+
+            {changes.length > 0 && (
+              <div>
+                <p className="section-title">What changed</p>
+                <div className="rows">
+                  {changes.map(([k, c]) => (
+                    <div key={k} className="grid grid-cols-[96px_1fr] items-center gap-2 px-3.5 py-2.5 text-sm">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{fieldLabel(k)}</span>
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="rounded-lg bg-rose-50 px-2 py-0.5 text-rose-700 line-through decoration-rose-300">{fmtValue(c?.from)}</span>
+                        <ChevronRight size={14} className="text-slate-300" />
+                        <span className="rounded-lg bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">{fmtValue(c?.to)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {extraDetails.length > 0 && (
+              <div>
+                <p className="section-title">Event details</p>
+                <Fields>
+                  {extraDetails.map(([k, v]) => (
+                    <Field key={k} label={fieldLabel(k)}>
+                      {fmtValue(v)}
+                    </Field>
+                  ))}
+                </Fields>
+              </div>
+            )}
+
+            {audRel && (
+              <div>
+                <p className="section-title">
+                  {audEntity === 'visitor' ? 'Visitor record' : audEntity === 'invite' ? 'Invite record' : audEntity === 'user' ? 'User record' : audEntity === 'blacklistentry' ? 'Blacklist entry' : 'Related record'}
+                </p>
+                {audEntity === 'visitor' && (
+                  <div className="space-y-3">
+                    <VisitorCard v={audRel} />
+                    <Fields>
+                      <Field label="Visit">{audRel.invite?.purpose}</Field>
+                      <Field label="Host">{audRel.invite?.host && <PersonLink id={audRel.invite.host.id} name={audRel.invite.host.fullName} />}</Field>
+                      <Field label="Email">{audRel.email}</Field>
+                      <Field label="Address">{audRel.address}</Field>
+                    </Fields>
+                  </div>
+                )}
+                {audEntity === 'invite' && <InviteDetail inv={audRel} />}
+                {audEntity === 'user' && (
+                  <div className="card p-4">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={audRel.fullName} src={avatarUrl(audRel.avatarPath)} size={46} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold">{audRel.fullName}</p>
+                        <p className="truncate text-xs text-slate-500">{audRel.email}</p>
+                      </div>
+                      <StatusPill status={audRel.role} />
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <div className="tile !p-2">
+                        <p className="text-[10px] uppercase text-slate-500">Phone</p>
+                        <p className="truncate text-xs font-semibold">{audRel.phone || '—'}</p>
+                      </div>
+                      <div className="tile !p-2">
+                        <p className="text-[10px] uppercase text-slate-500">Portfolio</p>
+                        <p className="truncate text-xs font-semibold">{audRel.portfolio || '—'}</p>
+                      </div>
+                      <div className="tile !p-2">
+                        <p className="text-[10px] uppercase text-slate-500">Active</p>
+                        <p className="text-xs font-semibold">{audRel.isActive ? 'Yes' : 'No'}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Link href={`/u/${audRel.id}`} className="btn-ghost flex-1 !py-2">
+                        <Eye size={15} /> Preview
+                      </Link>
+                      <button type="button" className="btn-soft flex-1 !py-2" onClick={() => { const u = users.find((x) => x.id === audRel.id); if (u) { setDetailAudit(null); setTab('users'); openUser(u); } }}>
+                        <Pencil size={14} /> Edit
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {audEntity === 'blacklistentry' && (
+                  <Fields>
+                    <Field label="Name">{audRel.fullName}</Field>
+                    <Field label="Phone">{audRel.phone}</Field>
+                    <Field label="ID number">{audRel.idNumber}</Field>
+                    <Field label="Reason">{audRel.reason}</Field>
+                    <Field label="Status">
+                      <StatusPill label={audRel.isActive ? 'Active' : 'Lifted'} tone={audRel.isActive ? 'rose' : 'slate'} />
+                    </Field>
+                  </Fields>
+                )}
+              </div>
+            )}
+            {!audRel && detailAudit.entityId && (
+              <p className="tile-muted text-center text-xs text-slate-500">The related {String(detailAudit.entity || 'record').toLowerCase()} is no longer available.</p>
+            )}
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }
-

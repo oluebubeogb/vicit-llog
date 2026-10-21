@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AdminOrGateSilentGuard } from '../../common/guards/admin-or-gate-silent.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -175,16 +176,17 @@ export class UsersController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  one(@Param('id') id: string) {
-    return this.usersService.findById(id);
+  one(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.usersService.findById(id, user.orgId);
   }
 
   @Patch(':id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  update(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
-    return this.usersService.updateStaff(id, user.orgId, body);
+  @ApiOperation({ summary: 'Admin: edit staff (name, email, phone, portfolio, role, active)' })
+  update(@Param('id') id: string, @Body() body: UpdateUserDto, @CurrentUser() user: any) {
+    return this.usersService.updateStaff(id, user.orgId, body, user.id);
   }
 
   @Post(':id/reset-password')

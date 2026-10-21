@@ -11,6 +11,7 @@ import { InviteStatus, VisitStatus } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { publicFrontendBase } from '../../common/utils/urls';
 import { buildGateQrPayload, renderQrDataUrl, renderQrPng } from '../../common/utils/qr';
 
 function isLocalUrl(u: string) {
@@ -40,7 +41,7 @@ export class VisitorsService {
       include: {
         visitors: true,
         host: { select: { id: true, fullName: true, email: true, phone: true } },
-        organisation: { select: { name: true } },
+        organisation: { select: { name: true, customDomain: true } },
       },
     });
 
@@ -129,7 +130,7 @@ export class VisitorsService {
     }
 
     if (visitor.email) {
-      const frontend = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+      const frontend = publicFrontendBase((invite as any).organisation?.customDomain);
       const apiPublic = (process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
       await this.mail.sendVisitorQrEmail({
         to: visitor.email,

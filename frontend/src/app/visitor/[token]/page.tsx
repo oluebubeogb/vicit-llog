@@ -17,7 +17,13 @@ import {
   Loader2,
   ShieldCheck,
   Download,
+  Mail,
 } from 'lucide-react';
+import BrandMark from '@/components/BrandMark';
+import StatusPill from '@/components/ui/StatusPill';
+import { InfoTip } from '@/components/ui/Tooltip';
+import { Notice } from '@/components/ui/Bits';
+import { useBrand } from '@/components/BrandProvider';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 /** Hosted PNG of the gate QR (works for "save image", sharing, offline screenshots). */
@@ -72,41 +78,33 @@ function StatusBadge({
   label,
   time,
   active,
+  last,
 }: {
   done: boolean;
   label: string;
   time?: string | null;
   active?: boolean;
+  last?: boolean;
 }) {
   return (
-    <div
-      className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 transition ${
-        done
-          ? 'border-emerald-200 bg-emerald-50'
-          : active
-            ? 'border-brand-200 bg-brand-50'
-            : 'border-slate-100 bg-slate-50'
-      }`}
-    >
+    <div className="relative flex items-start gap-3 pb-3 last:pb-0">
+      {!last && (
+        <span className={`absolute left-[13px] top-8 h-[calc(100%-1.5rem)] w-0.5 rounded-full ${done ? 'bg-gradient-to-b from-emerald-400 to-emerald-200' : 'bg-slate-200'}`} />
+      )}
       <div
-        className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+        className={`relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition duration-500 ${
           done
-            ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-200'
+            ? 'bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-[0_6px_14px_-4px_rgb(16_185_129/0.6)]'
             : active
-              ? 'bg-brand-500 text-white'
-              : 'bg-slate-200 text-slate-400'
+              ? 'bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-glow'
+              : 'bg-slate-100 text-slate-300 ring-1 ring-slate-200'
         }`}
       >
-        {done ? <Check size={16} strokeWidth={3} /> : <span className="h-2 w-2 rounded-full bg-current" />}
+        {active && !done && <span className="absolute inset-0 animate-ping rounded-full bg-brand-400/40" />}
+        {done ? <Check size={15} strokeWidth={3} /> : <span className="h-2 w-2 rounded-full bg-current" />}
       </div>
-      <div className="min-w-0 flex-1">
-        <p
-          className={`text-sm font-semibold ${
-            done ? 'text-emerald-800' : active ? 'text-brand-800' : 'text-slate-500'
-          }`}
-        >
-          {label}
-        </p>
+      <div className="min-w-0 flex-1 pt-1">
+        <p className={`text-sm font-semibold ${done ? 'text-slate-800' : active ? 'text-brand-800' : 'text-slate-400'}`}>{label}</p>
         {time && <p className="text-xs text-slate-500">{time}</p>}
       </div>
     </div>
@@ -169,6 +167,7 @@ async function detectHumanInVideo(video: HTMLVideoElement): Promise<boolean> {
 export default function VisitorPage() {
   const params = useParams();
   const token = params?.token as string;
+  const { brand } = useBrand();
 
   const [invite, setInvite] = useState<Invite | null>(null);
   const [loading, setLoading] = useState(true);
@@ -298,18 +297,24 @@ export default function VisitorPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <Loader2 className="animate-spin text-brand-600" size={32} />
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+        <BrandMark size={60} className="animate-float" />
+        <Loader2 className="animate-spin text-brand-500" size={24} />
       </div>
     );
   }
 
   if (error || !invite) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
-        <AlertCircle className="text-red-500" size={40} />
-        <h1 className="text-lg font-bold text-slate-900">Unable to open invite</h1>
-        <p className="text-sm text-slate-500">{error || 'Not found'}</p>
+      <div className="page flex min-h-screen items-center justify-center">
+        <div className="surface animate-in w-full max-w-sm text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-50 to-rose-100 text-rose-500 shadow-inner">
+            <AlertCircle size={30} />
+          </div>
+          <h1 className="text-lg font-bold text-slate-900">Unable to open invite</h1>
+          <p className="mt-1 text-sm text-slate-500">{error || 'Not found'}</p>
+          <p className="mt-4 text-xs text-slate-400">Please contact your host for a new link.</p>
+        </div>
       </div>
     );
   }
@@ -321,42 +326,42 @@ export default function VisitorPage() {
   const isArrived = selected?.status === 'ARRIVED';
   const isExited = selected?.status === 'EXITED';
   const photoTime = hasPhoto ? fmt(selected?.updatedAt || selected?.createdAt) : null;
+  const stateLabel = isExited ? 'EXITED' : isArrived ? 'ARRIVED' : hasPhoto ? 'USED' : 'PENDING';
+  const stepsDone = [hasPhoto, hasPhoto && !!qr, hasPhoto, isArrived || isExited, isExited].filter(Boolean).length;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-10">
+    <div className="min-h-screen pb-10">
       {/* Header */}
-      <div className="bg-gradient-to-br from-brand-800 to-brand-600 px-5 pb-8 pt-8 text-white">
-        <div className="mb-1 flex items-center gap-2 text-brand-100">
-          <ShieldCheck size={18} />
-          <span className="text-xs font-medium uppercase tracking-wider">Visitor registration</span>
+      <div className="hero !rounded-none !rounded-b-[32px] px-5 pb-12 pt-[max(1.75rem,env(safe-area-inset-top))]">
+        <div className="mb-4 flex items-center gap-2.5">
+          <BrandMark size={38} />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{invite.organisation?.name || brand.name}</p>
+            <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-white/70">
+              <ShieldCheck size={12} /> Visitor registration
+            </p>
+          </div>
         </div>
-        <h1 className="text-xl font-bold leading-tight">{invite.purpose}</h1>
-        <div className="mt-3 space-y-1 text-sm text-brand-100">
+        <h1 className="text-2xl font-bold leading-tight">{invite.purpose}</h1>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
           {invite.host?.fullName && (
-            <p className="flex items-center gap-2">
-              <User size={14} /> Host: {invite.host.fullName}
-            </p>
-          )}
-          {invite.organisation?.name && (
-            <p className="flex items-center gap-2">
-              <Building2 size={14} /> {invite.organisation.name}
-            </p>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur">
+              <User size={12} /> Host: {invite.host.fullName}
+            </span>
           )}
           {invite.expectedAt && (
-            <p className="flex items-center gap-2">
-              <Calendar size={14} /> {fmt(invite.expectedAt)}
-            </p>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur">
+              <Calendar size={12} /> {fmt(invite.expectedAt)}
+            </span>
           )}
         </div>
       </div>
 
-      <div className="relative z-10 -mt-4 space-y-4 px-4">
+      <div className="relative z-10 mx-auto -mt-7 max-w-lg space-y-4 px-4">
         {/* Guest selector */}
         {invite.visitors.length > 1 && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-              Select guest
-            </p>
+          <div className="card animate-in p-3">
+            <p className="eyebrow mb-2">Who are you?</p>
             <div className="flex flex-wrap gap-2">
               {invite.visitors.map((v) => (
                 <button
@@ -367,16 +372,14 @@ export default function VisitorPage() {
                     stopCamera();
                     setCaptureError('');
                   }}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition duration-200 hover:-translate-y-0.5 ${
                     selectedId === v.id
-                      ? 'bg-brand-600 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      ? 'border-transparent bg-gradient-to-r from-brand-500 to-brand-700 text-white shadow-glow'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50'
                   }`}
                 >
                   {v.fullName}
-                  {v.photoPath && (
-                    <Check size={12} className="ml-1 inline text-emerald-300" strokeWidth={3} />
-                  )}
+                  {v.photoPath && <Check size={13} className={selectedId === v.id ? 'text-emerald-200' : 'text-emerald-500'} strokeWidth={3} />}
                 </button>
               ))}
             </div>
@@ -385,112 +388,61 @@ export default function VisitorPage() {
 
         {/* Status timeline */}
         {selected && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900">{selected.fullName}</h2>
-              <span
-                className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                  isExited
-                    ? 'bg-slate-100 text-slate-600'
-                    : isArrived
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : hasPhoto
-                        ? 'bg-brand-100 text-brand-700'
-                        : 'bg-amber-100 text-amber-700'
-                }`}
-              >
-                {isExited
-                  ? 'Exited'
-                  : isArrived
-                    ? 'On site'
-                    : hasPhoto
-                      ? 'Registered'
-                      : 'Awaiting photo'}
+          <div className="card card-art animate-in p-4">
+            <div className="mb-4 flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-accent-700 text-sm font-bold text-white shadow-glow">
+                {selected.fullName.split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase()}
               </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-base font-bold text-slate-900">{selected.fullName}</h2>
+                <p className="text-xs text-slate-500">{stepsDone} of 5 steps complete</p>
+              </div>
+              <StatusPill status={stateLabel} label={isExited ? 'Exited' : isArrived ? 'On site' : hasPhoto ? 'Registered' : 'Awaiting photo'} tone={isExited ? 'slate' : isArrived ? 'emerald' : hasPhoto ? 'brand' : 'amber'} />
             </div>
-            <div className="space-y-2">
-              <StatusBadge
-                done={hasPhoto}
-                active={!hasPhoto}
-                label="Image capture"
-                time={photoTime}
-              />
-              <StatusBadge
-                done={hasPhoto && Boolean(qr)}
-                active={hasPhoto && !qr}
-                label="QR code ready"
-                time={hasPhoto ? photoTime : null}
-              />
-              <StatusBadge
-                done={hasPhoto}
-                label="Passphrase issued"
-                time={hasPhoto ? photoTime : null}
-              />
-              <StatusBadge
-                done={isArrived || isExited}
-                active={hasPhoto && !isArrived && !isExited}
-                label="Arrived for visit"
-                time={fmt(selected.enteredAt)}
-              />
-              <StatusBadge
-                done={isExited}
-                active={isArrived}
-                label="Exited"
-                time={fmt(selected.exitedAt)}
-              />
+            <div className="mb-4 h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-brand-500 to-accent-600 transition-all duration-700" style={{ width: `${(stepsDone / 5) * 100}%` }} />
+            </div>
+            <div>
+              <StatusBadge done={hasPhoto} active={!hasPhoto} label="Photo captured" time={photoTime} />
+              <StatusBadge done={hasPhoto && Boolean(qr)} active={hasPhoto && !qr} label="QR pass ready" time={hasPhoto ? photoTime : null} />
+              <StatusBadge done={hasPhoto} label="Passphrase issued" time={hasPhoto ? photoTime : null} />
+              <StatusBadge done={isArrived || isExited} active={hasPhoto && !isArrived && !isExited} label="Arrived for visit" time={fmt(selected.enteredAt)} />
+              <StatusBadge done={isExited} active={isArrived} label="Visit completed" time={fmt(selected.exitedAt)} last />
             </div>
           </div>
         )}
 
         {/* Photo capture — only if not yet taken and not arrived/exited */}
         {selected && !hasPhoto && !isArrived && !isExited && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-1 flex items-center gap-2 text-sm font-bold text-slate-900">
-              <Camera size={16} className="text-brand-600" />
+          <div className="card animate-in p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-50 to-brand-100 text-brand-600">
+                <Camera size={16} />
+              </span>
               Passport-style photo
+              <InfoTip text="Face the camera in good light. Empty frames are rejected automatically." />
             </h3>
-            <p className="mb-3 text-xs text-slate-500">
-              Face the camera in good light. Empty frames are rejected automatically.
-            </p>
 
             {!capturing ? (
-              <button
-                type="button"
-                onClick={startCamera}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 font-semibold text-white hover:bg-brand-700"
-              >
+              <button type="button" onClick={startCamera} className="btn-primary w-full !py-3.5">
                 <Camera size={20} />
                 Open camera
               </button>
             ) : (
               <div className="space-y-3">
-                <div className="relative overflow-hidden rounded-xl bg-black aspect-square">
-                  <video
-                    ref={videoRef}
-                    playsInline
-                    muted
-                    autoPlay
-                    className="h-full w-full object-cover scale-x-[-1]"
-                  />
+                <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-950 shadow-lift">
+                  <video ref={videoRef} playsInline muted autoPlay className="h-full w-full scale-x-[-1] object-cover" />
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <div className="h-[70%] w-[55%] rounded-full border-2 border-white/50 shadow-[0_0_0_999px_rgba(0,0,0,0.35)]" />
+                    <div className="h-[70%] w-[55%] rounded-full border-2 border-dashed border-white/70 shadow-[0_0_0_999px_rgba(2,6,23,0.45)]" />
                   </div>
+                  <p className="absolute inset-x-0 bottom-3 text-center text-xs font-medium text-white/85">Centre your face in the oval</p>
                 </div>
                 <canvas ref={canvasRef} className="hidden" />
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={stopCamera}
-                    className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600"
-                  >
+                  <button type="button" onClick={stopCamera} className="btn-ghost flex-1">
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    onClick={takePhoto}
-                    disabled={uploading}
-                    className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60"
-                  >
+                  <button type="button" onClick={takePhoto} disabled={uploading} className="btn-success flex-[2] !py-3">
                     {uploading ? (
                       <>
                         <Loader2 size={18} className="animate-spin" /> Checking…
@@ -504,101 +456,94 @@ export default function VisitorPage() {
                 </div>
               </div>
             )}
-            {captureError && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-                {captureError}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Photo preview when already captured */}
-        {selected?.photoPath && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-              Your photo
-            </p>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/visitors/photo/${selected.photoPath}`}
-              alt={selected.fullName}
-              className="mx-auto h-36 w-36 rounded-2xl object-cover shadow-md"
-            />
+            {captureError && <div className="mt-3"><Notice tone="error">{captureError}</Notice></div>}
           </div>
         )}
 
         {/* QR + passphrase after capture */}
         {hasPhoto && (
-          <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center gap-2 text-emerald-700">
-              <Check size={20} strokeWidth={2.5} className="rounded-full bg-emerald-500 p-0.5 text-white" />
-              <h3 className="font-bold">Ready for the gate</h3>
+          <div className="card animate-in overflow-hidden">
+            <div className="flex items-center gap-3 border-b border-emerald-100 bg-gradient-to-r from-emerald-50 to-white px-5 py-3.5">
+              {selected?.photoPath && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/visitors/photo/${selected.photoPath}`}
+                  alt={selected.fullName}
+                  className="h-12 w-12 rounded-xl object-cover shadow-soft ring-2 ring-white"
+                />
+              )}
+              <div className="flex-1">
+                <h3 className="flex items-center gap-1.5 font-bold text-emerald-800">
+                  <Check size={17} strokeWidth={3} className="rounded-full bg-emerald-500 p-0.5 text-white" /> Ready for the gate
+                </h3>
+                <p className="text-xs text-emerald-700/70">Show this pass on arrival</p>
+              </div>
             </div>
-            {qr && (
-              <div className="mb-4 flex flex-col items-center">
-                {/* Always black-on-white, never inverted by dark mode, crisp pixels, big
-                    enough for older phone cameras to lock on from arm's length. */}
-                <div
-                  className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
-                  style={{ colorScheme: 'light', backgroundColor: '#ffffff' }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={qr}
-                    alt="Gate QR code"
-                    width={512}
-                    height={512}
-                    draggable={false}
-                    className="block h-auto w-[min(72vw,288px)] bg-white"
-                    style={{ imageRendering: 'pixelated', filter: 'none' }}
-                  />
+            <div className="p-5">
+              {qr && (
+                <div className="mb-4 flex flex-col items-center">
+                  {/* Always black-on-white, never inverted by dark mode, crisp pixels, big
+                      enough for older phone cameras to lock on from arm's length. */}
+                  <div className="rounded-[26px] bg-gradient-to-br from-brand-400 via-brand-600 to-accent-700 p-[3px] shadow-glow">
+                    <div className="rounded-[23px] p-3" style={{ colorScheme: 'light', backgroundColor: '#ffffff' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={qr}
+                        alt="Gate QR code"
+                        width={512}
+                        height={512}
+                        draggable={false}
+                        className="block h-auto w-[min(72vw,288px)] bg-white"
+                        style={{ imageRendering: 'pixelated', filter: 'none' }}
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-3 flex items-center gap-1 text-xs text-slate-500">
+                    <QrCode size={12} /> Turn your screen brightness up at the gate
+                  </p>
+                  <a
+                    href={selected ? qrPngUrl(token, selected.id) : qr}
+                    download="gate-qr.png"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-ghost mt-3 !py-2 !text-xs"
+                  >
+                    <Download size={14} /> Save QR image
+                  </a>
                 </div>
-                <p className="mt-2 flex items-center gap-1 text-xs text-slate-500">
-                  <QrCode size={12} /> Show this QR at the gate · turn screen brightness up
+              )}
+              {passphrase && (
+                <div className="tile text-center">
+                  <p className="mb-1 flex items-center justify-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <KeyRound size={12} /> Backup passphrase
+                    <InfoTip text="If the QR will not scan, tell the gate officer this passphrase." size={12} />
+                  </p>
+                  <p className="select-all font-mono text-2xl font-bold tracking-[0.25em] text-gradient">{passphrase}</p>
+                </div>
+              )}
+              {selected?.email && (
+                <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-slate-500">
+                  <Mail size={12} /> A copy was sent to {selected.email}
                 </p>
-                <a
-                  href={selected ? qrPngUrl(token, selected.id) : qr}
-                  download="gate-qr.png"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  <Download size={14} /> Save QR image
-                </a>
-              </div>
-            )}
-            {passphrase && (
-              <div className="rounded-xl bg-slate-50 p-4 text-center">
-                <p className="mb-1 flex items-center justify-center gap-1 text-xs uppercase tracking-wide text-slate-400">
-                  <KeyRound size={12} /> Passphrase (backup)
+              )}
+              {isArrived && (
+                <p className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-50 to-emerald-100/60 py-2.5 text-sm font-semibold text-emerald-700">
+                  <LogIn size={16} /> You are checked in
+                  {selected.enteredAt ? ` · ${fmt(selected.enteredAt)}` : ''}
                 </p>
-                <p className="select-all font-mono text-xl font-bold tracking-wider text-slate-900">
-                  {passphrase}
+              )}
+              {isExited && (
+                <p className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-slate-100 py-2.5 text-sm font-medium text-slate-600">
+                  <LogOut size={16} /> Visit completed
+                  {selected.exitedAt ? ` · ${fmt(selected.exitedAt)}` : ''}
                 </p>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  If the QR will not scan, tell the gate officer this passphrase.
-                </p>
-              </div>
-            )}
-            {selected?.email && (
-              <p className="mt-3 text-center text-xs text-slate-500">
-                A copy of your QR code was sent to {selected.email}
-              </p>
-            )}
-            {isArrived && (
-              <p className="mt-3 flex items-center justify-center gap-2 rounded-lg bg-emerald-50 py-2 text-sm font-medium text-emerald-700">
-                <LogIn size={16} /> You are checked in
-                {selected.enteredAt ? ` · ${fmt(selected.enteredAt)}` : ''}
-              </p>
-            )}
-            {isExited && (
-              <p className="mt-3 flex items-center justify-center gap-2 rounded-lg bg-slate-100 py-2 text-sm font-medium text-slate-600">
-                <LogOut size={16} /> Visit completed
-                {selected.exitedAt ? ` · ${fmt(selected.exitedAt)}` : ''}
-              </p>
-            )}
+              )}
+            </div>
           </div>
         )}
+        <p className="flex items-center justify-center gap-1.5 pt-2 text-[11px] text-slate-400">
+          <ShieldCheck size={12} /> Your details are only shared with {invite.organisation?.name || brand.name}
+        </p>
       </div>
     </div>
   );

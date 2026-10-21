@@ -3,7 +3,14 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api, getUser } from '@/lib/api';
-import { ArrowLeft, User, Phone, Briefcase, X } from 'lucide-react';
+import { ArrowLeft, User, Phone, Briefcase, X, ShieldCheck } from 'lucide-react';
+import Avatar from '@/components/ui/Avatar';
+import Sheet from '@/components/ui/Sheet';
+import StatusPill from '@/components/ui/StatusPill';
+import Tooltip from '@/components/ui/Tooltip';
+import { Empty, Field, Fields, SkeletonList } from '@/components/ui/Bits';
+import { VisitorCard } from '@/components/InviteBits';
+import { MODE_LABEL, relTime } from '@/lib/format';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -39,45 +46,31 @@ export default function PublicUserPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center text-slate-400">
-        Loading…
+      <div className="page">
+        <div className="skeleton mb-4 h-56 !rounded-3xl" />
+        <SkeletonList rows={4} />
       </div>
     );
   }
 
   if (!allowed || !profile) {
     return (
-      <div className="px-4 pt-16 text-center">
-        <p className="text-slate-500">Not found</p>
+      <div className="page pt-16">
+        <Empty icon={<User size={24} />} title="Not found" hint="This profile doesn’t exist or you don’t have access to it." />
       </div>
     );
   }
 
-  const avatar = profile.avatarPath
-    ? `${API}/users/avatar/${profile.avatarPath}`
-    : null;
+  const avatar = profile.avatarPath ? `${API}/users/avatar/${profile.avatarPath}` : null;
 
-  const showGateTabs =
-    viewer?.role === 'ADMIN' && profile.subjectIsGate && profile.gateActivity;
+  const showGateTabs = viewer?.role === 'ADMIN' && profile.subjectIsGate && profile.gateActivity;
 
   const tabs: { id: Tab; label: string; count: number }[] = showGateTabs
     ? [
         { id: 'invites', label: 'Invites', count: profile.guests?.length || 0 },
-        {
-          id: 'entries',
-          label: 'Entries',
-          count: profile.gateActivity?.entries?.length || 0,
-        },
-        {
-          id: 'declines',
-          label: 'Declines',
-          count: profile.gateActivity?.declines?.length || 0,
-        },
-        {
-          id: 'exits',
-          label: 'Exits',
-          count: profile.gateActivity?.exits?.length || 0,
-        },
+        { id: 'entries', label: 'Entries', count: profile.gateActivity?.entries?.length || 0 },
+        { id: 'declines', label: 'Declines', count: profile.gateActivity?.declines?.length || 0 },
+        { id: 'exits', label: 'Exits', count: profile.gateActivity?.exits?.length || 0 },
       ]
     : [{ id: 'invites', label: 'Previous guests', count: profile.guests?.length || 0 }];
 
@@ -92,124 +85,92 @@ export default function PublicUserPage() {
     return path ? `${API}/visitors/photo/${path}` : null;
   }
 
+  const guests = profile.guests || [];
+  const onSite = guests.filter((g: any) => g.status === 'ARRIVED').length;
+  const lastVisit = guests.map((g: any) => g.enteredAt || g.createdAt).filter(Boolean).sort().pop();
+
   return (
-    <div className="mx-auto max-w-lg px-4 pt-6 pb-12">
-      <div className="mb-6 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() =>
-            typeof window !== 'undefined' ? window.history.back() : null
-          }
-          className="rounded-full p-2 hover:bg-slate-100"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <h1 className="text-xl font-bold">Profile</h1>
-      </div>
-
-      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-        <div className="flex flex-col items-center text-center">
-          <button
-            type="button"
-            onClick={() => avatar && setPhotoPreview(true)}
-            className="mb-4 flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-brand-50 text-brand-600 ring-4 ring-brand-100 transition hover:ring-brand-300"
-            title={avatar ? 'Tap to enlarge' : undefined}
-          >
-            {avatar ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatar} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <User size={40} />
-            )}
+    <div className="page">
+      <div className="mb-4 flex items-center gap-3">
+        <Tooltip content="Back">
+          <button type="button" onClick={() => (typeof window !== 'undefined' ? window.history.back() : null)} className="back-btn" aria-label="Back">
+            <ArrowLeft size={18} />
           </button>
-          <h2 className="text-xl font-bold text-slate-900">{profile.fullName}</h2>
-          {profile.organisationName && (
-            <p className="mt-1 text-sm text-slate-400">{profile.organisationName}</p>
-          )}
-        </div>
+        </Tooltip>
+        <p className="eyebrow">Profile</p>
+      </div>
 
-        <div className="mt-6 space-y-3">
-          {profile.phone && (
-            <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm">
-              <Phone size={16} className="text-slate-400" />
-              <a href={`tel:${profile.phone}`} className="text-slate-800">
-                {profile.phone}
-              </a>
-            </div>
-          )}
+      <div className="hero animate-in !pb-6 text-center">
+        <Tooltip content={avatar ? 'Tap to enlarge' : 'No photo'}>
+          <button type="button" onClick={() => avatar && setPhotoPreview(true)} className="mx-auto mb-3 block rounded-full ring-4 ring-white/30 transition hover:ring-white/60">
+            <Avatar name={profile.fullName} src={avatar} size={96} ring={false} className="!text-2xl" />
+          </button>
+        </Tooltip>
+        <h1 className="text-2xl font-bold">{profile.fullName}</h1>
+        {profile.organisationName && <p className="mt-0.5 text-sm text-white/75">{profile.organisationName}</p>}
+        <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs">
           {profile.portfolio && (
-            <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm">
-              <Briefcase size={16} className="text-slate-400" />
-              <span className="text-slate-800">{profile.portfolio}</span>
-            </div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur">
+              <Briefcase size={12} /> {profile.portfolio}
+            </span>
+          )}
+          {profile.phone && (
+            <a href={`tel:${profile.phone}`} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur transition hover:bg-white/25">
+              <Phone size={12} /> {profile.phone}
+            </a>
+          )}
+          {profile.subjectIsGate && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-300/30 px-2.5 py-1 ring-1 ring-white/20">
+              <ShieldCheck size={12} /> Gate officer
+            </span>
           )}
         </div>
       </div>
 
-      <hr className="my-6 border-slate-200" />
+      <div className="stagger -mt-5 mb-5 grid grid-cols-3 gap-2 px-3">
+        {[
+          { l: 'Guests', v: guests.length },
+          { l: 'On site', v: onSite },
+          { l: 'Last visit', v: lastVisit ? relTime(lastVisit) : '—' },
+        ].map((x) => (
+          <div key={x.l} className="card p-2.5 text-center">
+            <p className="truncate text-base font-bold text-slate-900">{x.v}</p>
+            <p className="text-[10px] uppercase tracking-wider text-slate-400">{x.l}</p>
+          </div>
+        ))}
+      </div>
 
-      {showGateTabs && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                tab === t.id
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {t.label}
-              <span className="ml-1 opacity-80">({t.count})</span>
-            </button>
-          ))}
+      {showGateTabs ? (
+        <div className="-mx-4 mb-3 overflow-x-auto px-4">
+          <div className="segmented">
+            {tabs.map((t) => (
+              <button key={t.id} type="button" data-active={tab === t.id} onClick={() => setTab(t.id)}>
+                {t.label} <span className="opacity-70">{t.count}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      )}
-
-      {!showGateTabs && (
-        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
-          Previous guests
-        </h3>
+      ) : (
+        <p className="section-title">Previous guests</p>
       )}
 
       {listForTab().length === 0 ? (
-        <p className="rounded-xl bg-slate-50 py-8 text-center text-sm text-slate-400">
-          No records
-        </p>
+        <Empty icon={<User size={22} />} title="No records" />
       ) : (
-        <ul className="space-y-2">
+        <ul className="rows stagger">
           {listForTab().map((g: any) => (
             <li key={g.id}>
-              <button
-                type="button"
-                onClick={() => setGuest(g)}
-                className="flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-white p-3 text-left shadow-sm row-hover"
-              >
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100">
-                  {g.photoPath ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={photoSrc(g.photoPath)!}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <User size={18} className="text-slate-400" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-slate-900">{g.fullName}</p>
-                  <p className="truncate text-xs text-slate-400">
+              <button type="button" onClick={() => setGuest(g)} className="row-link group">
+                <Avatar name={g.fullName} src={photoSrc(g.photoPath)} size={40} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-slate-800">{g.fullName}</span>
+                  <span className="block truncate text-xs text-slate-500">
                     {g.invite?.purpose || 'Visit'}
-                    {g.invite?.category ? ` · ${g.invite.category}` : ''}
-                    {g.status ? ` · ${g.status}` : ''}
-                  </p>
-                  {tab === 'declines' && g.deniedReason && (
-                    <p className="truncate text-xs text-red-600">{g.deniedReason}</p>
-                  )}
-                </div>
+                    {(g.enteredAt || g.createdAt) && ` · ${relTime(g.enteredAt || g.createdAt)}`}
+                  </span>
+                  {tab === 'declines' && g.deniedReason && <span className="block truncate text-xs text-rose-600">{g.deniedReason}</span>}
+                </span>
+                <StatusPill status={g.status} />
               </button>
             </li>
           ))}
@@ -218,113 +179,31 @@ export default function PublicUserPage() {
 
       {/* Avatar preview */}
       {photoPreview && avatar && (
-        <div
-          className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-black/85 p-4"
-          onClick={() => setPhotoPreview(false)}
-        >
-          <button
-            type="button"
-            onClick={() => setPhotoPreview(false)}
-            className="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white"
-          >
+        <div className="fixed inset-0 z-[100] flex animate-in flex-col items-center justify-center bg-slate-950/90 p-4 backdrop-blur" onClick={() => setPhotoPreview(false)}>
+          <button type="button" onClick={() => setPhotoPreview(false)} className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] rounded-full bg-white/15 p-2 text-white" aria-label="Close">
             <X size={24} />
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={avatar}
-            alt=""
-            className="max-h-[80vh] max-w-full rounded-2xl object-contain shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
+          <img src={avatar} alt="" className="max-h-[80vh] max-w-full rounded-3xl object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
           <p className="mt-3 text-sm text-white/80">{profile.fullName}</p>
         </div>
       )}
 
       {/* Guest / activity detail */}
-      {guest && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Details</h2>
-              <button
-                type="button"
-                onClick={() => setGuest(null)}
-                className="rounded-full p-2 hover:bg-slate-100"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="mb-4 flex justify-center">
-              <div className="h-28 w-28 overflow-hidden rounded-2xl bg-slate-100">
-                {guest.photoPath ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photoSrc(guest.photoPath)!}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-slate-300">
-                    <User size={36} />
-                  </div>
-                )}
-              </div>
-            </div>
-            <dl className="space-y-2 text-sm">
-              <div>
-                <dt className="text-xs text-slate-400">Name</dt>
-                <dd className="font-medium">{guest.fullName}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-400">Status</dt>
-                <dd>{guest.status}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-400">Purpose</dt>
-                <dd>{guest.invite?.purpose || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-400">Category</dt>
-                <dd>{guest.invite?.category || '—'}</dd>
-              </div>
-              {guest.invite?.host?.fullName && (
-                <div>
-                  <dt className="text-xs text-slate-400">Host</dt>
-                  <dd>{guest.invite.host.fullName}</dd>
-                </div>
-              )}
-              {guest.entryMode && (
-                <div>
-                  <dt className="text-xs text-slate-400">Entry mode</dt>
-                  <dd>{guest.entryMode}</dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-xs text-slate-400">Entered</dt>
-                <dd>
-                  {guest.enteredAt
-                    ? new Date(guest.enteredAt).toLocaleString()
-                    : '—'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-400">Exited</dt>
-                <dd>
-                  {guest.exitedAt
-                    ? new Date(guest.exitedAt).toLocaleString()
-                    : '—'}
-                </dd>
-              </div>
-              {guest.deniedReason && (
-                <div>
-                  <dt className="text-xs text-slate-400">Decline reason</dt>
-                  <dd className="text-red-700">{guest.deniedReason}</dd>
-                </div>
-              )}
-            </dl>
+      <Sheet open={!!guest} onClose={() => setGuest(null)} icon={<User size={20} />} title={guest?.fullName} subtitle={guest && <StatusPill status={guest.status} />}>
+        {guest && (
+          <div className="space-y-3">
+            <VisitorCard v={guest} />
+            <Fields>
+              <Field label="Visit">{guest.invite?.purpose}</Field>
+              <Field label="Category">{guest.invite?.category && <StatusPill status={guest.invite.category} />}</Field>
+              <Field label="Host">{guest.invite?.host?.fullName}</Field>
+              <Field label="Arrived by">{guest.entryMode && (MODE_LABEL[guest.entryMode] || guest.entryMode)}</Field>
+              <Field label="Decline reason">{guest.deniedReason && <span className="text-rose-700">{guest.deniedReason}</span>}</Field>
+            </Fields>
           </div>
-        </div>
-      )}
+        )}
+      </Sheet>
     </div>
   );
 }

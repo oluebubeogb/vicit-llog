@@ -301,7 +301,8 @@ export class GateService {
         hostName: host.fullName,
         guestName: visitor.fullName,
         purpose: visitor.invite.purpose,
-        event: 'photo', // fallback label; body covers decline in notification
+        event: 'denied',
+        reason: reason.trim(),
         at: updated.deniedAt?.toISOString(),
       }).catch(() => {});
     }

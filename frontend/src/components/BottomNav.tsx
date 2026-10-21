@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { getUser, api } from '@/lib/api';
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 
 const staffLinks = [
   { href: '/dashboard', icon: Home, label: 'Home' },
@@ -85,35 +86,48 @@ export default function BottomNav() {
   const links = isGate ? gateLinks : staffLinks;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 mt-4 border-t border-slate-200 bg-white/95 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur bottom-nav">
-      <div className="mx-auto flex max-w-lg items-center justify-around px-1 pt-2">
-        {links.map(({ href, icon: Icon, label, exact, badge }: any) => {
-          const active = exact
-            ? pathname === href
-            : pathname === href || pathname?.startsWith(href + '/');
-          const isActive =
-            isGate && href === '/gate' ? pathname === '/gate' : active;
-          return (
-            <Link
-              key={href + label}
-              href={href}
-              className={clsx(
-                'relative flex flex-col items-center gap-0.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition hover:text-brand-600',
-                isActive ? 'text-brand-600' : 'text-slate-500',
-              )}
-            >
-              <span className="relative">
-                <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
-                {badge && unread > 0 && (
-                  <span className="absolute -right-2 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                    {unread > 99 ? '99+' : unread}
-                  </span>
+    <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bottom-nav">
+      <div className="pointer-events-auto mx-auto max-w-lg px-3">
+        <div className="relative flex items-center justify-around overflow-hidden rounded-[26px] border border-white/70 bg-white/80 px-1.5 py-1.5 shadow-[0_18px_40px_-16px_rgb(15_23_42/0.35),0_2px_6px_rgb(15_23_42/0.06)] backdrop-blur-xl">
+          <span className="pointer-events-none absolute inset-0 bg-gradient-to-r from-brand-50/60 via-white/0 to-accent-50/60" />
+          {links.map(({ href, icon: Icon, label, exact, badge }: any) => {
+            const active = exact
+              ? pathname === href
+              : pathname === href || pathname?.startsWith(href + '/');
+            const isActive = isGate && href === '/gate' ? pathname === '/gate' : active;
+            return (
+              <Link
+                key={href + label}
+                href={href}
+                aria-current={isActive ? 'page' : undefined}
+                className={clsx(
+                  'group relative flex min-w-[60px] flex-col items-center gap-0.5 rounded-2xl px-2.5 py-1.5 text-[11px] font-semibold transition-colors duration-200',
+                  isActive ? 'text-white' : 'text-slate-500 hover:text-brand-700',
                 )}
-              </span>
-              <span>{label}</span>
-            </Link>
-          );
-        })}
+              >
+                {isActive && (
+                  <motion.span
+                    layoutId="nav-pill"
+                    transition={{ type: 'spring', damping: 26, stiffness: 340 }}
+                    className="absolute inset-0 rounded-2xl bg-gradient-to-br from-brand-500 via-brand-600 to-accent-700 shadow-glow"
+                  />
+                )}
+                {!isActive && (
+                  <span className="absolute inset-0 rounded-2xl bg-brand-50 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                )}
+                <span className="relative transition-transform duration-300 group-hover:-translate-y-0.5 group-active:scale-90">
+                  <Icon size={21} strokeWidth={isActive ? 2.4 : 2} />
+                  {badge && unread > 0 && (
+                    <span className="absolute -right-2.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gradient-to-br from-rose-500 to-red-600 px-1 text-[10px] font-bold text-white ring-2 ring-white animate-pulse-ring">
+                      {unread > 99 ? '99+' : unread}
+                    </span>
+                  )}
+                </span>
+                <span className="relative">{label}</span>
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </nav>
   );

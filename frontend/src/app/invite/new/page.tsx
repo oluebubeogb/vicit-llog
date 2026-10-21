@@ -3,9 +3,30 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { ArrowLeft, Copy, Check,
-  Share2, Download, User, ChevronDown, ChevronRight } from 'lucide-react';
-import Link from 'next/link';
+import {
+  Bike,
+  CalendarDays,
+  Car,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Copy,
+  Download,
+  Footprints,
+  Mail,
+  Minus,
+  PhoneOff,
+  Plus,
+  Share2,
+  Sparkles,
+  UserPlus,
+} from 'lucide-react';
+import PageHeader from '@/components/ui/PageHeader';
+import Avatar from '@/components/ui/Avatar';
+import Collapse from '@/components/ui/Collapse';
+import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
+import { Notice } from '@/components/ui/Bits';
 import { isValidEmail } from '@/lib/email';
 
 type Guest = { fullName: string; email: string; phone: string; address: string };
@@ -247,264 +268,198 @@ export default function NewInvitePage() {
   }
 
   if (result) {
+    const waiting = result.awaitingApproval || result.isOffline;
     return (
-      <div className="px-4 pt-6 pb-28">
-        <h1 className="mb-4 text-xl font-bold">Invite Created</h1>
-        <div className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-          <p className="text-sm text-emerald-800">
-            Share this link with visitors. Expires in{' '}
-            <strong>{result.expiresInMinutes} minutes</strong>.
+      <div className="page">
+        <div className="hero animate-in mb-4" style={waiting ? { backgroundImage: 'linear-gradient(135deg, #fbbf24, #f59e0b 50%, #ea580c)', boxShadow: '0 14px 34px -12px rgb(217 119 6 / 0.6)' } : undefined}>
+          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 ring-1 ring-white/30 backdrop-blur">
+            {waiting ? <Clock size={24} /> : <Check size={26} />}
+          </span>
+          <h1 className="mt-3 text-2xl font-bold">{waiting ? 'Request submitted' : 'Invite created'}</h1>
+          <p className="mt-1 text-sm text-white/80">
+            {result.awaitingApproval
+              ? 'An administrator will review it. Guests are emailed as soon as it is approved.'
+              : result.isOffline
+                ? 'Walk-in request — awaiting admin approval.'
+                : <>Share this link with your guests. It expires in <strong>{result.expiresInMinutes} minutes</strong>.</>}
           </p>
-          <div className="flex items-center gap-2 rounded-xl bg-white p-3">
-            <code className="flex-1 truncate text-xs text-slate-700">{result.link}</code>
-            <button
-              type="button"
-              onClick={copyLink}
-              title="Copy link"
-              className="rounded-lg bg-brand-600 p-2 text-white"
-            >
-              {copied ? <Check size={16} /> : <Copy size={16} />}
-            </button>
-            <button
-              type="button"
-              onClick={shareInvite}
-              title="Share"
-              className="rounded-lg border border-brand-200 bg-brand-50 p-2 text-brand-700"
-            >
-              <Share2 size={16} />
-            </button>
-          </div>
-          <div className="rounded-xl bg-white p-3">
-            <p className="text-xs text-slate-500">Passphrase (gate backup)</p>
-            <p className="font-mono text-lg font-bold tracking-wider">{result.passphrase}</p>
+        </div>
+        <div className="stagger space-y-3">
+          {!waiting && result.link && (
+            <div className="card card-art p-3">
+              <p className="eyebrow mb-2 px-1">Registration link</p>
+              <div className="tile flex items-center gap-2 !p-2">
+                <code className="min-w-0 flex-1 truncate px-1 text-xs text-slate-700">{result.link}</code>
+                <Tooltip content={copied ? 'Copied!' : 'Copy link'}>
+                  <button type="button" onClick={copyLink} className="btn-primary !p-2.5" aria-label="Copy link">
+                    {copied ? <Check size={16} /> : <Copy size={16} />}
+                  </button>
+                </Tooltip>
+                <Tooltip content="Share link and passphrase">
+                  <button type="button" onClick={shareInvite} className="btn-soft !p-2.5" aria-label="Share">
+                    <Share2 size={16} />
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+          )}
+          <div className="card p-4">
+            <p className="flex items-center gap-1 text-xs font-medium text-slate-500">
+              Passphrase <InfoTip text="Backup code the gate officer can type if the QR can’t be scanned." size={12} />
+            </p>
+            <p className="mt-1 font-mono text-2xl font-bold tracking-[0.25em] text-gradient">{result.passphrase}</p>
           </div>
           {result.emailsSent?.length > 0 && (
-            <p className="text-sm text-emerald-800">
-              Invite emailed to: {result.emailsSent.join(', ')}
-            </p>
-          )}
-          {result.isOffline && (
-            <p className="text-sm text-amber-700">Offline request — awaiting admin approval.</p>
+            <Notice tone="success">
+              <span className="flex items-start gap-2">
+                <Mail size={16} className="mt-0.5 shrink-0" /> Invite emailed to {result.emailsSent.join(', ')}
+              </span>
+            </Notice>
           )}
         </div>
-        <button
-          onClick={() => router.push('/dashboard')}
-          className="mt-6 w-full rounded-xl bg-brand-600 py-3 font-semibold text-white"
-        >
-          Back to Dashboard
-        </button>
+        <div className="mt-6 grid grid-cols-2 gap-2">
+          <button onClick={() => { setResult(null); setDescription(''); setGuestCount(1); setGuests([emptyGuest()]); setOpenGuests({ 0: true }); }} className="btn-ghost">
+            <UserPlus size={16} /> Another
+          </button>
+          <button onClick={() => router.push('/dashboard')} className="btn-primary">
+            Dashboard
+          </button>
+        </div>
       </div>
     );
   }
 
+  const MODES = [
+    { v: 'PEDESTRIAN', l: 'On foot', icon: <Footprints size={16} /> },
+    { v: 'MOTORCYCLE', l: 'Motorcycle', icon: <Bike size={16} /> },
+    { v: 'VEHICLE', l: 'Vehicle', icon: <Car size={16} /> },
+  ];
+
   return (
-    <div className="px-4 pt-6 pb-28">
-      <div className="mb-6 flex items-center gap-3">
-        <Link href="/dashboard" className="rounded-full p-2 hover:bg-slate-100">
-          <ArrowLeft size={20} />
-        </Link>
-        <h1 className="text-xl font-bold">New Invite</h1>
-      </div>
+    <div className="page">
+      <PageHeader back="/dashboard" icon={<UserPlus size={20} />} title="New invite" subtitle="Guests get a secure link and QR pass" info="Each guest with an email receives a personal registration link. The passphrase is a backup for the gate." />
 
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">Purpose *</label>
-          <select
-            value={purpose}
-            onChange={(e) => setPurpose(e.target.value as 'PERSONAL' | 'OFFICIAL')}
-            className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 outline-none focus:border-brand-500"
-            required
-          >
-            <option value="OFFICIAL">Official</option>
-            <option value="PERSONAL">Personal</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">Description *</label>
-          <textarea
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder={placeholders[placeholderIndex]}
-            className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
-            required
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <section className="surface animate-in space-y-4">
+          <p className="section-title">The visit</p>
           <div>
-            <label className="mb-1.5 block text-sm font-medium">Date *</label>
-            <input
-              type="date"
-              value={expectedDate}
-              onChange={(e) => setExpectedDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
-              required
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Time *</label>
-            <input
-              type="time"
-              value={expectedTime}
-              onChange={(e) => setExpectedTime(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
-              required
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">Number of guests</label>
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={guestCount}
-            onChange={(e) => setGuestCount(parseInt(e.target.value) || 1)}
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
-          />
-        </div>
-
-        <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setBulkOpen((o) => !o)}
-              className="flex items-center gap-1 text-sm font-medium text-slate-700"
-            >
-              {bulkOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              Bulk paste (optional)
-            </button>
-            <button
-              type="button"
-              onClick={downloadSampleTxt}
-              className="flex items-center gap-1 text-xs font-medium text-brand-600"
-            >
-              <Download size={14} /> Sample invite .txt
-            </button>
-          </div>
-          {bulkOpen && (
-            <>
-              <textarea
-                rows={4}
-                value={bulkText}
-                onChange={(e) => setBulkText(e.target.value)}
-                onBlur={applyBulk}
-                placeholder={'Name, Email, Phone number, Address\nName, Email, Phone number, Address'}
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
-              />
-              <p className="mt-1 text-xs text-slate-400">
-                One guest per line. Leave the box to auto-fill the guest cards below.
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Collapsible guest cards */}
-        <div className="space-y-2">
-          {guests.map((g, i) => {
-            const open = openGuests[i] !== false;
-            const summary =
-              g.fullName || g.email
-                ? [g.fullName, g.email].filter(Boolean).join(' · ')
-                : `Guest ${i + 1}`;
-            return (
-              <div
-                key={i}
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleGuest(i)}
-                  className="flex w-full items-center gap-2 px-4 py-3 text-left"
-                >
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs text-white">
-                    {i + 1}
-                  </span>
-                  <User size={16} className="text-slate-400" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">
-                    {summary}
-                  </span>
-                  {open ? (
-                    <ChevronDown size={18} className="text-slate-400" />
-                  ) : (
-                    <ChevronRight size={18} className="text-slate-400" />
-                  )}
+            <span className="label">Category</span>
+            <div className="segmented w-full">
+              {(['OFFICIAL', 'PERSONAL'] as const).map((c) => (
+                <button key={c} type="button" data-active={purpose === c} onClick={() => setPurpose(c)} className="flex-1">
+                  {c === 'OFFICIAL' ? 'Official' : 'Personal'}
                 </button>
-                {open && (
-                  <div className="space-y-2 border-t border-slate-100 px-4 pb-4 pt-2">
-                    <input
-                      value={g.fullName}
-                      onChange={(e) => updateGuest(i, 'fullName', e.target.value)}
-                      placeholder="Full name"
-                      className="w-full rounded-lg border px-3 py-2 text-sm"
-                    />
-                    <input
-                      type="email"
-                      value={g.email}
-                      onChange={(e) => updateGuest(i, 'email', e.target.value)}
-                      placeholder="Email (invite link sent here)"
-                      className="w-full rounded-lg border px-3 py-2 text-sm"
-                    />
-                    <input
-                      value={g.phone}
-                      onChange={(e) => updateGuest(i, 'phone', e.target.value)}
-                      placeholder="Phone number"
-                      className="w-full rounded-lg border px-3 py-2 text-sm"
-                    />
-                    <input
-                      value={g.address}
-                      onChange={(e) => updateGuest(i, 'address', e.target.value)}
-                      placeholder="Address"
-                      className="w-full rounded-lg border px-3 py-2 text-sm"
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">Expected mode of entry</label>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
-            className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 outline-none focus:border-brand-500"
-          >
-            <option value="PEDESTRIAN">Pedestrian</option>
-            <option value="MOTORCYCLE">Motorcycle</option>
-            <option value="VEHICLE">Vehicle</option>
-          </select>
-        </div>
-
-        <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <input
-            type="checkbox"
-            checked={isOffline}
-            onChange={(e) => setIsOffline(e.target.checked)}
-            className="h-5 w-5 rounded border-slate-300 text-brand-600"
-          />
-          <div>
-            <p className="text-sm font-medium">Offline / No-phone request</p>
-            <p className="text-xs text-slate-400">
-              Requires admin approval (emails not sent until approved)
-            </p>
+              ))}
+            </div>
           </div>
-        </label>
+          <label className="block">
+            <span className="label">Description</span>
+            <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={placeholders[placeholderIndex]} className="input resize-none text-sm" required />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="label"><CalendarDays size={14} /> Date</span>
+              <input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} className="input" required />
+            </label>
+            <label className="block">
+              <span className="label"><Clock size={14} /> Time</span>
+              <input type="time" value={expectedTime} onChange={(e) => setExpectedTime(e.target.value)} className="input" required />
+            </label>
+          </div>
+          <div>
+            <span className="label">
+              Arriving by <InfoTip text="Pre-fills the gate. Officers can change it on arrival." size={12} />
+            </span>
+            <div className="segmented w-full">
+              {MODES.map((m) => (
+                <button key={m.v} type="button" data-active={mode === m.v} onClick={() => setMode(m.v)} className="!flex flex-1 items-center justify-center gap-1.5 !px-1">
+                  {m.icon} {m.l}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
 
-        {error && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
-        )}
+        <section className="surface animate-in space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="section-title !mb-0 flex-1">Guests</p>
+            <div className="ml-3 flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              <button type="button" onClick={() => setGuestCount(Math.max(1, guestCount - 1))} className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-brand-50 hover:text-brand-700" aria-label="Fewer guests">
+                <Minus size={14} />
+              </button>
+              <input type="number" min={1} max={20} value={guestCount} onChange={(e) => setGuestCount(parseInt(e.target.value) || 1)} className="w-8 bg-transparent text-center text-sm font-bold outline-none" aria-label="Number of guests" />
+              <button type="button" onClick={() => setGuestCount(Math.min(20, guestCount + 1))} className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-brand-50 hover:text-brand-700" aria-label="More guests">
+                <Plus size={14} />
+              </button>
+            </div>
+          </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-xl bg-brand-600 py-3.5 font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-        >
-          {loading ? 'Creating…' : 'Create Invite Link'}
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => setBulkOpen((o) => !o)} className="flex items-center gap-1 text-sm font-medium text-slate-700 transition hover:text-brand-700">
+              <ChevronRight size={16} className={`transition-transform duration-300 ${bulkOpen ? 'rotate-90' : ''}`} />
+              Bulk paste
+              <InfoTip text="One guest per line: Name, Email, Phone, Address. Leave the box to auto-fill the guest cards." size={12} />
+            </button>
+            <Tooltip content="Download a sample guest list">
+              <button type="button" onClick={downloadSampleTxt} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-600 transition hover:bg-brand-50">
+                <Download size={14} /> Sample
+              </button>
+            </Tooltip>
+          </div>
+          <Collapse open={bulkOpen}>
+            <textarea rows={4} value={bulkText} onChange={(e) => setBulkText(e.target.value)} onBlur={applyBulk} placeholder={'Name, Email, Phone number, Address\nName, Email, Phone number, Address'} className="input text-sm" />
+          </Collapse>
+
+          <div className="space-y-2">
+            {guests.map((g, i) => {
+              const open = openGuests[i] !== false;
+              const summary = g.fullName || g.email ? [g.fullName, g.email].filter(Boolean).join(' · ') : `Guest ${i + 1}`;
+              return (
+                <div key={i} className={`card transition ${open ? '!border-brand-200 shadow-lift' : ''}`}>
+                  <button type="button" onClick={() => toggleGuest(i)} className="group flex w-full items-center gap-2.5 px-3.5 py-3 text-left">
+                    {g.fullName ? <Avatar name={g.fullName} size={30} /> : (
+                      <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-700 text-xs font-bold text-white">{i + 1}</span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{summary}</span>
+                    {g.email && <Mail size={14} className="text-emerald-500" />}
+                    <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 group-hover:text-brand-500 ${open ? 'rotate-180' : ''}`} />
+                  </button>
+                  <Collapse open={open}>
+                    <div className="grid grid-cols-1 gap-2 border-t border-slate-100 bg-gradient-to-b from-brand-50/40 to-white px-3.5 pb-3.5 pt-3">
+                      <input value={g.fullName} onChange={(e) => updateGuest(i, 'fullName', e.target.value)} placeholder="Full name" className="input !py-2.5 text-sm" />
+                      <input type="email" value={g.email} onChange={(e) => updateGuest(i, 'email', e.target.value)} placeholder="Email — invite link is sent here" className="input !py-2.5 text-sm" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={g.phone} onChange={(e) => updateGuest(i, 'phone', e.target.value)} placeholder="Phone" className="input !py-2.5 text-sm" />
+                        <input value={g.address} onChange={(e) => updateGuest(i, 'address', e.target.value)} placeholder="Address" className="input !py-2.5 text-sm" />
+                      </div>
+                    </div>
+                  </Collapse>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <button type="button" role="switch" aria-checked={isOffline} onClick={() => setIsOffline(!isOffline)} className="card card-art flex w-full items-center gap-3 p-4 text-left">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-50 to-amber-100 text-amber-600">
+            <PhoneOff size={18} />
+          </span>
+          <span className="flex-1">
+            <span className="flex items-center gap-1 text-sm font-semibold text-slate-800">
+              Walk-in / no-phone request
+              <InfoTip text="Requires admin approval. No emails are sent until it is approved." size={12} />
+            </span>
+            <span className="block text-xs text-slate-500">{isOffline ? 'Will wait for admin approval' : 'For guests without a phone'}</span>
+          </span>
+          <span className={`relative h-7 w-12 shrink-0 rounded-full transition ${isOffline ? 'bg-gradient-to-r from-amber-400 to-amber-600' : 'bg-slate-200'}`}>
+            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${isOffline ? 'left-6' : 'left-1'}`} />
+          </span>
+        </button>
+
+        {error && <Notice tone="error">{error}</Notice>}
+
+        <button type="submit" disabled={loading} className="btn-primary w-full !py-3.5 text-base">
+          {loading ? 'Creating…' : <><Sparkles size={17} /> Create invite</>}
         </button>
       </form>
     </div>

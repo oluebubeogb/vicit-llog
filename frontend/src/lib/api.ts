@@ -121,16 +121,25 @@ export const api = {
   createUser: (data: any) =>
     request('/users', { method: 'POST', body: JSON.stringify(data) }),
   audit: () => request('/audit'),
-  analytics: (days = 30) => request(`/analytics/dashboard?days=${days}`),
+  analytics: (days = 30, from?: string, to?: string) => {
+    const q = new URLSearchParams({ days: String(days) });
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    return request(`/analytics/dashboard?${q.toString()}`);
+  },
   analyticsVisitors: (params: {
     days?: number;
     metric?: string;
     purpose?: string;
     entryMode?: string;
     status?: string;
+    from?: string;
+    to?: string;
   }) => {
     const q = new URLSearchParams();
     if (params.days) q.set('days', String(params.days));
+    if (params.from) q.set('from', params.from);
+    if (params.to) q.set('to', params.to);
     if (params.metric) q.set('metric', params.metric);
     if (params.purpose) q.set('purpose', params.purpose);
     if (params.entryMode) q.set('entryMode', params.entryMode);
@@ -169,6 +178,7 @@ export const api = {
   visitorHistory: (q: string) =>
     request(`/reports/history?q=${encodeURIComponent(q)}`),
   branding: () => request('/branding'),
+  publicBranding: () => request('/branding/public'),
   updateBranding: (data: any) =>
     request('/branding', { method: 'PATCH', body: JSON.stringify(data) }),
   health: () => request('/health'),

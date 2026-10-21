@@ -19,7 +19,7 @@ export class InvitesController {
   @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
   @ApiOperation({ summary: 'Create visitor invite' })
   create(@Body() dto: CreateInviteDto, @CurrentUser() user: any) {
-    return this.invitesService.create(dto, user.id, user.orgId);
+    return this.invitesService.create(dto, user.id, user.orgId, user.role);
   }
 
   @Get('mine')
@@ -59,7 +59,7 @@ export class InvitesController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: approve offline visitor request' })
+  @ApiOperation({ summary: 'Admin: approve an offline request or an invite awaiting approval' })
   approveOffline(@Param('id') id: string, @CurrentUser() user: any) {
     return this.invitesService.approveOffline(id, user.id, user.orgId);
   }

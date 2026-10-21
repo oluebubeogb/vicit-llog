@@ -72,6 +72,8 @@ services:
       # Runtime fallbacks (NEXT_PUBLIC_* are mainly build-time)
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Vicit Llog}
+      # Server-side URL the Next server uses to read branding for the dynamic PWA manifest
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://backend:4000}
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
     expose:

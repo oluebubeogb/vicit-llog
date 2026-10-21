@@ -14,7 +14,7 @@ export class NotificationsController {
   @Get()
   @ApiOperation({ summary: 'List my notifications' })
   list(@CurrentUser() user: any) {
-    return this.notificationsService.findForUser(user.id);
+    return this.notificationsService.findForUser(user.id, user.orgId);
   }
 
   @Patch('read-all')

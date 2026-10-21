@@ -13,6 +13,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
 import { buildGateQrPayload, renderQrDataUrl } from '../../common/utils/qr';
 import { isValidEmail } from '../../common/utils/email';
+import { publicFrontendBase } from '../../common/utils/urls';
 
 @Injectable()
 export class InvitesService {
@@ -31,8 +32,55 @@ export class InvitesService {
     return `${w1}-${w2}-${num}`;
   }
 
-  async create(dto: CreateInviteDto, hostId: string, orgId: string) {
+  /** Public visitor-facing base URL: branding custom domain wins over FRONTEND_URL. */
+  private async frontendBase(orgId: string) {
+    const org = await this.prisma.organisation.findUnique({
+      where: { id: orgId },
+      select: { customDomain: true },
+    });
+    return publicFrontendBase(org?.customDomain);
+  }
+
+  private async sendGuestInviteEmails(inviteId: string) {
+    const invite = await this.prisma.invite.findUnique({
+      where: { id: inviteId },
+      include: {
+        visitors: true,
+        host: { select: { fullName: true } },
+        organisation: { select: { name: true, customDomain: true } },
+      },
+    });
+    if (!invite) return [] as string[];
+    const ttl = Math.max(1, Math.round((invite.expiresAt.getTime() - Date.now()) / 60000));
+    const link = `${publicFrontendBase(invite.organisation?.customDomain)}/visitor/${invite.token}`;
+    const sent: string[] = [];
+    for (const v of invite.visitors) {
+      if (!v.email) continue;
+      const r = await this.mail.sendInviteEmail({
+        to: v.email,
+        guestName: v.fullName,
+        hostName: invite.host.fullName,
+        purpose: invite.purpose,
+        link,
+        passphrase: invite.passphrase,
+        ttlMinutes: ttl,
+        expectedAt: invite.expectedAt ? invite.expectedAt.toISOString() : null,
+        orgName: invite.organisation?.name,
+      });
+      if (r.ok) sent.push(v.email);
+    }
+    return sent;
+  }
+
+  async create(dto: CreateInviteDto, hostId: string, orgId: string, creatorRole?: string) {
     const ttl = parseInt(process.env.INVITE_LINK_TTL_MINUTES || '60', 10);
+    const orgSettings = await this.prisma.organisation.findUnique({
+      where: { id: orgId },
+      select: { requireApproval: true },
+    });
+    // Branding & Settings → "Require approval for invites": non-admin invites wait for an admin
+    const needsApproval =
+      !dto.isOffline && Boolean(orgSettings?.requireApproval) && creatorRole !== Role.ADMIN;
     const expiresAt = new Date(Date.now() + ttl * 60 * 1000);
     const token = uuidv4();
     const passphrase = this.generatePassphrase();
@@ -50,7 +98,11 @@ export class InvitesService {
         hostId,
         organisationId: orgId,
         isOffline: dto.isOffline || false,
-        status: dto.isOffline ? InviteStatus.OFFLINE_PENDING : InviteStatus.ACTIVE,
+        status: dto.isOffline
+          ? InviteStatus.OFFLINE_PENDING
+          : needsApproval
+            ? InviteStatus.AWAITING_APPROVAL
+            : InviteStatus.ACTIVE,
         ...(dto.expectedAt ? { expectedAt: new Date(dto.expectedAt) } : {}),
       },
       include: {
@@ -105,25 +157,26 @@ export class InvitesService {
       details: { purpose: dto.purpose, guestCount: guests.length },
     });
 
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const link = `${baseUrl}/visitor/${token}`;
+    const link = `${await this.frontendBase(orgId)}/visitor/${token}`;
 
-    // Email each guest that has an address (skip offline-pending until approved)
-    const emailsSent: string[] = [];
-    if (!dto.isOffline) {
-      for (const g of guests) {
-        if (!g.email) continue;
-        const r = await this.mail.sendInviteEmail({
-          to: g.email,
-          guestName: g.fullName,
-          hostName: invite.host.fullName,
-          purpose: dto.purpose,
-          link,
-          passphrase,
-          ttlMinutes: ttl,
-          expectedAt: dto.expectedAt || null,
+    // Email each guest that has an address (skip offline / awaiting approval until approved)
+    let emailsSent: string[] = [];
+    if (!dto.isOffline && !needsApproval) {
+      emailsSent = await this.sendGuestInviteEmails(invite.id);
+    }
+
+    if (needsApproval) {
+      const admins = await this.prisma.user.findMany({
+        where: { organisationId: orgId, role: Role.ADMIN, isActive: true },
+        select: { id: true },
+      });
+      for (const a of admins) {
+        await this.notifications.create({
+          userId: a.id,
+          title: 'Invite awaiting approval',
+          body: `${invite.host.fullName} created an invite for "${dto.purpose}" (${guests.length} guest${guests.length === 1 ? '' : 's'}).`,
+          meta: { type: 'INVITE_APPROVAL', inviteId: invite.id },
         });
-        if (r.ok) emailsSent.push(g.email);
       }
     }
 
@@ -134,6 +187,7 @@ export class InvitesService {
       link,
       expiresInMinutes: ttl,
       emailsSent,
+      awaitingApproval: needsApproval,
     };
   }
 
@@ -173,6 +227,9 @@ export class InvitesService {
 
     if (invite.status === InviteStatus.OFFLINE_PENDING) {
       throw new BadRequestException('This offline request is awaiting admin approval');
+    }
+    if (invite.status === InviteStatus.AWAITING_APPROVAL) {
+      throw new BadRequestException('This invite is awaiting approval by an administrator');
     }
 
     if (invite.status === InviteStatus.REVOKED) {
@@ -240,9 +297,16 @@ export class InvitesService {
 
   async approveOffline(inviteId: string, adminId: string, orgId: string) {
     const invite = await this.prisma.invite.findFirst({
-      where: { id: inviteId, organisationId: orgId, isOffline: true },
+      where: {
+        id: inviteId,
+        organisationId: orgId,
+        OR: [
+          { isOffline: true, status: InviteStatus.OFFLINE_PENDING },
+          { status: InviteStatus.AWAITING_APPROVAL },
+        ],
+      },
     });
-    if (!invite) throw new NotFoundException('Offline invite not found');
+    if (!invite) throw new NotFoundException('Pending invite not found');
 
     const ttl = parseInt(process.env.INVITE_LINK_TTL_MINUTES || '60', 10);
 
@@ -256,13 +320,23 @@ export class InvitesService {
     });
 
     await this.audit.log({
-      action: 'OFFLINE_INVITE_APPROVED',
+      action: invite.isOffline ? 'OFFLINE_INVITE_APPROVED' : 'INVITE_APPROVED',
       entity: 'Invite',
       entityId: inviteId,
       userId: adminId,
+      details: { purpose: invite.purpose },
     });
 
-    return updated;
+    // Approved online invites now get their registration emails
+    const emailsSent = invite.isOffline ? [] : await this.sendGuestInviteEmails(inviteId);
+    await this.notifications.create({
+      userId: invite.hostId,
+      title: 'Invite approved',
+      body: `Your invite for "${invite.purpose}" was approved${emailsSent.length ? ' and guests were emailed' : ''}.`,
+      meta: { type: 'INVITE_APPROVED', inviteId },
+    });
+
+    return { ...updated, emailsSent };
   }
 
   async getPublicInviteInfo(token: string) {

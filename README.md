@@ -91,3 +91,22 @@ vicit-llog/
   links to the registration page and a hosted PNG (`GET /visitors/qr/:token/:visitorId.png`; set
   `API_PUBLIC_URL`).
 * Round-trip test (no DB needed): `cd backend && npm run test:qr`
+
+## Design system & branding
+
+- **Branding & Settings** (Admin → Branding) drive the whole product: organisation name and logo
+  (navigation, login, splash, visitor pages, emails, PWA manifest, document title), primary /
+  secondary colours (generated into a full 50–950 shade scale used by every page, chart and email,
+  plus the PWA theme colour), email logo background, custom domain (invite and QR links), approval
+  requirement (staff invites wait in *Awaiting approval*) and photo retention.
+- The PWA manifest is served dynamically from `/manifest.webmanifest` using the saved branding
+  (`API_INTERNAL_URL` lets the Next.js server reach the API inside Docker).
+- iOS launch images are static PNGs. Regenerate them in your brand colours with:
+
+  ```bash
+  cd frontend && node scripts/generate-pwa-assets.mjs "#2563eb" "#1e40af"
+  ```
+
+- UI building blocks live in `frontend/src/components/ui` (Tooltip/InfoTip, Sheet, StatusPill,
+  Avatar, Sparkline, Collapse, PageHeader, Bits). Explanatory copy is shown in tooltips; errors and
+  essential information are always shown inline. Animations respect `prefers-reduced-motion`.
