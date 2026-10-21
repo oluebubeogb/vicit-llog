@@ -41,17 +41,22 @@ export default function BottomNav() {
     setMounted(true);
     const u = getUser();
     setRole(u?.role ?? null);
-    if (u) {
+  }, []);
+
+  useEffect(() => {
+    const u = getUser();
+    if (!u) return;
+    const load = () =>
       api
         .unreadNotificationsCount()
         .then(setUnread)
         .catch(() => setUnread(0));
-      const t = setInterval(() => {
-        api.unreadNotificationsCount().then(setUnread).catch(() => {});
-      }, 60000);
-      return () => clearInterval(t);
-    }
-  }, []);
+    load();
+    // Clear badge when viewing alerts; also refresh on route change
+    if (pathname === '/notifications') setUnread(0);
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
+  }, [pathname]);
 
   if (!mounted) return null;
 

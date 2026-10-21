@@ -95,4 +95,67 @@ export class AnalyticsService {
       peakHours,
     };
   }
+
+  async listVisitors(
+    orgId: string,
+    days = 30,
+    filter?: {
+      status?: string;
+      purpose?: string;
+      entryMode?: string;
+      metric?: string;
+    },
+  ) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const where: any = {
+      invite: { organisationId: orgId },
+      createdAt: { gte: since },
+    };
+
+    const metric = filter?.metric;
+    if (metric === 'arrived') {
+      where.status = { in: ['ARRIVED', 'EXITED'] };
+      where.enteredAt = { gte: since };
+      delete where.createdAt;
+    } else if (metric === 'exited') {
+      where.status = 'EXITED';
+      where.exitedAt = { gte: since };
+      delete where.createdAt;
+    } else if (metric === 'activeNow') {
+      where.status = 'ARRIVED';
+      delete where.createdAt;
+    } else if (metric === 'denied') {
+      where.status = 'DENIED';
+      where.deniedAt = { gte: since };
+      delete where.createdAt;
+    } else if (filter?.status) {
+      where.status = filter.status;
+    }
+
+    if (filter?.purpose) {
+      where.invite = { ...where.invite, purpose: filter.purpose };
+    }
+    if (filter?.entryMode) {
+      where.entryMode = filter.entryMode;
+    }
+
+    return this.prisma.visitor.findMany({
+      where,
+      include: {
+        invite: {
+          select: {
+            purpose: true,
+            category: true,
+            expectedMode: true,
+            host: { select: { fullName: true, email: true } },
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+  }
+
 }

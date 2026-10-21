@@ -109,11 +109,28 @@ export const api = {
   notifications: () => request('/notifications'),
   markRead: (id: string) =>
     request(`/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllRead: () =>
+    request('/notifications/read-all', { method: 'PATCH' }),
   users: () => request('/users'),
   createUser: (data: any) =>
     request('/users', { method: 'POST', body: JSON.stringify(data) }),
   audit: () => request('/audit'),
   analytics: (days = 30) => request(`/analytics/dashboard?days=${days}`),
+  analyticsVisitors: (params: {
+    days?: number;
+    metric?: string;
+    purpose?: string;
+    entryMode?: string;
+    status?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.days) q.set('days', String(params.days));
+    if (params.metric) q.set('metric', params.metric);
+    if (params.purpose) q.set('purpose', params.purpose);
+    if (params.entryMode) q.set('entryMode', params.entryMode);
+    if (params.status) q.set('status', params.status);
+    return request(`/analytics/visitors?${q.toString()}`);
+  },
   blacklist: () => request('/blacklist'),
   addBlacklist: (data: any) =>
     request('/blacklist', { method: 'POST', body: JSON.stringify(data) }),

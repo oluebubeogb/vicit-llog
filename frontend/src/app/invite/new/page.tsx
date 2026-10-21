@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { ArrowLeft, Copy, Check, Download, User, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Copy, Check,
+  Share2, Download, User, ChevronDown, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { isValidEmail } from '@/lib/email';
 
@@ -188,6 +189,28 @@ export default function NewInvitePage() {
     }
   }
 
+  async function shareInvite() {
+    if (!result?.link) return;
+    const payload = {
+      title: 'Visitor invite',
+      text: `You are invited. Passphrase: ${result.passphrase || ''}`,
+      url: result.link,
+    };
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share(payload);
+      } else {
+        await navigator.clipboard.writeText(
+          `${result.link}\nPassphrase: ${result.passphrase || ''}`,
+        );
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch {
+      // user cancelled share
+    }
+  }
+
   function downloadSampleTxt() {
     const sample = [
       'Name, Email, Phone number, Address',
@@ -218,10 +241,30 @@ export default function NewInvitePage() {
           </p>
           <div className="flex items-center gap-2 rounded-xl bg-white p-3">
             <code className="flex-1 truncate text-xs text-slate-700">{result.link}</code>
-            <button onClick={copyLink} className="rounded-lg bg-brand-600 p-2 text-white">
+            <button
+              type="button"
+              onClick={copyLink}
+              title="Copy link"
+              className="rounded-lg bg-brand-600 p-2 text-white"
+            >
               {copied ? <Check size={16} /> : <Copy size={16} />}
             </button>
+            <button
+              type="button"
+              onClick={shareInvite}
+              title="Share"
+              className="rounded-lg border border-brand-200 bg-brand-50 p-2 text-brand-700"
+            >
+              <Share2 size={16} />
+            </button>
           </div>
+          <button
+            type="button"
+            onClick={shareInvite}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 font-semibold text-white"
+          >
+            <Share2 size={18} /> Share invite
+          </button>
           <div className="rounded-xl bg-white p-3">
             <p className="text-xs text-slate-500">Passphrase (gate backup)</p>
             <p className="font-mono text-lg font-bold tracking-wider">{result.passphrase}</p>

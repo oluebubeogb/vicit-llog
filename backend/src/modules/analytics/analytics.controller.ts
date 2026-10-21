@@ -20,4 +20,22 @@ export class AnalyticsController {
   dashboard(@CurrentUser() user: any, @Query('days') days?: string) {
     return this.analytics.dashboard(user.orgId, days ? parseInt(days, 10) : 30);
   }
+
+  @Get('visitors')
+  @ApiOperation({ summary: 'Drill-down: visitors matching a metric/filter' })
+  visitors(
+    @CurrentUser() user: any,
+    @Query('days') days?: string,
+    @Query('metric') metric?: string,
+    @Query('purpose') purpose?: string,
+    @Query('entryMode') entryMode?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.analytics.listVisitors(user.orgId, days ? parseInt(days, 10) : 30, {
+      metric,
+      purpose,
+      entryMode,
+      status,
+    });
+  }
 }

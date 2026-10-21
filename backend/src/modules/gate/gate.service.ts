@@ -54,6 +54,7 @@ export class GateService {
     return {
       inviteId: invite.id,
       purpose: invite.purpose,
+      expectedMode: invite.expectedMode,
       host: invite.host,
       organisation: invite.organisation,
       visitors: invite.visitors.map((v) => ({

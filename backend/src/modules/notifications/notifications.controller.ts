@@ -17,15 +17,15 @@ export class NotificationsController {
     return this.notificationsService.findForUser(user.id);
   }
 
-  @Patch(':id/read')
-  @ApiOperation({ summary: 'Mark notification as read' })
-  markRead(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.notificationsService.markRead(id, user.id);
-  }
-
   @Patch('read-all')
   @ApiOperation({ summary: 'Mark all notifications as read' })
   markAll(@CurrentUser() user: any) {
     return this.notificationsService.markAllRead(user.id);
+  }
+
+  @Patch(':id/read')
+  @ApiOperation({ summary: 'Mark notification as read' })
+  markRead(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.notificationsService.markRead(id, user.id);
   }
 }

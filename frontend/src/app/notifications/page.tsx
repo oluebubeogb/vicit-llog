@@ -1,25 +1,43 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
-import { Bell } from 'lucide-react';
+import { ArrowLeft, Bell } from 'lucide-react';
 
 export default function NotificationsPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .notifications()
-      .then(setItems)
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const list = await api.notifications();
+        setItems(list);
+        // Clear unread badge when alerts are opened
+        const unread = (list || []).filter((n: any) => !n.isRead);
+        if (unread.length) {
+          await api.markAllRead().catch(() => {});
+          setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+        }
+      } catch {
+        setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   return (
     <div className="px-4 pt-6 pb-8">
-      <h1 className="mb-6 flex items-center gap-2 text-xl font-bold">
-        <Bell size={22} /> Notifications
-      </h1>
+      <div className="mb-6 flex items-center gap-3">
+        <Link href="/dashboard" className="rounded-full p-2 hover:bg-slate-100">
+          <ArrowLeft size={20} />
+        </Link>
+        <h1 className="flex items-center gap-2 text-xl font-bold">
+          <Bell size={22} /> Notifications
+        </h1>
+      </div>
 
       {loading ? (
         <p className="text-slate-400">Loading…</p>

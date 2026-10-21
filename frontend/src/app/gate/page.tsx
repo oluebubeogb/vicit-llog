@@ -10,6 +10,7 @@ import {
   Search,
   Camera,
   X,
+  Ban,
 } from 'lucide-react';
 
 export default function GatePage() {
@@ -48,6 +49,7 @@ export default function GatePage() {
         try {
           const data = await api.gateLookup(q.trim());
           setResult(data);
+          if (data?.expectedMode) setEntryMode(data.expectedMode);
         } catch (err: any) {
           setError(err.message || 'Not found');
         }
@@ -64,6 +66,7 @@ export default function GatePage() {
     try {
       const data = await api.gateLookup(value);
       setResult(data);
+      if (data?.expectedMode) setEntryMode(data.expectedMode);
     } catch (err: any) {
       setError(err.message || 'Not found');
     } finally {
@@ -238,17 +241,25 @@ export default function GatePage() {
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">
-              Entry mode
+              Actual entry mode
+              {result.expectedMode && (
+                <span className="ml-2 font-normal text-slate-400">
+                  (invite expected: {result.expectedMode.toLowerCase()})
+                </span>
+              )}
             </label>
             <select
               value={entryMode}
               onChange={(e) => setEntryMode(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-brand-500"
+              className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 outline-none focus:border-brand-500"
             >
               <option value="PEDESTRIAN">Pedestrian</option>
               <option value="MOTORCYCLE">Motorcycle</option>
               <option value="VEHICLE">Vehicle</option>
             </select>
+            <p className="mt-1 text-xs text-slate-400">
+              Pre-filled from the invite; change if the visitor arrives differently.
+            </p>
           </div>
 
           {result.visitors?.map((v: any) => (
@@ -298,31 +309,51 @@ export default function GatePage() {
                 )}
               </div>
 
-              <div className="mt-4 flex gap-2">
+              <div className="mt-4 space-y-2">
+                {v.status === 'INVITED' && !v.photoPath && (
+                  <p className="text-center text-sm text-amber-600">
+                    Photo not captured yet
+                  </p>
+                )}
                 {v.status === 'INVITED' && (
                   <div className="flex w-full flex-col gap-2">
-                    <div className="flex gap-2">
+                    <div className="flex items-center justify-end gap-2">
                       <button
+                        type="button"
                         onClick={() => doEntry(v.id)}
                         disabled={!!actionLoading || !v.photoPath}
-                        className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-50"
+                        title="Permit entry"
+                        aria-label="Permit entry"
+                        className="group relative flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-40"
                       >
-                        <LogIn size={18} />
-                        {actionLoading === v.id + '-in' ? '…' : 'ENTRY'}
+                        {actionLoading === v.id + '-in' ? (
+                          <span className="text-sm">…</span>
+                        ) : (
+                          <LogIn size={22} />
+                        )}
+                        <span className="pointer-events-none absolute -top-8 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow transition group-hover:opacity-100">
+                          Permit entry
+                        </span>
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
-                          setDenyFor(v.id);
+                          setDenyFor(denyFor === v.id ? null : v.id);
                           setDenyReason('');
                         }}
                         disabled={!!actionLoading}
-                        className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-3 font-semibold text-red-700 disabled:opacity-50"
+                        title="Decline entry"
+                        aria-label="Decline entry"
+                        className="group relative flex h-12 w-12 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-700 shadow-sm transition hover:bg-red-100 disabled:opacity-40"
                       >
-                        Decline
+                        <Ban size={22} />
+                        <span className="pointer-events-none absolute -top-8 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow transition group-hover:opacity-100">
+                          Decline
+                        </span>
                       </button>
                     </div>
                     {denyFor === v.id && (
-                      <div className="rounded-xl border border-red-100 bg-red-50/50 p-3">
+                      <div className="w-full rounded-xl border border-red-100 bg-red-50/50 p-3">
                         <label className="mb-1 block text-xs font-medium text-red-800">
                           Comment * (required)
                         </label>
@@ -363,7 +394,8 @@ export default function GatePage() {
                   <button
                     onClick={() => doExit(v.id)}
                     disabled={!!actionLoading}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-600 py-3 font-semibold text-white disabled:opacity-50"
+                    title="Record exit"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-600 py-3 font-semibold text-white disabled:opacity-50"
                   >
                     <LogOut size={18} />
                     {actionLoading === v.id + '-out' ? '…' : 'EXIT'}
@@ -371,11 +403,6 @@ export default function GatePage() {
                 )}
                 {v.status === 'EXITED' && (
                   <p className="w-full text-center text-sm text-slate-400">Already exited</p>
-                )}
-                {v.status === 'INVITED' && !v.photoPath && (
-                  <p className="w-full text-center text-sm text-amber-600">
-                    Photo not captured yet
-                  </p>
                 )}
               </div>
             </div>
