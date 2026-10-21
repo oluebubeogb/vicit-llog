@@ -36,3 +36,14 @@ body {
 .row-hover {
   @apply cursor-pointer transition duration-150 hover:bg-slate-50 active:bg-slate-100;
 }
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

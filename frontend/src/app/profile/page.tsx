@@ -7,6 +7,7 @@ import { api, getUser, setUser, clearToken } from '@/lib/api';
 import { isValidEmail } from '@/lib/email';
 import { detectHumanInVideo } from '@/lib/detectHuman';
 import { LogOut, User, ArrowLeft, Camera, X, Loader2 } from 'lucide-react';
+import InstallBanner from '@/components/InstallBanner';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -288,6 +289,13 @@ export default function ProfilePage() {
           {saving ? 'Submitting…' : 'Submit for approval'}
         </button>
       </form>
+
+      {/* Install banner for staff / admin / gate officers */}
+      {(user?.role === 'ADMIN' || user?.role === 'STAFF' || user?.role === 'GATE') && (
+        <div className="mb-4">
+          <InstallBanner variant="profile" />
+        </div>
+      )}
 
       <button
         onClick={logout}

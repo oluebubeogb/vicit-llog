@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, setToken, setUser } from '@/lib/api';
+import InstallBanner from '@/components/InstallBanner';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,6 +35,11 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-brand-800 to-brand-900 px-6 text-white">
+      {/* Full-width install banner */}
+      <div className="mb-6 w-full max-w-sm">
+        <InstallBanner variant="login" />
+      </div>
+
       <div className="mb-8 flex flex-col items-center">
         {/* App icon (same as taskbar / PWA) on a light background so blue logos stay visible */}
         <div className="mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-lg shadow-black/20">
