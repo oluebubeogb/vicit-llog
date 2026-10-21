@@ -314,7 +314,7 @@ export class UsersService {
     note?: string,
   ) {
     if (!ids?.length) throw new BadRequestException('No items selected');
-    const results = [];
+    const results: any[] = [];
     for (const id of ids) {
       try {
         results.push(await this.reviewProfileEdit(id, orgId, adminId, approve, note));
