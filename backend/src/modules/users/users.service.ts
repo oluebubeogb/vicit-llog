@@ -305,7 +305,30 @@ export class UsersService {
   }
 
 
-  async getPublicProfile(userId: string) {
+
+  async bulkReviewProfileEdits(
+    orgId: string,
+    adminId: string,
+    ids: string[],
+    approve: boolean,
+    note?: string,
+  ) {
+    if (!ids?.length) throw new BadRequestException('No items selected');
+    const results = [];
+    for (const id of ids) {
+      try {
+        results.push(await this.reviewProfileEdit(id, orgId, adminId, approve, note));
+      } catch (e: any) {
+        results.push({ id, error: e?.message || 'failed' });
+      }
+    }
+    return { processed: results.length, results };
+  }
+
+  async getPublicProfile(
+    userId: string,
+    viewer?: { id: string; role: string; orgId: string },
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, isActive: true },
       select: {
@@ -314,10 +337,17 @@ export class UsersService {
         phone: true,
         portfolio: true,
         avatarPath: true,
+        role: true,
+        organisationId: true,
         organisation: { select: { name: true } },
       },
     });
     if (!user) throw new NotFoundException('Profile not found');
+
+    // Scope to same organisation when viewer is known
+    if (viewer?.orgId && user.organisationId !== viewer.orgId) {
+      throw new NotFoundException('Profile not found');
+    }
 
     const guests = await this.prisma.visitor.findMany({
       where: { invite: { hostId: userId } },
@@ -328,6 +358,9 @@ export class UsersService {
         photoPath: true,
         enteredAt: true,
         exitedAt: true,
+        deniedAt: true,
+        deniedReason: true,
+        entryMode: true,
         createdAt: true,
         invite: { select: { purpose: true, category: true } },
       },
@@ -335,15 +368,92 @@ export class UsersService {
       take: 50,
     });
 
-    return {
+    const result: any = {
       id: user.id,
       fullName: user.fullName,
       phone: user.phone,
       portfolio: user.portfolio,
       avatarPath: user.avatarPath,
       organisationName: user.organisation?.name,
+      // isGate subject (for UI tabs) — not the viewer's role
+      subjectIsGate: user.role === Role.GATE,
       guests,
     };
+
+    // Admin-only: gate officer activity (entries / declines / exits they recorded)
+    if (viewer?.role === 'ADMIN' && user.role === Role.GATE) {
+      const [entries, declines, exits] = await Promise.all([
+        this.prisma.visitor.findMany({
+          where: {
+            entryById: userId,
+            status: { in: ['ARRIVED', 'EXITED'] },
+            enteredAt: { not: null },
+          },
+          select: {
+            id: true,
+            fullName: true,
+            status: true,
+            photoPath: true,
+            entryMode: true,
+            enteredAt: true,
+            exitedAt: true,
+            invite: {
+              select: {
+                purpose: true,
+                category: true,
+                host: { select: { fullName: true } },
+              },
+            },
+          },
+          orderBy: { enteredAt: 'desc' },
+          take: 100,
+        }),
+        this.prisma.visitor.findMany({
+          where: { entryById: userId, status: 'DENIED' },
+          select: {
+            id: true,
+            fullName: true,
+            status: true,
+            photoPath: true,
+            deniedAt: true,
+            deniedReason: true,
+            invite: {
+              select: {
+                purpose: true,
+                category: true,
+                host: { select: { fullName: true } },
+              },
+            },
+          },
+          orderBy: { deniedAt: 'desc' },
+          take: 100,
+        }),
+        this.prisma.visitor.findMany({
+          where: { exitById: userId, status: 'EXITED' },
+          select: {
+            id: true,
+            fullName: true,
+            status: true,
+            photoPath: true,
+            entryMode: true,
+            enteredAt: true,
+            exitedAt: true,
+            invite: {
+              select: {
+                purpose: true,
+                category: true,
+                host: { select: { fullName: true } },
+              },
+            },
+          },
+          orderBy: { exitedAt: 'desc' },
+          take: 100,
+        }),
+      ]);
+      result.gateActivity = { entries, declines, exits };
+    }
+
+    return result;
   }
 
   async uploadAvatar(userId: string, file: Express.Multer.File) {

@@ -187,6 +187,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ approve, note }),
     }),
+  bulkReviewProfileEdits: (ids: string[], approve: boolean, note?: string) =>
+    request('/users/profile-edits/bulk-review', {
+      method: 'POST',
+      body: JSON.stringify({ ids, approve, note }),
+    }),
   unreadNotificationsCount: async () => {
     const list = await request('/notifications');
     return Array.isArray(list) ? list.filter((n: any) => !n.isRead).length : 0;

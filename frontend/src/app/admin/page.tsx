@@ -45,6 +45,8 @@ export default function AdminPage() {
     'enteredAt', 'exitedAt', 'entryOfficer', 'exitOfficer', 'createdAt',
   ]);
   const [profileEdits, setProfileEdits] = useState<any[]>([]);
+  const [selectedEdits, setSelectedEdits] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [detailInvite, setDetailInvite] = useState<any | null>(null);
   const [detailAudit, setDetailAudit] = useState<any | null>(null);
   const [overlayMsg, setOverlayMsg] = useState('');
@@ -318,67 +320,175 @@ export default function AdminPage() {
               Choose columns, then download a report with natural dates and gate officers.
             </p>
           </button>
-          <div className="rounded-xl border bg-white p-4 card-hover">
-            <div className="mb-2 flex items-center gap-2">
+                    <div className="rounded-xl border bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center gap-2">
               <UserCog size={18} className="text-violet-600" />
               <span className="font-semibold">Profile change requests</span>
               <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium">
                 {profileEdits.filter((e) => e.status === 'PENDING').length} pending
               </span>
             </div>
-            {profileEdits.filter((e) => e.status === 'PENDING').length === 0 ? (
-              <p className="text-xs text-slate-400">No pending profile edits</p>
-            ) : (
-              <ul className="mt-2 space-y-2">
-                {profileEdits
-                  .filter((e) => e.status === 'PENDING')
-                  .map((e) => (
-                    <li key={e.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm">
-                      <p className="text-xs text-slate-400">
-                        {new Date(e.createdAt).toLocaleString()}
-                      </p>
-                      <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <p className="font-semibold text-slate-500">Before</p>
-                          <pre className="whitespace-pre-wrap text-[11px]">
-                            {JSON.stringify(e.before, null, 0)}
-                          </pre>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-slate-500">After</p>
-                          <pre className="whitespace-pre-wrap text-[11px]">
-                            {JSON.stringify(e.after, null, 0)}
-                          </pre>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            await api.reviewProfileEdit(e.id, true);
-                            setProfileEdits(await api.listProfileEdits());
-                            setMsg('Profile change approved');
-                          }}
-                          className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white"
+            {(() => {
+              const pending = profileEdits.filter((e) => e.status === 'PENDING');
+              if (!pending.length) {
+                return <p className="text-xs text-slate-400">No pending profile edits</p>;
+              }
+              const allSelected =
+                pending.length > 0 && pending.every((e) => selectedEdits.includes(e.id));
+              function toggle(id: string) {
+                setSelectedEdits((prev) =>
+                  prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                );
+              }
+              function toggleAll() {
+                setSelectedEdits(allSelected ? [] : pending.map((e) => e.id));
+              }
+              async function bulk(approve: boolean) {
+                if (!selectedEdits.length) return;
+                setBulkBusy(true);
+                try {
+                  await api.bulkReviewProfileEdits(selectedEdits, approve);
+                  setProfileEdits(await api.listProfileEdits());
+                  setSelectedEdits([]);
+                  setMsg(
+                    approve
+                      ? `Approved ${selectedEdits.length} change(s)`
+                      : `Declined ${selectedEdits.length} change(s)`,
+                  );
+                } catch (err: any) {
+                  setMsg(err.message);
+                } finally {
+                  setBulkBusy(false);
+                }
+              }
+              function fieldRows(before: any, after: any) {
+                const keys = Array.from(
+                  new Set([...Object.keys(before || {}), ...Object.keys(after || {})]),
+                ).filter((k) => k !== 'avatarPath');
+                return keys
+                  .filter((k) => String(before?.[k] ?? '') !== String(after?.[k] ?? ''))
+                  .map((k) => ({
+                    key: k,
+                    from: before?.[k] ?? '—',
+                    to: after?.[k] ?? '—',
+                  }));
+              }
+              return (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                      />
+                      Select all
+                    </label>
+                    <span className="text-xs text-slate-400">
+                      {selectedEdits.length} selected
+                    </span>
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        type="button"
+                        disabled={!selectedEdits.length || bulkBusy}
+                        onClick={() => bulk(true)}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                      >
+                        Approve selected
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!selectedEdits.length || bulkBusy}
+                        onClick={() => bulk(false)}
+                        className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 disabled:opacity-40"
+                      >
+                        Decline selected
+                      </button>
+                    </div>
+                  </div>
+                  <ul className="space-y-2">
+                    {pending.map((e) => {
+                      const rows = fieldRows(e.before, e.after);
+                      const checked = selectedEdits.includes(e.id);
+                      return (
+                        <li
+                          key={e.id}
+                          className={`rounded-xl border p-3 text-sm transition ${
+                            checked
+                              ? 'border-brand-200 bg-brand-50/40'
+                              : 'border-slate-100 bg-slate-50'
+                          }`}
                         >
-                          <Check size={14} /> Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            await api.reviewProfileEdit(e.id, false);
-                            setProfileEdits(await api.listProfileEdits());
-                            setMsg('Profile change declined');
-                          }}
-                          className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 py-2 text-xs font-semibold text-red-600"
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            )}
+                          <div className="mb-2 flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggle(e.id)}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs text-slate-400">
+                                {new Date(e.createdAt).toLocaleString()}
+                              </p>
+                              {rows.length === 0 ? (
+                                <p className="mt-1 text-xs text-slate-500">No field changes listed</p>
+                              ) : (
+                                <div className="mt-1.5 space-y-1">
+                                  {rows.map((r) => (
+                                    <div
+                                      key={r.key}
+                                      className="flex flex-wrap items-baseline gap-x-2 text-xs"
+                                    >
+                                      <span className="font-medium capitalize text-slate-500">
+                                        {r.key}
+                                      </span>
+                                      <span className="text-slate-400 line-through">
+                                        {String(r.from)}
+                                      </span>
+                                      <span className="text-slate-300">→</span>
+                                      <span className="font-medium text-slate-800">
+                                        {String(r.to)}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="ml-7 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await api.reviewProfileEdit(e.id, true);
+                                setProfileEdits(await api.listProfileEdits());
+                                setSelectedEdits((s) => s.filter((x) => x !== e.id));
+                                setMsg('Profile change approved');
+                              }}
+                              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white"
+                            >
+                              <Check size={14} /> Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await api.reviewProfileEdit(e.id, false);
+                                setProfileEdits(await api.listProfileEdits());
+                                setSelectedEdits((s) => s.filter((x) => x !== e.id));
+                                setMsg('Profile change declined');
+                              }}
+                              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 py-2 text-xs font-semibold text-red-600"
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

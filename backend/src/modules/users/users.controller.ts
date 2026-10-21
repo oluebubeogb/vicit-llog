@@ -33,8 +33,12 @@ export class UsersController {
   @ApiBearerAuth()
   @UseGuards(AdminOrGateSilentGuard)
   @ApiOperation({ summary: 'Staff profile (admin/gate only; others get 404)' })
-  publicProfile(@Param('id') id: string) {
-    return this.usersService.getPublicProfile(id);
+  publicProfile(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.usersService.getPublicProfile(id, {
+      id: user.id,
+      role: user.role,
+      orgId: user.orgId,
+    });
   }
 
   @Get('avatar/:filename')
@@ -129,6 +133,24 @@ export class UsersController {
   @Roles(Role.ADMIN)
   listEdits(@CurrentUser() user: any) {
     return this.usersService.listProfileEdits(user.orgId);
+  }
+
+  @Post('profile-edits/bulk-review')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Bulk approve/decline profile edits' })
+  bulkReview(
+    @Body() body: { ids: string[]; approve: boolean; note?: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.usersService.bulkReviewProfileEdits(
+      user.orgId,
+      user.id,
+      body.ids || [],
+      !!body.approve,
+      body.note,
+    );
   }
 
   @Post('profile-edits/:id/review')
