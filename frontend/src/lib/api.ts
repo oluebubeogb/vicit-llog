@@ -101,6 +101,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ notes }),
     }),
+  denyEntry: (visitorId: string, reason: string) =>
+    request(`/gate/deny/${visitorId}`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
   notifications: () => request('/notifications'),
   markRead: (id: string) =>
     request(`/notifications/${id}/read`, { method: 'PATCH' }),
@@ -131,10 +136,11 @@ export const api = {
       body: JSON.stringify(data),
     }),
   gates: () => request('/locations/gates/all'),
-  exportCsv: (from?: string, to?: string) => {
+  exportCsv: (from?: string, to?: string, columns?: string[]) => {
     const q = new URLSearchParams();
     if (from) q.set('from', from);
     if (to) q.set('to', to);
+    if (columns?.length) q.set('columns', columns.join(','));
     return request(`/reports/visits.csv?${q.toString()}`);
   },
   visitorHistory: (q: string) =>
@@ -150,6 +156,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
+  requestProfileEdit: (data: any) =>
+    request('/users/me/profile-edit', { method: 'POST', body: JSON.stringify(data) }),
+  listProfileEdits: () => request('/users/profile-edits'),
+  reviewProfileEdit: (id: string, approve: boolean, note?: string) =>
+    request(`/users/profile-edits/${id}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ approve, note }),
+    }),
+  unreadNotificationsCount: async () => {
+    const list = await request('/notifications');
+    return Array.isArray(list) ? list.filter((n: any) => !n.isRead).length : 0;
+  },
   bulkUsers: (rows: any[]) =>
     request('/users/bulk', { method: 'POST', body: JSON.stringify({ rows }) }),
   resetUserPassword: (id: string) =>

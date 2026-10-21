@@ -45,6 +45,7 @@ export default function BrandingPage() {
       await api.updateBranding({
         name: form.name,
         primaryColor: form.primaryColor,
+        emailIconBg: form.emailIconBg,
         secondaryColor: form.secondaryColor,
         customDomain: form.customDomain,
         requireApproval: form.requireApproval,
@@ -199,7 +200,28 @@ export default function BrandingPage() {
           <span className="text-sm font-medium">Require approval for invites</span>
         </label>
 
-        <button type="submit" className="w-full rounded-xl bg-brand-600 py-3.5 font-semibold text-white">
+        
+        <div>
+          <label className="mb-1.5 block text-sm font-medium">Email icon background</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={form.emailIconBg || '#ffffff'}
+              onChange={(e) => setForm({ ...form, emailIconBg: e.target.value })}
+              className="h-10 w-14 cursor-pointer rounded border"
+            />
+            <input
+              value={form.emailIconBg || '#ffffff'}
+              onChange={(e) => setForm({ ...form, emailIconBg: e.target.value })}
+              className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono"
+              placeholder="#ffffff"
+            />
+          </div>
+          <p className="mt-1 text-xs text-slate-400">
+            Background behind your logo in emails (use white for transparent PNGs).
+          </p>
+        </div>
+<button type="submit" className="w-full rounded-xl bg-brand-600 py-3.5 font-semibold text-white">
           Save Settings
         </button>
       </form>

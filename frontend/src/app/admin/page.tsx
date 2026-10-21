@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { api } from '@/lib/api';
 import Link from 'next/link';
+import { isValidEmail } from '@/lib/email';
 import {
   ArrowLeft,
   UserPlus,
@@ -12,10 +13,11 @@ import {
   Palette,
   Download,
   Activity,
-  Trash2,
   Upload,
   KeyRound,
   X,
+  UserCog,
+  Check,
 } from 'lucide-react';
 
 export default function AdminPage() {
@@ -37,6 +39,15 @@ export default function AdminPage() {
   const [selected, setSelected] = useState<any | null>(null);
   const [bulkResult, setBulkResult] = useState<any | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [showExport, setShowExport] = useState(false);
+  const [exportCols, setExportCols] = useState<string[]>([
+    'fullName', 'status', 'purpose', 'category', 'host', 'entryMode',
+    'enteredAt', 'exitedAt', 'entryOfficer', 'exitOfficer', 'createdAt',
+  ]);
+  const [profileEdits, setProfileEdits] = useState<any[]>([]);
+  const [detailInvite, setDetailInvite] = useState<any | null>(null);
+  const [detailAudit, setDetailAudit] = useState<any | null>(null);
+  const [overlayMsg, setOverlayMsg] = useState('');
 
   function loadUsers() {
     api.users().then(setUsers).catch(() => {});
@@ -47,10 +58,15 @@ export default function AdminPage() {
     api.allInvites().then(setInvites).catch(() => {});
     api.audit().then(setAudit).catch(() => {});
     api.health().then(setHealth).catch(() => {});
+    api.listProfileEdits().then(setProfileEdits).catch(() => {});
   }, []);
 
   async function createUser(e: React.FormEvent) {
     e.preventDefault();
+    if (!isValidEmail(form.email)) {
+      setMsg('Please enter a valid email address that can receive mail.');
+      return;
+    }
     try {
       const res = await api.createUser(form);
       setMsg('User created');
@@ -70,7 +86,7 @@ export default function AdminPage() {
 
   async function exportCsv() {
     try {
-      const csv = await api.exportCsv();
+      const csv = await api.exportCsv(undefined, undefined, exportCols);
       const blob = new Blob([csv as string], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -78,16 +94,8 @@ export default function AdminPage() {
       a.download = `vicit-visits-${Date.now()}.csv`;
       a.click();
       URL.revokeObjectURL(url);
+      setShowExport(false);
       setMsg('CSV exported');
-    } catch (err: any) {
-      setMsg(err.message);
-    }
-  }
-
-  async function cleanup() {
-    try {
-      const res = await api.cleanupPhotos();
-      setMsg(`Cleanup: scanned ${res.scanned}, deleted ${res.deleted}`);
     } catch (err: any) {
       setMsg(err.message);
     }
@@ -149,10 +157,14 @@ export default function AdminPage() {
     try {
       const res = await api.resetUserPassword(id);
       if (res.initialPassword) setOncePassword(res.initialPassword);
-      setMsg(res.initialPassword ? `Password reset for ${res.email}` : `Password reset for ${res.email} — new temp password emailed.`);
+      const m = res.initialPassword
+        ? `Password reset for ${res.email}. Temporary password shown below — copy it now.`
+        : `Password reset for ${res.email}. A temporary password was emailed to the user.`;
+      setOverlayMsg(m);
+      setMsg(m);
       setSelected((s: any) => (s ? { ...s, mustChangePassword: true } : s));
     } catch (err: any) {
-      setMsg(err.message);
+      setOverlayMsg(err.message);
     }
   }
 
@@ -243,7 +255,7 @@ export default function AdminPage() {
       {tab === 'tools' && (
         <div className="space-y-3">
           {health && (
-            <div className="rounded-xl border bg-white p-4">
+            <div className="rounded-xl border bg-white p-4 card-hover">
               <div className="mb-2 flex items-center gap-2">
                 <Activity size={18} />
                 <span className="font-semibold">System Health</span>
@@ -262,12 +274,81 @@ export default function AdminPage() {
               </p>
             </div>
           )}
-          <button onClick={exportCsv} className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white py-3 font-medium shadow-sm">
-            <Download size={18} /> Export Visits CSV
+          <button
+            type="button"
+            onClick={() => setShowExport(true)}
+            className="w-full rounded-xl border bg-white p-4 text-left shadow-sm card-hover"
+          >
+            <div className="mb-1 flex items-center gap-2">
+              <Download size={18} className="text-brand-600" />
+              <span className="font-semibold">Export Visits CSV</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Choose columns, then download a report with natural dates and gate officers.
+            </p>
           </button>
-          <button onClick={cleanup} className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white py-3 font-medium shadow-sm">
-            <Trash2 size={18} /> Run Photo Cleanup
-          </button>
+          <div className="rounded-xl border bg-white p-4 card-hover">
+            <div className="mb-2 flex items-center gap-2">
+              <UserCog size={18} className="text-violet-600" />
+              <span className="font-semibold">Profile change requests</span>
+              <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium">
+                {profileEdits.filter((e) => e.status === 'PENDING').length} pending
+              </span>
+            </div>
+            {profileEdits.filter((e) => e.status === 'PENDING').length === 0 ? (
+              <p className="text-xs text-slate-400">No pending profile edits</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {profileEdits
+                  .filter((e) => e.status === 'PENDING')
+                  .map((e) => (
+                    <li key={e.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm">
+                      <p className="text-xs text-slate-400">
+                        {new Date(e.createdAt).toLocaleString()}
+                      </p>
+                      <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <p className="font-semibold text-slate-500">Before</p>
+                          <pre className="whitespace-pre-wrap text-[11px]">
+                            {JSON.stringify(e.before, null, 0)}
+                          </pre>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-500">After</p>
+                          <pre className="whitespace-pre-wrap text-[11px]">
+                            {JSON.stringify(e.after, null, 0)}
+                          </pre>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await api.reviewProfileEdit(e.id, true);
+                            setProfileEdits(await api.listProfileEdits());
+                            setMsg('Profile change approved');
+                          }}
+                          className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white"
+                        >
+                          <Check size={14} /> Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await api.reviewProfileEdit(e.id, false);
+                            setProfileEdits(await api.listProfileEdits());
+                            setMsg('Profile change declined');
+                          }}
+                          className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 py-2 text-xs font-semibold text-red-600"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
 
@@ -348,14 +429,27 @@ export default function AdminPage() {
       {tab === 'invites' && (
         <ul className="space-y-2">
           {invites.map((inv) => (
-            <li key={inv.id} className="rounded-xl border bg-white p-3">
+            <li
+              key={inv.id}
+              onClick={() => setDetailInvite(inv)}
+              className="rounded-xl border bg-white p-3 row-hover"
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium">{inv.purpose}</p>
-                  <p className="text-xs text-slate-500">{inv.host?.fullName} · {inv.status}</p>
+                  <p className="text-xs text-slate-500">
+                    {inv.host?.fullName} · {inv.status}
+                    {inv.category ? ` · ${inv.category}` : ''}
+                  </p>
                 </div>
                 {inv.status === 'OFFLINE_PENDING' && (
-                  <button onClick={() => approve(inv.id)} className="rounded-lg bg-emerald-600 px-3 py-1 text-xs text-white">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      approve(inv.id);
+                    }}
+                    className="rounded-lg bg-emerald-600 px-3 py-1 text-xs text-white"
+                  >
                     Approve
                   </button>
                 )}
@@ -368,7 +462,11 @@ export default function AdminPage() {
       {tab === 'audit' && (
         <ul className="space-y-2">
           {audit.map((a) => (
-            <li key={a.id} className="rounded-xl border bg-white p-3 text-sm">
+            <li
+              key={a.id}
+              onClick={() => setDetailAudit(a)}
+              className="rounded-xl border bg-white p-3 text-sm row-hover"
+            >
               <p className="font-medium">{a.action}</p>
               <p className="text-xs text-slate-500">
                 {a.user?.fullName || 'System'} · {new Date(a.createdAt).toLocaleString()}
@@ -380,11 +478,11 @@ export default function AdminPage() {
 
       {/* User detail sheet */}
       {selected && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">Staff details</h2>
-              <button onClick={() => setSelected(null)} className="rounded-full p-2 hover:bg-slate-100">
+              <button onClick={() => { setSelected(null); setOverlayMsg(''); setOncePassword(null); }} className="rounded-full p-2 hover:bg-slate-100">
                 <X size={20} />
               </button>
             </div>
@@ -423,6 +521,17 @@ export default function AdminPage() {
               <button type="submit" className="w-full rounded-xl bg-brand-600 py-3 font-semibold text-white">
                 Save details
               </button>
+              {overlayMsg && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  {overlayMsg}
+                </div>
+              )}
+              {oncePassword && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs font-semibold text-amber-900">Temporary password (copy now)</p>
+                  <p className="mt-1 font-mono text-xl font-bold tracking-widest">{oncePassword}</p>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => resetPw(selected.id)}
@@ -434,6 +543,141 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Export columns modal */}
+      {showExport && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold">Export Visits CSV</h2>
+              <button onClick={() => setShowExport(false)} className="rounded-full p-2 hover:bg-slate-100">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="mb-3 text-sm text-slate-500">Select columns to include</p>
+            <div className="space-y-2">
+              {[
+                ['fullName', 'Visitor name'],
+                ['email', 'Email'],
+                ['phone', 'Phone'],
+                ['status', 'Status'],
+                ['purpose', 'Purpose'],
+                ['category', 'Category'],
+                ['host', 'Host'],
+                ['entryMode', 'Entry mode'],
+                ['enteredAt', 'Entered'],
+                ['exitedAt', 'Exited'],
+                ['deniedAt', 'Declined at'],
+                ['deniedReason', 'Decline reason'],
+                ['entryOfficer', 'Entry gate officer'],
+                ['exitOfficer', 'Exit gate officer'],
+                ['createdAt', 'Registered'],
+              ].map(([id, label]) => (
+                <label key={id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={exportCols.includes(id)}
+                    onChange={(e) => {
+                      setExportCols((prev) =>
+                        e.target.checked ? [...prev, id] : prev.filter((c) => c !== id),
+                      );
+                    }}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={!exportCols.length}
+              className="mt-4 w-full rounded-xl bg-brand-600 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Download CSV
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Invite detail */}
+      {detailInvite && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold">Invite details</h2>
+              <button onClick={() => setDetailInvite(null)} className="rounded-full p-2 hover:bg-slate-100">
+                <X size={20} />
+              </button>
+            </div>
+            <dl className="space-y-2 text-sm">
+              <div><dt className="text-xs text-slate-400">Purpose</dt><dd className="font-medium">{detailInvite.purpose}</dd></div>
+              <div><dt className="text-xs text-slate-400">Category</dt><dd>{detailInvite.category || '—'}</dd></div>
+              <div><dt className="text-xs text-slate-400">Status</dt><dd>{detailInvite.status}</dd></div>
+              <div><dt className="text-xs text-slate-400">Host</dt><dd>{detailInvite.host?.fullName}</dd></div>
+              <div><dt className="text-xs text-slate-400">Passphrase</dt><dd className="font-mono">{detailInvite.passphrase}</dd></div>
+              <div><dt className="text-xs text-slate-400">Expires</dt><dd>{detailInvite.expiresAt ? new Date(detailInvite.expiresAt).toLocaleString() : '—'}</dd></div>
+              <div><dt className="text-xs text-slate-400">Created</dt><dd>{new Date(detailInvite.createdAt).toLocaleString()}</dd></div>
+            </dl>
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-semibold uppercase text-slate-400">Guests</p>
+              {(detailInvite.visitors || []).map((v: any) => (
+                <div key={v.id} className="rounded-lg border p-2 text-sm">
+                  <p className="font-medium">{v.fullName}</p>
+                  <p className="text-xs text-slate-500">{v.status}{v.email ? ` · ${v.email}` : ''}</p>
+                </div>
+              ))}
+            </div>
+            {(detailInvite.status === 'EXPIRED' ||
+              (detailInvite.expiresAt && new Date(detailInvite.expiresAt) < new Date())) &&
+              !(detailInvite.visitors || []).every((v: any) => v.photoPath) && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await api.reviveInvite(detailInvite.id);
+                  setInvites(await api.allInvites());
+                  setDetailInvite(null);
+                  setMsg('Invite link revived');
+                }}
+                className="mt-4 w-full rounded-xl bg-brand-600 py-3 font-semibold text-white"
+              >
+                Revive expired link
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Audit detail */}
+      {detailAudit && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold">Audit entry</h2>
+              <button onClick={() => setDetailAudit(null)} className="rounded-full p-2 hover:bg-slate-100">
+                <X size={20} />
+              </button>
+            </div>
+            <dl className="space-y-2 text-sm">
+              <div><dt className="text-xs text-slate-400">Action</dt><dd className="font-medium">{detailAudit.action}</dd></div>
+              <div><dt className="text-xs text-slate-400">Entity</dt><dd>{detailAudit.entity}{detailAudit.entityId ? ` · ${detailAudit.entityId}` : ''}</dd></div>
+              <div><dt className="text-xs text-slate-400">User</dt><dd>{detailAudit.user?.fullName || 'System'}</dd></div>
+              <div><dt className="text-xs text-slate-400">When</dt><dd>{new Date(detailAudit.createdAt).toLocaleString()}</dd></div>
+              {detailAudit.details && (
+                <div>
+                  <dt className="text-xs text-slate-400">Details</dt>
+                  <dd>
+                    <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-50 p-3 text-xs">
+                      {JSON.stringify(detailAudit.details, null, 2)}
+                    </pre>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -12,7 +12,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { EntryMode } from '@prisma/client';
+import { EntryMode, InviteCategory } from '@prisma/client';
 
 export class GuestInputDto {
   @ApiProperty()
@@ -39,6 +39,11 @@ export class CreateInviteDto {
   @ApiProperty({ example: 'Meeting with procurement team' })
   @IsString()
   purpose: string;
+
+  @ApiPropertyOptional({ enum: InviteCategory, default: InviteCategory.OFFICIAL })
+  @IsOptional()
+  @IsEnum(InviteCategory)
+  category?: InviteCategory;
 
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()

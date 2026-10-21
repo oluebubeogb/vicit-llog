@@ -1,0 +1,26 @@
+
+CREATE TYPE "InviteCategory" AS ENUM ('PERSONAL', 'OFFICIAL');
+CREATE TYPE "ProfileEditStatus" AS ENUM ('PENDING', 'APPROVED', 'DECLINED');
+
+ALTER TABLE "Organisation" ADD COLUMN IF NOT EXISTS "emailIconBg" TEXT DEFAULT '#ffffff';
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "avatarPath" TEXT;
+ALTER TABLE "Invite" ADD COLUMN IF NOT EXISTS "category" "InviteCategory" NOT NULL DEFAULT 'OFFICIAL';
+ALTER TABLE "Visitor" ADD COLUMN IF NOT EXISTS "deniedAt" TIMESTAMP(3);
+ALTER TABLE "Visitor" ADD COLUMN IF NOT EXISTS "deniedReason" TEXT;
+ALTER TABLE "Visitor" ADD COLUMN IF NOT EXISTS "entryById" TEXT;
+ALTER TABLE "Visitor" ADD COLUMN IF NOT EXISTS "exitById" TEXT;
+
+CREATE TABLE IF NOT EXISTS "ProfileEditRequest" (
+  "id" TEXT NOT NULL,
+  "userId" TEXT NOT NULL,
+  "organisationId" TEXT NOT NULL,
+  "status" "ProfileEditStatus" NOT NULL DEFAULT 'PENDING',
+  "before" JSONB NOT NULL,
+  "after" JSONB NOT NULL,
+  "reviewedById" TEXT,
+  "reviewedAt" TIMESTAMP(3),
+  "reviewNote" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "ProfileEditRequest_pkey" PRIMARY KEY ("id")
+);

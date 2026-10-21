@@ -64,6 +64,8 @@ export class GateService {
         entryMode: v.entryMode,
         enteredAt: v.enteredAt,
         exitedAt: v.exitedAt,
+        deniedAt: (v as any).deniedAt,
+        deniedReason: (v as any).deniedReason,
       })),
     };
   }
@@ -95,6 +97,7 @@ export class GateService {
         status: VisitStatus.ARRIVED,
         entryMode: dto.entryMode || EntryMode.PEDESTRIAN,
         enteredAt: new Date(),
+        entryById: gateUserId,
         gateNotes: dto.notes,
       },
     });
@@ -164,6 +167,7 @@ export class GateService {
       data: {
         status: VisitStatus.EXITED,
         exitedAt: new Date(),
+        exitById: gateUserId,
         gateNotes: notes ? `${visitor.gateNotes || ''}\nExit: ${notes}`.trim() : visitor.gateNotes,
       },
     });
@@ -217,6 +221,71 @@ export class GateService {
   }
 
   /** Recent invites/visits for gate dashboard */
+
+  async denyEntry(visitorId: string, gateUserId: string, reason: string) {
+    if (!reason?.trim()) {
+      throw new BadRequestException('A comment is required when declining entry');
+    }
+    const visitor = await this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: { invite: { include: { host: true } } },
+    });
+    if (!visitor) throw new NotFoundException('Visitor not found');
+    if (visitor.status === VisitStatus.ARRIVED) {
+      throw new BadRequestException('Visitor already on premises — use exit instead');
+    }
+    if (visitor.status === VisitStatus.EXITED) {
+      throw new BadRequestException('Visitor has already exited');
+    }
+    if (visitor.status === VisitStatus.DENIED) {
+      throw new BadRequestException('Entry already declined');
+    }
+
+    const updated = await this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: {
+        status: VisitStatus.DENIED,
+        deniedAt: new Date(),
+        deniedReason: reason.trim(),
+        entryById: gateUserId,
+        gateNotes: reason.trim(),
+      },
+    });
+
+    await this.audit.log({
+      action: 'ENTRY_DENIED',
+      entity: 'Visitor',
+      entityId: visitor.id,
+      userId: gateUserId,
+      details: { reason: reason.trim() },
+    });
+
+    await this.notifications.create({
+      userId: visitor.invite.hostId,
+      title: 'Visitor entry declined',
+      body: `${visitor.fullName} was declined at the gate: ${reason.trim()}`,
+      meta: { visitorId: visitor.id, inviteId: visitor.inviteId, type: 'ENTRY_DENIED' },
+      channels: ['in_app'],
+    });
+
+    const host = await this.prisma.user.findUnique({
+      where: { id: visitor.invite.hostId },
+      select: { email: true, fullName: true },
+    });
+    if (host?.email) {
+      await this.mail.sendHostVisitorUpdate({
+        to: host.email,
+        hostName: host.fullName,
+        guestName: visitor.fullName,
+        purpose: visitor.invite.purpose,
+        event: 'photo', // fallback label; body covers decline in notification
+        at: updated.deniedAt?.toISOString(),
+      }).catch(() => {});
+    }
+
+    return updated;
+  }
+
   async listVisits(orgId: string, filter?: string) {
     const invites = await this.prisma.invite.findMany({
       where: { organisationId: orgId },

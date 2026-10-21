@@ -11,7 +11,7 @@ import { Response } from 'express';
 @ApiTags('Reports')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.ADMIN, Role.STAFF)
 @Controller('reports')
 export class ReportsController {
   constructor(private reports: ReportsService) {}
@@ -22,11 +22,23 @@ export class ReportsController {
     @CurrentUser() user: any,
     @Query('from') from: string,
     @Query('to') to: string,
+    @Query('columns') columns: string,
     @Res() res: Response,
   ) {
-    const result = await this.reports.exportVisitsCsv(user.orgId, from, to);
+    const cols = columns
+      ? columns.split(',').map((c) => c.trim()).filter(Boolean)
+      : undefined;
+    const result = await this.reports.exportVisitsCsv(
+      user.orgId,
+      from,
+      to,
+      cols,
+    );
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.filename}"`,
+    );
     res.send(result.csv);
   }
 

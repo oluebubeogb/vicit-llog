@@ -24,6 +24,7 @@ export class BrandingService {
         logoUrl: true,
         primaryColor: true,
         secondaryColor: true,
+        emailIconBg: true,
         customDomain: true,
         requireApproval: true,
         defaultWorkflow: true,
@@ -41,6 +42,7 @@ export class BrandingService {
       logoUrl?: string;
       primaryColor?: string;
       secondaryColor?: string;
+      emailIconBg?: string;
       customDomain?: string;
       requireApproval?: boolean;
       photoRetentionDays?: number;
@@ -56,6 +58,7 @@ export class BrandingService {
         logoUrl: true,
         primaryColor: true,
         secondaryColor: true,
+        emailIconBg: true,
         customDomain: true,
         requireApproval: true,
         defaultWorkflow: true,

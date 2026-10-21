@@ -9,7 +9,7 @@ export class AnalyticsService {
     const since = new Date();
     since.setDate(since.getDate() - days);
 
-    const [totalVisits, arrived, exited, byPurpose, byMode, byDay, activeNow] =
+    const [totalVisits, arrived, exited, denied, byPurpose, byMode, byDay, activeNow] =
       await Promise.all([
         this.prisma.visitor.count({
           where: { invite: { organisationId: orgId }, createdAt: { gte: since } },
@@ -26,6 +26,13 @@ export class AnalyticsService {
             invite: { organisationId: orgId },
             status: 'EXITED',
             exitedAt: { gte: since },
+          },
+        }),
+        this.prisma.visitor.count({
+          where: {
+            invite: { organisationId: orgId },
+            status: 'DENIED',
+            deniedAt: { gte: since },
           },
         }),
         this.prisma.invite.groupBy({
@@ -80,6 +87,7 @@ export class AnalyticsService {
       totalVisits,
       arrived,
       exited,
+      denied,
       activeNow,
       byPurpose: byPurpose.map((p) => ({ purpose: p.purpose, count: p._count })),
       byMode: byMode.map((m) => ({ mode: m.entryMode, count: m._count })),

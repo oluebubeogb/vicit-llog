@@ -3,13 +3,12 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, getUser, clearToken } from '@/lib/api';
+import { api, getUser } from '@/lib/api';
 import {
   UserPlus,
   Users,
   Bell,
   Shield,
-  LogOut,
   Clock,
 } from 'lucide-react';
 
@@ -37,31 +36,19 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, [router]);
 
-  function logout() {
-    clearToken();
-    router.replace('/login');
-  }
-
   const active = invites.filter((i) => i.status === 'ACTIVE' || i.status === 'USED').length;
   const pending = invites.filter((i) => i.status === 'OFFLINE_PENDING').length;
 
   return (
     <div className="px-4 pt-6 pb-4">
-      <header className="mb-6 flex items-center justify-between">
-        <div>
-          <p className="text-sm text-slate-500">Welcome back</p>
-          <h1 className="text-xl font-bold text-slate-900">
+      <header className="mb-6">
+        <div className="rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white shadow-lg shadow-brand-200/40 card-hover">
+          <p className="text-sm text-brand-100">Welcome back</p>
+          <h1 className="mt-0.5 text-xl font-bold tracking-tight">
             {user?.fullName || '…'}
           </h1>
-          <p className="text-xs text-slate-400">{user?.organisation?.name}</p>
+          <p className="mt-1 text-xs text-brand-100/90">{user?.organisation?.name}</p>
         </div>
-        <button
-          onClick={logout}
-          className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-          title="Sign out"
-        >
-          <LogOut size={20} />
-        </button>
       </header>
 
       <div className="mb-6 grid grid-cols-2 gap-3">
@@ -80,7 +67,7 @@ export default function DashboardPage() {
       <div className="mb-6 grid grid-cols-2 gap-3">
         <Link
           href="/invite/new"
-          className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition active:scale-[0.98]"
+          className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition card-hover active:scale-[0.98]"
         >
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
             <UserPlus size={24} />
@@ -89,7 +76,7 @@ export default function DashboardPage() {
         </Link>
         <Link
           href="/visitors"
-          className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition active:scale-[0.98]"
+          className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition card-hover active:scale-[0.98]"
         >
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
             <Users size={24} />
@@ -98,7 +85,7 @@ export default function DashboardPage() {
         </Link>
         <Link
           href="/notifications"
-          className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition active:scale-[0.98]"
+          className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition card-hover active:scale-[0.98]"
         >
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
             <Bell size={24} />
@@ -108,7 +95,7 @@ export default function DashboardPage() {
         {user?.role === 'ADMIN' && (
           <Link
             href="/admin"
-            className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition active:scale-[0.98]"
+            className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition card-hover active:scale-[0.98]"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
               <Shield size={24} />

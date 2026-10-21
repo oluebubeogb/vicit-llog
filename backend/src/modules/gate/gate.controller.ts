@@ -43,4 +43,14 @@ export class GateController {
   ) {
     return this.gateService.recordExit(visitorId, user.id, notes);
   }
+
+  @Post('deny/:visitorId')
+  @ApiOperation({ summary: 'Decline visitor entry (requires comment)' })
+  deny(
+    @Param('visitorId') visitorId: string,
+    @Body('reason') reason: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.gateService.denyEntry(visitorId, user.id, reason);
+  }
 }

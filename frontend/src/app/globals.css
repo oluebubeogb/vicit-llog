@@ -27,3 +27,12 @@ body {
   padding-bottom: max(0.75rem, var(--safe-bottom));
   min-height: var(--nav-height);
 }
+
+
+/* Subtle interactive affordance */
+.card-hover {
+  @apply transition duration-150 hover:border-brand-200 hover:shadow-md;
+}
+.row-hover {
+  @apply transition duration-150 hover:bg-slate-50 active:bg-slate-100 cursor-pointer;
+}

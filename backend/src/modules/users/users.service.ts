@@ -10,6 +10,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { Role } from '@prisma/client';
 import { generateNigerianPassword } from '../../common/utils/password-words';
 import { MailService } from '../mail/mail.service';
+import { isValidEmail } from '../../common/utils/email';
 
 const userSelect = {
   id: true,
@@ -18,9 +19,11 @@ const userSelect = {
   role: true,
   portfolio: true,
   phone: true,
+  avatarPath: true,
   isActive: true,
   mustChangePassword: true,
   createdAt: true,
+  organisationId: true,
 } as const;
 
 function showTempInAdmin(): boolean {
@@ -35,6 +38,9 @@ export class UsersService {
   ) {}
 
   async create(dto: CreateUserDto, orgId: string) {
+    if (!isValidEmail(dto.email)) {
+      throw new BadRequestException('Please enter a valid email address that can receive mail.');
+    }
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
@@ -219,4 +225,80 @@ export class UsersService {
         : {}),
     };
   }
+
+  async requestProfileEdit(userId: string, orgId: string, after: Record<string, any>) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, organisationId: orgId } });
+    if (!user) throw new NotFoundException('User not found');
+    if (after.email && !isValidEmail(after.email)) {
+      throw new BadRequestException('Invalid email address');
+    }
+    const before = {
+      fullName: user.fullName,
+      phone: user.phone,
+      portfolio: user.portfolio,
+      email: user.email,
+      avatarPath: user.avatarPath,
+    };
+    const cleaned: any = {};
+    for (const k of ['fullName', 'phone', 'portfolio', 'email', 'avatarPath']) {
+      if (after[k] !== undefined && after[k] !== before[k as keyof typeof before]) {
+        cleaned[k] = after[k];
+      }
+    }
+    if (!Object.keys(cleaned).length) {
+      throw new BadRequestException('No changes detected');
+    }
+    return (this.prisma as any).profileEditRequest.create({
+      data: {
+        userId,
+        organisationId: orgId,
+        before,
+        after: { ...before, ...cleaned },
+        status: 'PENDING',
+      },
+    });
+  }
+
+  async listProfileEdits(orgId: string, status?: string) {
+    const where: any = { organisationId: orgId };
+    if (status) where.status = status;
+    return (this.prisma as any).profileEditRequest.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  async reviewProfileEdit(id: string, orgId: string, adminId: string, approve: boolean, note?: string) {
+    const req = await (this.prisma as any).profileEditRequest.findFirst({
+      where: { id, organisationId: orgId },
+    });
+    if (!req) throw new NotFoundException('Edit request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('Already reviewed');
+
+    if (approve) {
+      const after = req.after as any;
+      await this.prisma.user.update({
+        where: { id: req.userId },
+        data: {
+          fullName: after.fullName,
+          phone: after.phone || null,
+          portfolio: after.portfolio || null,
+          ...(after.email ? { email: String(after.email).toLowerCase() } : {}),
+          ...(after.avatarPath !== undefined ? { avatarPath: after.avatarPath } : {}),
+        },
+      });
+    }
+
+    return (this.prisma as any).profileEditRequest.update({
+      where: { id },
+      data: {
+        status: approve ? 'APPROVED' : 'DECLINED',
+        reviewedById: adminId,
+        reviewedAt: new Date(),
+        reviewNote: note || null,
+      },
+    });
+  }
+
 }

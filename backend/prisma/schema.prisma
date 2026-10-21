@@ -44,6 +44,17 @@ enum WorkflowType {
   SECURITY_THEN_HOST
 }
 
+enum InviteCategory {
+  PERSONAL
+  OFFICIAL
+}
+
+enum ProfileEditStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
 model Organisation {
   id              String          @id @default(uuid())
   name            String
@@ -52,6 +63,7 @@ model Organisation {
   logoUrl         String?
   primaryColor    String?         @default("#2563eb")
   secondaryColor  String?         @default("#1e40af")
+  emailIconBg     String?         @default("#ffffff")
   customDomain    String?
   // Settings
   requireApproval Boolean         @default(false)
@@ -101,6 +113,7 @@ model User {
   role           Role         @default(STAFF)
   portfolio      String?
   phone          String?
+  avatarPath     String?
   permissions    String[]     @default([])
   isActive       Boolean      @default(true)
   mustChangePassword Boolean   @default(true)
@@ -118,6 +131,7 @@ model Invite {
   passphrase     String
   status         InviteStatus @default(PENDING)
   purpose        String
+  category       InviteCategory @default(OFFICIAL)
   guestCount     Int          @default(1)
   guestNames     String[]
   expectedMode   EntryMode?
@@ -151,7 +165,11 @@ model Visitor {
   entryMode   EntryMode?
   enteredAt   DateTime?
   exitedAt    DateTime?
+  deniedAt    DateTime?
+  deniedReason String?
   gateId      String?
+  entryById   String?
+  exitById    String?
   gateNotes   String?
   idNumber    String?
   createdAt   DateTime    @default(now())
@@ -206,4 +224,18 @@ model Notification {
   channel   String   @default("in_app")
   meta      Json?
   createdAt DateTime @default(now())
+}
+
+model ProfileEditRequest {
+  id             String            @id @default(uuid())
+  userId         String
+  organisationId String
+  status         ProfileEditStatus @default(PENDING)
+  before         Json
+  after          Json
+  reviewedById   String?
+  reviewedAt     DateTime?
+  reviewNote     String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 }

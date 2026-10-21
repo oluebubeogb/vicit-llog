@@ -9,15 +9,25 @@ export class MailService {
   }
 
   private brand() {
+    const frontend = process.env.FRONTEND_URL || '';
+    const iconBg = process.env.EMAIL_ICON_BG || '#ffffff';
+    const logoPath = process.env.EMAIL_LOGO_URL || (frontend ? `${frontend.replace(/\/$/, '')}/icon-192.png` : '');
     return {
       name: process.env.NEXT_PUBLIC_APP_NAME || process.env.ORGANIZATION || 'Vicit Llog',
-      color: '#1e40af',
-      url: process.env.FRONTEND_URL || '',
+      color: process.env.EMAIL_BRAND_COLOR || '#1e40af',
+      url: frontend,
+      iconBg,
+      logoPath,
     };
   }
 
   private layout(title: string, bodyHtml: string) {
     const b = this.brand();
+    const logoBlock = b.logoPath
+      ? `<div style="margin:0 auto 12px;width:64px;height:64px;border-radius:16px;background:${b.iconBg};display:inline-block;line-height:64px;overflow:hidden;">
+            <img src="${b.logoPath}" alt="" width="64" height="64" style="display:block;width:64px;height:64px;object-fit:contain;" />
+         </div>`
+      : '';
     return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -28,6 +38,7 @@ export class MailService {
       <table width="100%" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
         <tr>
           <td style="background:${b.color};padding:28px 32px;text-align:center;">
+            ${logoBlock}
             <div style="font-size:22px;font-weight:700;color:#fff;letter-spacing:-0.02em;">${b.name}</div>
             <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">Visitor Access Control</div>
           </td>

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { ArrowLeft, Copy, Check, Download, User, ChevronDown, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
+import { isValidEmail } from '@/lib/email';
 
 type Guest = { fullName: string; email: string; phone: string; address: string };
 
@@ -83,6 +84,7 @@ function parseBulkText(text: string): Guest[] {
 export default function NewInvitePage() {
   const router = useRouter();
   const [purpose, setPurpose] = useState('');
+  const [category, setCategory] = useState<'PERSONAL' | 'OFFICIAL'>('OFFICIAL');
   const [expectedDate, setExpectedDate] = useState('');
   const [expectedTime, setExpectedTime] = useState('');
   const [guestCount, setGuestCount] = useState(1);
@@ -148,6 +150,13 @@ export default function NewInvitePage() {
           address: g.address.trim() || undefined,
         }))
         .filter((g) => g.fullName);
+      for (const g of clean) {
+        if (g.email && !isValidEmail(g.email)) {
+          setError(`Invalid email for ${g.fullName}: "${g.email}". Please correct it.`);
+          setLoading(false);
+          return;
+        }
+      }
       let expectedAt: string | undefined;
       if (expectedDate) {
         const time = expectedTime || '09:00';
@@ -159,6 +168,7 @@ export default function NewInvitePage() {
         guests: clean,
         guestNames: clean.map((g) => g.fullName),
         expectedMode: mode,
+        category,
         isOffline,
         expectedAt,
       });
@@ -254,6 +264,19 @@ export default function NewInvitePage() {
             className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
             required
           />
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-medium">Category *</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as 'PERSONAL' | 'OFFICIAL')}
+            className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 outline-none focus:border-brand-500"
+            required
+          >
+            <option value="OFFICIAL">Official</option>
+            <option value="PERSONAL">Personal</option>
+          </select>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -385,7 +408,7 @@ export default function NewInvitePage() {
           <select
             value={mode}
             onChange={(e) => setMode(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-500"
+            className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 outline-none focus:border-brand-500"
           >
             <option value="PEDESTRIAN">Pedestrian</option>
             <option value="MOTORCYCLE">Motorcycle</option>

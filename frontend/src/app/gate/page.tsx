@@ -23,6 +23,8 @@ export default function GatePage() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState('');
   const [previewPhoto, setPreviewPhoto] = useState<{ url: string; name: string } | null>(null);
+  const [denyFor, setDenyFor] = useState<string | null>(null);
+  const [denyReason, setDenyReason] = useState('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -85,6 +87,24 @@ export default function GatePage() {
     setActionLoading(visitorId + '-out');
     try {
       await api.recordExit(visitorId);
+      await lookup();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setActionLoading('');
+    }
+  }
+
+  async function doDeny(visitorId: string) {
+    if (!denyReason.trim()) {
+      setError('Please enter a comment explaining why entry is declined.');
+      return;
+    }
+    setActionLoading(visitorId + '-deny');
+    try {
+      await api.denyEntry(visitorId, denyReason.trim());
+      setDenyFor(null);
+      setDenyReason('');
       await lookup();
     } catch (err: any) {
       setError(err.message);
@@ -280,14 +300,64 @@ export default function GatePage() {
 
               <div className="mt-4 flex gap-2">
                 {v.status === 'INVITED' && (
-                  <button
-                    onClick={() => doEntry(v.id)}
-                    disabled={!!actionLoading || !v.photoPath}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-50"
-                  >
-                    <LogIn size={18} />
-                    {actionLoading === v.id + '-in' ? '…' : 'ENTRY'}
-                  </button>
+                  <div className="flex w-full flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => doEntry(v.id)}
+                        disabled={!!actionLoading || !v.photoPath}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-50"
+                      >
+                        <LogIn size={18} />
+                        {actionLoading === v.id + '-in' ? '…' : 'ENTRY'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDenyFor(v.id);
+                          setDenyReason('');
+                        }}
+                        disabled={!!actionLoading}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-3 font-semibold text-red-700 disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                    {denyFor === v.id && (
+                      <div className="rounded-xl border border-red-100 bg-red-50/50 p-3">
+                        <label className="mb-1 block text-xs font-medium text-red-800">
+                          Comment * (required)
+                        </label>
+                        <textarea
+                          value={denyReason}
+                          onChange={(e) => setDenyReason(e.target.value)}
+                          rows={2}
+                          placeholder="Reason for declining entry…"
+                          className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-red-400"
+                        />
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setDenyFor(null)}
+                            className="flex-1 rounded-lg border border-slate-200 py-2 text-sm font-medium text-slate-600"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => doDeny(v.id)}
+                            disabled={!!actionLoading || !denyReason.trim()}
+                            className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                          >
+                            {actionLoading === v.id + '-deny' ? '…' : 'Confirm decline'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {v.status === 'DENIED' && (
+                  <p className="w-full text-center text-sm text-red-600">
+                    Entry declined{v.deniedReason ? `: ${v.deniedReason}` : ''}
+                  </p>
                 )}
                 {v.status === 'ARRIVED' && (
                   <button

@@ -12,6 +12,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
 import * as QRCode from 'qrcode';
+import { isValidEmail } from '../../common/utils/email';
 
 @Injectable()
 export class InvitesService {
@@ -41,6 +42,7 @@ export class InvitesService {
         token,
         passphrase,
         purpose: dto.purpose,
+        category: dto.category || 'OFFICIAL',
         guestCount: dto.guestCount || 1,
         guestNames: dto.guestNames || [],
         expectedMode: dto.expectedMode,
@@ -60,6 +62,13 @@ export class InvitesService {
     type G = { fullName: string; email?: string; phone?: string; address?: string };
     let guests: G[] = [];
     if (dto.guests?.length) {
+      for (const g of dto.guests) {
+        if (g.email?.trim() && !isValidEmail(g.email)) {
+          throw new BadRequestException(
+            `Invalid email address: "${g.email}". Please correct it so the invite can be delivered.`,
+          );
+        }
+      }
       guests = dto.guests.map((g) => ({
         fullName: g.fullName.trim(),
         email: g.email?.trim().toLowerCase() || undefined,

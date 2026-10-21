@@ -6,7 +6,6 @@ import {
   Body,
   Param,
   UseGuards,
-  Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -16,7 +15,6 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
-import { Response } from 'express';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -27,14 +25,14 @@ export class UsersController {
 
   @Post()
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: onboard staff (returns initialPassword once)' })
+  @ApiOperation({ summary: 'Admin: onboard staff' })
   create(@Body() dto: CreateUserDto, @CurrentUser() user: any) {
     return this.usersService.create(dto, user.orgId);
   }
 
   @Post('bulk')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: bulk create staff from CSV rows; returns credentials CSV' })
+  @ApiOperation({ summary: 'Admin: bulk create staff' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -61,34 +59,57 @@ export class UsersController {
 
   @Get()
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: list users (no passwords)' })
   findAll(@CurrentUser() user: any) {
     return this.usersService.findAll(user.orgId);
   }
 
   @Get('me')
-  @ApiOperation({ summary: 'Get current user profile' })
   me(@CurrentUser() user: any) {
     return this.usersService.findById(user.id);
   }
 
+  @Post('me/profile-edit')
+  @ApiOperation({ summary: 'Request profile change (pending admin approval)' })
+  requestEdit(@Body() body: any, @CurrentUser() user: any) {
+    return this.usersService.requestProfileEdit(user.id, user.orgId, body);
+  }
+
+  @Get('profile-edits')
+  @Roles(Role.ADMIN)
+  listEdits(@CurrentUser() user: any) {
+    return this.usersService.listProfileEdits(user.orgId);
+  }
+
+  @Post('profile-edits/:id/review')
+  @Roles(Role.ADMIN)
+  reviewEdit(
+    @Param('id') id: string,
+    @Body() body: { approve: boolean; note?: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.usersService.reviewProfileEdit(
+      id,
+      user.orgId,
+      user.id,
+      !!body.approve,
+      body.note,
+    );
+  }
+
   @Get(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: get user details (no password)' })
-  one(@Param('id') id: string, @CurrentUser() user: any) {
+  one(@Param('id') id: string) {
     return this.usersService.findById(id);
   }
 
   @Patch(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: update staff details' })
   update(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
     return this.usersService.updateStaff(id, user.orgId, body);
   }
 
   @Post(':id/reset-password')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: reset password → new 5-letter Nigerian word (shown once)' })
   resetPassword(@Param('id') id: string, @CurrentUser() user: any) {
     return this.usersService.resetPassword(id, user.orgId);
   }
