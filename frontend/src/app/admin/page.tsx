@@ -516,7 +516,7 @@ export default function AdminPage() {
       {tab === 'users' && (
         <div className="animate-in">
           <div className="mb-3 grid grid-cols-3 gap-2">
-            <button onClick={() => setShowForm(!showForm)} className="btn-primary !px-2">
+            <button onClick={() => setShowForm(!showForm)} aria-expanded={showForm} className={`${showForm ? 'btn-primary' : 'btn-ghost'} !px-2`}>
               <UserPlus size={16} /> Add staff
             </button>
             <Tooltip content="Download a CSV template for bulk import">
@@ -845,7 +845,7 @@ export default function AdminPage() {
             ['purpose', 'Purpose'],
             ['category', 'Category'],
             ['host', 'Host'],
-            ['entryMode', 'Entry mode'],
+            ['entryMode', 'Arrived by'],
             ['enteredAt', 'Entered'],
             ['exitedAt', 'Exited'],
             ['deniedAt', 'Declined at'],

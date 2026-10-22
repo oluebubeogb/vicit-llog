@@ -6,12 +6,13 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateInviteDto } from './dto/create-invite.dto';
-import { InviteStatus, Role } from '@prisma/client';
+import { InviteStatus, Prisma, Role } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
-import { buildGateQrPayload, renderQrDataUrl } from '../../common/utils/qr';
+import { buildGateQrPayload } from '../../common/utils/qr';
+import { gatePassCaption, qrFileName, renderCaptionedQrDataUrl } from '../../common/utils/qr-caption';
 import { isValidEmail } from '../../common/utils/email';
 import { publicFrontendBase } from '../../common/utils/urls';
 
@@ -202,6 +203,94 @@ export class InvitesService {
     });
   }
 
+  /**
+   * Powerful visitor / invite search. The query is split on whitespace and an invite matches
+   * if ANY token appears (case-insensitive, partial) in its searchable text:
+   *   description/purpose, Official/Personal, status, arrival mode (incl. "on foot"),
+   *   expected guest names, host name, location name/address, and every visitor's name,
+   *   phone, email, address, status, entry mode and gate.
+   * Results are ranked by how many distinct tokens matched, then newest first, and paginated.
+   * Runs in Postgres (ILIKE over one concatenated document per invite), so it scales with the
+   * database rather than the browser. Scope matches the lists: admins → organisation,
+   * everyone else → their own invites.
+   */
+  async search(user: { id: string; role: string; orgId: string }, rawQ: string, page = 1, pageSize = 30) {
+    const tokens = [
+      ...new Set(
+        (rawQ || '')
+          .toLowerCase()
+          .split(/\s+/)
+          .map((t) => t.trim().slice(0, 40))
+          .filter(Boolean),
+      ),
+    ].slice(0, 8);
+    const size = Math.min(100, Math.max(1, pageSize));
+    const offset = (Math.max(1, page) - 1) * size;
+    if (!tokens.length) return { tokens, total: 0, page, pageSize: size, results: [] };
+
+    const esc = (t: string) => `%${t.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+    const scope =
+      user.role === Role.ADMIN
+        ? Prisma.sql`i."organisationId" = ${user.orgId}`
+        : Prisma.sql`i."hostId" = ${user.id}`;
+    // Friendly words for enum values so people can type what they see on screen.
+    const doc = Prisma.sql`lower(concat_ws(' ',
+        i.purpose,
+        i.category::text,
+        CASE i.status::text
+          WHEN 'ACTIVE' THEN 'active live' WHEN 'USED' THEN 'used registered'
+          WHEN 'EXPIRED' THEN 'expired' WHEN 'OFFLINE_PENDING' THEN 'pending walk-in walkin offline'
+          WHEN 'AWAITING_APPROVAL' THEN 'pending awaiting approval' ELSE i.status::text END,
+        CASE i."expectedMode"::text WHEN 'PEDESTRIAN' THEN 'on foot walking' ELSE i."expectedMode"::text END,
+        array_to_string(i."guestNames", ' '),
+        h."fullName",
+        l.name, l.address,
+        (SELECT string_agg(concat_ws(' ', v."fullName", v.phone, v.email, v.address,
+            CASE v.status::text WHEN 'ARRIVED' THEN 'arrived on site' WHEN 'EXITED' THEN 'exited left'
+              WHEN 'DENIED' THEN 'denied declined' WHEN 'INVITED' THEN 'invited registered' ELSE v.status::text END,
+            CASE v."entryMode"::text WHEN 'PEDESTRIAN' THEN 'on foot walking' ELSE v."entryMode"::text END,
+            g.name), ' ')
+           FROM "Visitor" v LEFT JOIN "Gate" g ON g.id = v."gateId" WHERE v."inviteId" = i.id)
+      ))`;
+    const score = Prisma.join(
+      tokens.map((t) => Prisma.sql`(CASE WHEN d.doc LIKE ${esc(t)} ESCAPE '\' THEN 1 ELSE 0 END)`),
+      ' + ',
+    );
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; score: number; total: bigint }>>`
+      WITH docs AS (
+        SELECT i.id, i."createdAt", ${doc} AS doc
+        FROM "Invite" i
+        JOIN "User" h ON h.id = i."hostId"
+        LEFT JOIN "Location" l ON l.id = i."locationId"
+        WHERE ${scope}
+      ), scored AS (
+        SELECT d.id, d."createdAt", (${score})::int AS score FROM docs d
+      )
+      SELECT id, score, COUNT(*) OVER() AS total FROM scored
+      WHERE score > 0
+      ORDER BY score DESC, "createdAt" DESC
+      LIMIT ${size} OFFSET ${offset}`;
+
+    const total = rows.length ? Number(rows[0].total) : 0;
+    const ids = rows.map((r) => r.id);
+    const invites = ids.length
+      ? await this.prisma.invite.findMany({
+          where: { id: { in: ids } },
+          include: { visitors: true, host: { select: { id: true, fullName: true, email: true } } },
+        })
+      : [];
+    const byId = new Map(invites.map((i) => [i.id, i]));
+    return {
+      tokens,
+      total,
+      page,
+      pageSize: size,
+      results: rows
+        .map((r) => (byId.has(r.id) ? { ...byId.get(r.id)!, matchScore: r.score } : null))
+        .filter(Boolean),
+    };
+  }
+
   async findAll(orgId: string) {
     return this.prisma.invite.findMany({
       where: { organisationId: orgId },
@@ -255,10 +344,23 @@ export class InvitesService {
     // Re-render QR codes on read so every visitor (including those registered before the
     // scan-compatibility fix, whose stored image had a too-small quiet zone) gets a
     // scan-friendly code. Cheap: a few ms per visitor.
+    const locationName = invite.locationId
+      ? (await this.prisma.location.findUnique({ where: { id: invite.locationId }, select: { name: true } }))?.name
+      : undefined;
     for (const v of invite.visitors || []) {
       if (!v.photoPath) continue;
       try {
-        v.qrCodeData = await renderQrDataUrl(buildGateQrPayload(v.id, invite.passphrase, invite.token));
+        v.qrCodeData = renderCaptionedQrDataUrl(
+          buildGateQrPayload(v.id, invite.passphrase, invite.token),
+          gatePassCaption({
+            fullName: v.fullName,
+            visitorId: v.id,
+            date: invite.expectedAt || v.createdAt,
+            orgName: invite.organisation?.name,
+            locationName,
+          }),
+        );
+        (v as any).qrFileName = qrFileName(v.fullName, invite.expectedAt || v.createdAt);
       } catch {
         // keep stored image
       }

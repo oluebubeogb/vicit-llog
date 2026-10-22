@@ -16,6 +16,17 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 type Tab = 'invites' | 'entries' | 'declines' | 'exits';
 
+function NotFoundBare() {
+  useEffect(() => {
+    document.title = 'Not found';
+  }, []);
+  return (
+    <div className="flex min-h-[70vh] items-center justify-center">
+      <p className="text-lg font-semibold text-slate-500">Not found</p>
+    </div>
+  );
+}
+
 export default function PublicUserPage() {
   const params = useParams();
   const id = params?.id as string;
@@ -54,11 +65,8 @@ export default function PublicUserPage() {
   }
 
   if (!allowed || !profile) {
-    return (
-      <div className="page pt-16">
-        <Empty icon={<User size={24} />} title="Not found" hint="This profile doesn’t exist or you don’t have access to it." />
-      </div>
-    );
+    // Intentionally bare: no explanation, no sign-in prompt, nothing that confirms the profile exists.
+    return <NotFoundBare />;
   }
 
   const avatar = profile.avatarPath ? `${API}/users/avatar/${profile.avatarPath}` : null;

@@ -38,6 +38,8 @@ type Visitor = {
   phone?: string | null;
   photoPath?: string | null;
   qrCodeData?: string | null;
+  /** Descriptive download name from the API, e.g. vicit-pass_ibe-okafor_2026-10-21.png */
+  qrFileName?: string | null;
   status: string;
   enteredAt?: string | null;
   exitedAt?: string | null;
@@ -491,7 +493,6 @@ export default function VisitorPage() {
                         src={qr}
                         alt="Gate QR code"
                         width={512}
-                        height={512}
                         draggable={false}
                         className="block h-auto w-[min(72vw,288px)] bg-white"
                         style={{ imageRendering: 'pixelated', filter: 'none' }}
@@ -502,8 +503,8 @@ export default function VisitorPage() {
                     <QrCode size={12} /> Turn your screen brightness up at the gate
                   </p>
                   <a
-                    href={selected ? qrPngUrl(token, selected.id) : qr}
-                    download="gate-qr.png"
+                    href={selected ? `${qrPngUrl(token, selected.id)}?download=1` : qr}
+                    download={selected?.qrFileName || 'vicit-pass.png'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-ghost mt-3 !py-2 !text-xs"

@@ -90,6 +90,17 @@ export default function BottomNav() {
       <div className="pointer-events-auto mx-auto max-w-lg px-3">
         <div className="relative flex items-center justify-around overflow-hidden rounded-[26px] border border-white/70 bg-white/80 px-1.5 py-1.5 shadow-[0_18px_40px_-16px_rgb(15_23_42/0.35),0_2px_6px_rgb(15_23_42/0.06)] backdrop-blur-xl">
           <span className="pointer-events-none absolute inset-0 bg-gradient-to-r from-brand-50/60 via-white/0 to-accent-50/60" />
+          {/* Gradient used to paint the active icon. userSpaceOnUse (icon viewBox 0–24) so straight
+              strokes with a zero-width bounding box are still painted. Follows branding colours. */}
+          <svg width="0" height="0" className="absolute" aria-hidden focusable="false">
+            <defs>
+              <linearGradient id="vicit-nav-active" gradientUnits="userSpaceOnUse" x1="2" y1="2" x2="22" y2="22">
+                <stop offset="0" style={{ stopColor: 'rgb(var(--brand-500))' }} />
+                <stop offset="0.5" style={{ stopColor: 'rgb(var(--brand-600))' }} />
+                <stop offset="1" style={{ stopColor: 'rgb(var(--accent-700))' }} />
+              </linearGradient>
+            </defs>
+          </svg>
           {links.map(({ href, icon: Icon, label, exact, badge }: any) => {
             const active = exact
               ? pathname === href
@@ -102,28 +113,35 @@ export default function BottomNav() {
                 aria-current={isActive ? 'page' : undefined}
                 className={clsx(
                   'group relative flex min-w-[60px] flex-col items-center gap-0.5 rounded-2xl px-2.5 py-1.5 text-[11px] font-semibold transition-colors duration-200',
-                  isActive ? 'text-white' : 'text-slate-500 hover:text-brand-700',
+                  isActive ? 'text-brand-700' : 'text-slate-500 hover:text-brand-700',
                 )}
               >
                 {isActive && (
                   <motion.span
                     layoutId="nav-pill"
                     transition={{ type: 'spring', damping: 26, stiffness: 340 }}
-                    className="absolute inset-0 rounded-2xl bg-gradient-to-br from-brand-500 via-brand-600 to-accent-700 shadow-glow"
+                    className="absolute inset-0 rounded-2xl bg-gradient-to-br from-brand-50 via-brand-100 to-accent-100 shadow-[0_6px_16px_-8px_rgb(var(--brand-600)/0.45)] ring-1 ring-inset ring-brand-200/70"
                   />
                 )}
                 {!isActive && (
                   <span className="absolute inset-0 rounded-2xl bg-brand-50 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
                 )}
                 <span className="relative transition-transform duration-300 group-hover:-translate-y-0.5 group-active:scale-90">
-                  <Icon size={21} strokeWidth={isActive ? 2.4 : 2} />
+                  <Icon size={21} strokeWidth={isActive ? 2.4 : 2} {...(isActive ? { color: 'url(#vicit-nav-active)' } : {})} />
                   {badge && unread > 0 && (
                     <span className="absolute -right-2.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gradient-to-br from-rose-500 to-red-600 px-1 text-[10px] font-bold text-white ring-2 ring-white animate-pulse-ring">
                       {unread > 99 ? '99+' : unread}
                     </span>
                   )}
                 </span>
-                <span className="relative">{label}</span>
+                <span
+                  className={clsx(
+                    'relative',
+                    isActive && 'bg-gradient-to-br from-brand-500 via-brand-600 to-accent-700 bg-clip-text text-transparent',
+                  )}
+                >
+                  {label}
+                </span>
               </Link>
             );
           })}

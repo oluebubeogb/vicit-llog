@@ -1,5 +1,6 @@
 'use client';
 
+import LineArt from './ui/LineArt';
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import BrandMark from './BrandMark';
@@ -18,6 +19,8 @@ export default function SplashScreen() {
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.has('nosplash')) return;
+      // Staff profile links opened on a signed-out device must reveal nothing (not even the brand)
+      if (window.location.pathname.startsWith('/u/') && !localStorage.getItem('vicit_token')) return;
       const standalone =
         window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true;
       const seen = sessionStorage.getItem('vicit-splash') === '1';
@@ -57,8 +60,7 @@ export default function SplashScreen() {
               'radial-gradient(120% 80% at 100% 0%, rgb(var(--accent-400) / 0.6), transparent 55%), radial-gradient(90% 60% at 0% 100%, rgb(var(--brand-300) / 0.35), transparent 60%), linear-gradient(160deg, rgb(var(--brand-600)), rgb(var(--brand-900)) 70%, rgb(var(--accent-950)))',
           }}
         >
-          <div className="hero-topo pointer-events-none absolute -right-24 -top-24 h-[420px] w-[420px] opacity-20" />
-          <div className="hero-topo pointer-events-none absolute -bottom-32 -left-24 h-[360px] w-[360px] rotate-180 opacity-10" />
+          <LineArt className="text-white" opacity={0.08} />
           <motion.div
             initial={{ scale: 0.7, opacity: 0, y: 12 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}

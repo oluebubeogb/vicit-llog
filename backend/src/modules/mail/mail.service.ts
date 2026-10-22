@@ -356,16 +356,19 @@ export class MailService {
     /** Visitor page link — QR is always shown there too */
     registrationLink?: string;
     orgName?: string;
+    /** Descriptive attachment name, e.g. vicit-pass_ibe-okafor_2026-10-21.png */
+    qrFileName?: string;
   }) {
     const b = await this.brand();
     const subject = `Your gate QR code — ${opts.purpose}`;
+    const fileName = opts.qrFileName || 'gate-qr.png';
     const text = [
       `Hello ${opts.guestName},`,
       `Your photo registration is complete.`,
       `Host: ${opts.hostName}`,
       `Purpose: ${opts.purpose}`,
       `Gate passphrase: ${opts.passphrase}`,
-      `Show the QR code in this email (attached as gate-qr.png) or on your registration page at the gate.`,
+      `Show the QR code in this email (attached as ${fileName}) or on your registration page at the gate.`,
       opts.registrationLink ? `Your registration page (shows the QR): ${opts.registrationLink}` : '',
       opts.qrImageUrl ? `QR image: ${opts.qrImageUrl}` : '',
       `If the QR will not scan, tell the gate officer your passphrase.`,
@@ -383,7 +386,7 @@ export class MailService {
     const attachments: any[] = png
       ? [
           {
-            filename: 'gate-qr.png',
+            filename: fileName,
             content: png,
             cid: 'visitor-qr@vicit',
             contentType: 'image/png',
@@ -392,14 +395,17 @@ export class MailService {
         ]
       : [];
 
+    // The pass PNG carries a caption under the code, so keep its real aspect ratio.
+    const qrW = 240;
+    const qrH = png && png.length > 24 ? Math.round((qrW * png.readUInt32BE(20)) / png.readUInt32BE(16)) : qrW;
     // White padded cell with bgcolor attr so dark-mode clients keep the QR on white.
     const qrBlock = png
       ? `<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:22px auto 10px;">
           <tr><td bgcolor="${tint(b.color, 0.92)}" style="background:${tint(b.color, 0.92)};background-image:linear-gradient(135deg,${tint(b.color, 0.88)} 0%,${tint(b.color2, 0.93)} 100%);padding:10px;border-radius:24px;">
             <table role="presentation" cellpadding="0" cellspacing="0"><tr>
               <td bgcolor="#ffffff" style="background:#ffffff;padding:14px;border-radius:16px;">
-                <img src="cid:visitor-qr@vicit" alt="Gate QR code" width="240" height="240"
-                  style="display:block;width:240px;height:240px;max-width:240px;background:#ffffff;border:0;outline:none;image-rendering:pixelated;" />
+                <img src="cid:visitor-qr@vicit" alt="Gate QR code" width="${qrW}" height="${qrH}"
+                  style="display:block;width:${qrW}px;height:${qrH}px;max-width:${qrW}px;background:#ffffff;border:0;outline:none;image-rendering:pixelated;" />
               </td>
             </tr></table>
           </td></tr>

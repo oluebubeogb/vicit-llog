@@ -79,7 +79,8 @@ export class ReportsService {
       purpose: (v) => `"${(v.invite?.purpose || '').replace(/"/g, '""')}"`,
       category: (v) => v.invite?.category || '',
       host: (v) => `"${v.invite?.host?.fullName || ''}"`,
-      entryMode: (v) => v.entryMode || '',
+      // display label (stored enum stays PEDESTRIAN / MOTORCYCLE / VEHICLE)
+      entryMode: (v) => ({ PEDESTRIAN: 'On foot', MOTORCYCLE: 'Motorcycle', VEHICLE: 'Vehicle' } as Record<string, string>)[v.entryMode] || v.entryMode || '',
       enteredAt: (v) => naturalDate(v.enteredAt),
       exitedAt: (v) => naturalDate(v.exitedAt),
       deniedAt: (v) => naturalDate(v.deniedAt),
@@ -118,7 +119,7 @@ export class ReportsService {
       purpose: 'Purpose',
       category: 'Category',
       host: 'Host',
-      entryMode: 'Entry Mode',
+      entryMode: 'Arrived by',
       enteredAt: 'Entered',
       exitedAt: 'Exited',
       deniedAt: 'Declined At',

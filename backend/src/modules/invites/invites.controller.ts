@@ -31,6 +31,25 @@ export class InvitesController {
     return this.invitesService.findMyInvites(user.id);
   }
 
+  @Get('search')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
+  @ApiOperation({ summary: 'Ranked multi-word search across invites and their visitors' })
+  search(
+    @CurrentUser() user: any,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.invitesService.search(
+      { id: user.id, role: user.role, orgId: user.orgId },
+      typeof q === 'string' ? q.slice(0, 200) : '',
+      parseInt(page || '1', 10) || 1,
+      parseInt(pageSize || '30', 10) || 30,
+    );
+  }
+
   @Get()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

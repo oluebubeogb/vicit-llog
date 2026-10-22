@@ -37,6 +37,12 @@ export function setUser(user: any) {
   localStorage.setItem('vicit_user', JSON.stringify(user));
 }
 
+function toQuery(params: Record<string, string | number | undefined | null>) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+  return q.toString();
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -146,6 +152,32 @@ export const api = {
     if (params.status) q.set('status', params.status);
     return request(`/analytics/visitors?${q.toString()}`);
   },
+  /** Newest 100 records behind any analytics number, plus the real total. */
+  analyticsDrill: (params: Record<string, string | number | undefined | null>) =>
+    request(`/analytics/drill?${toQuery(params)}`),
+  /** Full CSV (server-capped) of a drill-down; returns the file plus cap info from headers. */
+  analyticsExport: async (params: Record<string, string | number | undefined | null>) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/analytics/drill/export?${toQuery(params)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || 'Export failed');
+    }
+    const cd = res.headers.get('content-disposition') || '';
+    const name = /filename="?([^";]+)"?/i.exec(cd)?.[1] || 'vicit-export.csv';
+    return {
+      blob: await res.blob(),
+      name,
+      total: Number(res.headers.get('x-export-total') || 0),
+      cap: Number(res.headers.get('x-export-cap') || 0),
+      truncated: res.headers.get('x-export-truncated') === 'true',
+    };
+  },
+  /** Ranked multi-word search across invites and their visitors (server-side). */
+  searchInvites: (q: string, page = 1, pageSize = 30) =>
+    request(`/invites/search?${toQuery({ q, page, pageSize })}`),
   blacklist: () => request('/blacklist'),
   addBlacklist: (data: any) =>
     request('/blacklist', { method: 'POST', body: JSON.stringify(data) }),

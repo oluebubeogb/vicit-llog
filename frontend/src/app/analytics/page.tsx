@@ -26,6 +26,8 @@ import {
   CalendarRange,
   Clock,
   DoorOpen,
+  Download,
+  FileText,
   Flame,
   LogIn,
   LogOut,
@@ -48,9 +50,28 @@ import PersonLink from '@/components/PersonLink';
 import { VisitorCard } from '@/components/InviteBits';
 import { useBrand } from '@/components/BrandProvider';
 import { scale } from '@/lib/brand';
-import { fmtDuration, MODE_LABEL, photoUrl, relTime, titleCase } from '@/lib/format';
+import { fmtDate, fmtDuration, MODE_LABEL, photoUrl, relTime, titleCase } from '@/lib/format';
 
-type DrillT = { title: string; params: { metric?: string; purpose?: string; entryMode?: string; status?: string } };
+type DrillParams = Record<string, string | number | undefined>;
+/** A drill-down: the records behind one number. `alts` lets the panel switch metric (e.g. a day's entries vs exits). */
+type DrillT = { title: string; params: DrillParams; alts?: { label: string; params: DrillParams }[] };
+type DrillRes = { entity: 'visitors' | 'invites'; total: number; limit: number; exportCap: number; rows: any[] };
+
+/** Make any count tappable: opens the records behind it. */
+function Num({ n, onClick, className = '', title }: { n: ReactNode; onClick: () => void; className?: string; title?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      aria-label={title ? `Show ${title}` : undefined}
+      className={`rounded-md underline decoration-dotted decoration-slate-300 underline-offset-[3px] transition hover:text-brand-700 hover:decoration-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${className}`}
+    >
+      {n}
+    </button>
+  );
+}
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'export';
 
 const EMERALD = '#10b981';
 const AMBER = '#f59e0b';
@@ -157,12 +178,12 @@ function ChartCard({ title, icon, info, children, right }: { title: string; icon
   );
 }
 
-function Ring({ value, label, color, tip }: { value: number; label: string; color: string; tip: string }) {
+function Ring({ value, label, color, tip, onClick }: { value: number; label: string; color: string; tip: string; onClick?: () => void }) {
   const r = 30;
   const c = 2 * Math.PI * r;
   return (
     <Tooltip content={tip}>
-      <div className="tile flex flex-col items-center !px-1 !py-3">
+      <button type="button" onClick={onClick} className="tile flex w-full flex-col items-center !px-1 !py-3 transition hover:-translate-y-0.5 hover:shadow-soft">
         <svg width="76" height="76" viewBox="0 0 76 76" className="-rotate-90">
           <circle cx="38" cy="38" r={r} stroke="rgb(226 232 240)" strokeWidth="8" fill="none" />
           <circle
@@ -180,19 +201,19 @@ function Ring({ value, label, color, tip }: { value: number; label: string; colo
         </svg>
         <p className="-mt-[50px] mb-[26px] text-base font-bold text-slate-900">{value}%</p>
         <p className="text-[11px] font-medium text-slate-500">{label}</p>
-      </div>
+      </button>
     </Tooltip>
   );
 }
 
-function BarList({ rows, color, onPick }: { rows: { label: string; count: number; sub?: string }[]; color: string; onPick?: (l: string) => void }) {
+function BarList({ rows, color, onPick }: { rows: { label: string; count: number; sub?: string; id?: string }[]; color: string; onPick?: (r: { label: string; id?: string }) => void }) {
   const max = Math.max(1, ...rows.map((r) => r.count));
   if (!rows.length) return <p className="tile-muted text-center text-xs text-slate-500">No data in this period</p>;
   return (
     <ul className="rows stagger">
       {rows.map((r) => (
-        <li key={r.label}>
-          <button type="button" disabled={!onPick} onClick={() => onPick?.(r.label)} className="row-link !py-2.5 disabled:cursor-default">
+        <li key={r.id || r.label}>
+          <button type="button" disabled={!onPick} onClick={() => onPick?.(r)} className="row-link !py-2.5 disabled:cursor-default">
             <span className="min-w-0 flex-1">
               <span className="flex items-center justify-between text-sm">
                 <span className="truncate font-medium text-slate-700">{r.label}</span>
@@ -224,7 +245,10 @@ export default function AnalyticsPage() {
   const [to, setTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [drill, setDrill] = useState<DrillT | null>(null);
-  const [list, setList] = useState<any[]>([]);
+  const [res, setRes] = useState<DrillRes | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const list = res?.rows || [];
   const [listLoading, setListLoading] = useState(false);
   const [detail, setDetail] = useState<any | null>(null);
 
@@ -240,19 +264,60 @@ export default function AnalyticsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days, range?.from, range?.to]);
 
+  const drillQuery = (d: DrillT) => ({ days: data?.periodDays || days, ...(range || {}), ...d.params });
+
   async function openDrill(d: DrillT) {
     setDrill(d);
     setListLoading(true);
     setDetail(null);
+    setExportMsg(null);
     try {
-      const rows = await api.analyticsVisitors({ days: data?.periodDays || days, ...range, ...d.params });
-      setList(Array.isArray(rows) ? rows : []);
+      const r = await api.analyticsDrill(drillQuery(d));
+      setRes(r && Array.isArray(r.rows) ? r : null);
     } catch {
-      setList([]);
+      setRes(null);
     } finally {
       setListLoading(false);
     }
   }
+
+  async function exportDrill() {
+    if (!drill || exporting) return;
+    setExporting(true);
+    setExportMsg(null);
+    try {
+      const out = await api.analyticsExport({ ...drillQuery(drill), name: slug(drill.title) });
+      const url = URL.createObjectURL(out.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = out.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      setExportMsg(
+        out.truncated
+          ? `Downloaded the newest ${out.cap.toLocaleString()} of ${out.total.toLocaleString()} rows. Narrow the date range to export the rest.`
+          : `Downloaded ${out.total.toLocaleString()} row${out.total === 1 ? '' : 's'}.`,
+      );
+    } catch (e: any) {
+      setExportMsg(e?.message || 'Export failed. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // series point click → that day's records (switchable between registered / entries / exits / declined)
+  const dayDrill = (day: string, label: string, first: 'total' | 'arrived') => {
+    const alts = [
+      { label: 'Registered', params: { metric: 'total', day } },
+      { label: 'Entries', params: { metric: 'arrived', day } },
+      { label: 'Exits', params: { metric: 'exited', day } },
+      { label: 'Declined', params: { metric: 'denied', day } },
+    ];
+    openDrill({ title: label, params: first === 'total' ? alts[0].params : alts[1].params, alts });
+  };
+  const catLabel = (c: string) => (c === 'PERSONAL' ? 'Personal' : 'Official');
 
   const k = data?.kpis || {};
   const p = data?.previous || {};
@@ -270,7 +335,7 @@ export default function AnalyticsPage() {
             ? `${new Date(data.range.from).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${new Date(data.range.to).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
             : 'Loading…'
         }
-        info="Every number compares against the previous period of the same length. Tap cards and bars for the visitors behind them."
+        info="Every number compares against the previous period of the same length. Tap any number, bar, segment or cell to see the records behind it and download them as CSV."
       />
 
       <div className="animate-in mb-4 flex flex-wrap items-center gap-2">
@@ -310,15 +375,19 @@ export default function AnalyticsPage() {
             <Kpi icon={<LogOut size={18} />} label="Exits" value={k.exited} cur={k.exited} prev={p.exited} tone="from-amber-50 to-amber-100 text-amber-600" tip="Check-outs recorded at the gate" onClick={() => openDrill({ title: 'Exits', params: { metric: 'exited' } })} />
             <Kpi icon={<DoorOpen size={18} />} label="On site now" value={k.activeNow} tone="from-violet-50 to-violet-100 text-violet-600" tip="Visitors checked in and not yet signed out" onClick={() => openDrill({ title: 'On site now', params: { metric: 'activeNow' } })} />
             <Kpi icon={<Ban size={18} />} label="Declined" value={k.denied} cur={k.denied} prev={p.denied} invert tone="from-rose-50 to-rose-100 text-rose-600" tip="Entries refused by gate officers" onClick={() => openDrill({ title: 'Declined entries', params: { metric: 'denied' } })} />
-            <Kpi icon={<Timer size={18} />} label="Average stay" value={fmtDuration(k.avgDurationMinutes)} cur={k.avgDurationMinutes} prev={p.avgDurationMinutes} tone="from-sky-50 to-sky-100 text-sky-600" tip="Average time between check-in and check-out" />
-            <Kpi icon={<Repeat size={18} />} label="Returning visitors" value={k.returningVisitors} tone="from-brand-50 to-accent-100 text-accent-700" tip="People who visited more than once in this period" />
-            <Kpi icon={<ShieldAlert size={18} />} label="Blacklist matches" value={k.blacklistHits} tone="from-rose-50 to-amber-50 text-rose-600" tip="Registrations matching an active blacklist entry" />
+            <Kpi icon={<Timer size={18} />} label="Average stay" value={fmtDuration(k.avgDurationMinutes)} cur={k.avgDurationMinutes} prev={p.avgDurationMinutes} tone="from-sky-50 to-sky-100 text-sky-600" tip="Average time between check-in and check-out — tap for the visits it is based on" onClick={() => openDrill({ title: 'Completed visits', params: { metric: 'exited' } })} />
+            <Kpi icon={<Repeat size={18} />} label="Returning visitors" value={k.returningVisitors} tone="from-brand-50 to-accent-100 text-accent-700" tip="People who visited more than once in this period" onClick={() => openDrill({ title: 'Returning visitors', params: { metric: 'returning' } })} />
+            <Kpi icon={<ShieldAlert size={18} />} label="Blacklist matches" value={k.blacklistHits} tone="from-rose-50 to-amber-50 text-rose-600" tip="Registrations matching an active blacklist entry" onClick={() => openDrill({ title: 'Blacklist matches', params: { metric: 'blacklist' } })} />
           </div>
 
-          <ChartCard title="Traffic over time" icon={<BarChart3 size={16} />} info="Daily registrations, check-ins and check-outs">
-            <div className="h-52 -ml-3">
+          <ChartCard title="Traffic over time" icon={<BarChart3 size={16} />} info="Daily registrations, check-ins and check-outs. Tap a day to see its records.">
+            <div className="h-52 -ml-3 cursor-pointer">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={series} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
+                <AreaChart
+                  data={series}
+                  margin={{ top: 6, right: 6, bottom: 0, left: 0 }}
+                  onClick={(st: any) => { const pt = st?.activePayload?.[0]?.payload; if (pt?.day) dayDrill(pt.day, shortDay(pt.day), 'total'); }}
+                >
                   <defs>
                     <linearGradient id="gReg" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor={pal.brand} stopOpacity={0.35} />
@@ -340,16 +409,25 @@ export default function AnalyticsPage() {
               </ResponsiveContainer>
             </div>
             <div className="mt-2 flex flex-wrap gap-3 text-[11px] font-medium text-slate-500">
-              {[['Registered', pal.brand], ['Entries', EMERALD], ['Exits', AMBER]].map(([l, c]) => (
-                <span key={l} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>
+              {[['Registered', pal.brand, 'total', k.totalVisits], ['Entries', EMERALD, 'arrived', k.arrived], ['Exits', AMBER, 'exited', k.exited]].map(([l, c, m, n]) => (
+                <button key={l} type="button" onClick={() => openDrill({ title: String(l), params: { metric: String(m) } })} className="flex items-center gap-1.5 rounded-full px-1.5 py-0.5 transition hover:bg-white hover:text-slate-800">
+                  <span className="h-2 w-2 rounded-full" style={{ background: String(c) }} />
+                  {l} <b className="text-slate-700">{n}</b>
+                </button>
               ))}
             </div>
           </ChartCard>
 
-          <ChartCard title="Entries vs exits" icon={<LogIn size={16} />} info="Bars show check-ins and check-outs; the line shows declined entries">
-            <div className="h-44 -ml-3">
+          <ChartCard title="Entries vs exits" icon={<LogIn size={16} />} info="Bars show check-ins and check-outs; the line shows declined entries. Tap a day for its records.">
+            <div className="h-44 -ml-3 cursor-pointer">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={series} barGap={1} barCategoryGap="12%" margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
+                <ComposedChart
+                  data={series}
+                  barGap={1}
+                  barCategoryGap="12%"
+                  margin={{ top: 6, right: 6, bottom: 0, left: 0 }}
+                  onClick={(st: any) => { const pt = st?.activePayload?.[0]?.payload; if (pt?.day) dayDrill(pt.day, shortDay(pt.day), 'arrived'); }}
+                >
                   <CartesianGrid strokeDasharray="3 6" stroke="rgb(226 232 240)" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} minTickGap={24} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} width={32} />
@@ -363,20 +441,27 @@ export default function AnalyticsPage() {
           </ChartCard>
 
           <div className="grid grid-cols-3 gap-2">
-            <Ring value={k.admitRate} label="Admit rate" color={EMERALD} tip="Share of gate decisions that admitted the visitor" />
-            <Ring value={k.denialRate} label="Denial rate" color={ROSE} tip="Share of gate decisions that refused entry" />
-            <Ring value={k.showRate} label="Show-up rate" color={pal.brand} tip="Registered visitors who actually arrived" />
+            <Ring value={k.admitRate} label="Admit rate" color={EMERALD} tip="Share of gate decisions that admitted the visitor — tap for the admitted visitors" onClick={() => openDrill({ title: 'Admitted', params: { metric: 'arrived' } })} />
+            <Ring value={k.denialRate} label="Denial rate" color={ROSE} tip="Share of gate decisions that refused entry — tap for the declined visitors" onClick={() => openDrill({ title: 'Declined entries', params: { metric: 'denied' } })} />
+            <Ring value={k.showRate} label="Show-up rate" color={pal.brand} tip="Registered visitors who actually arrived — tap for those who showed up" onClick={() => openDrill({ title: 'Showed up', params: { metric: 'showed' } })} />
           </div>
 
           <ChartCard
             title="Peak hours"
             icon={<Flame size={16} />}
-            info="When visitors check in, by hour of day"
+            info="When visitors check in, by hour of day. Tap a bar or a cell for its check-ins."
             right={data.peakHours?.[0] && <StatusPill tone="amber" label={`Busiest ${String(data.peakHours[0].hour).padStart(2, '0')}:00`} />}
           >
-            <div className="h-36 -ml-3">
+            <div className="h-36 -ml-3 cursor-pointer">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.hourly} margin={{ top: 4, right: 6, bottom: 0, left: 0 }}>
+                <BarChart
+                  data={data.hourly}
+                  margin={{ top: 4, right: 6, bottom: 0, left: 0 }}
+                  onClick={(st: any) => {
+                    const h = st?.activePayload?.[0]?.payload?.hour;
+                    if (h !== undefined) openDrill({ title: `Check-ins ${String(h).padStart(2, '0')}:00–${String(h).padStart(2, '0')}:59`, params: { metric: 'arrived', hour: h } });
+                  }}
+                >
                   <XAxis dataKey="hour" tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false} interval={2} tickFormatter={(h) => `${h}h`} />
                   <YAxis allowDecimals={false} hide />
                   <RTooltip {...tooltipStyle} labelFormatter={(h) => `${String(h).padStart(2, '0')}:00 – ${String(h).padStart(2, '0')}:59`} cursor={{ fill: pal.brand100, opacity: 0.5 }} />
@@ -396,8 +481,11 @@ export default function AnalyticsPage() {
                     <span className="w-8 shrink-0 text-[10px] font-medium text-slate-400">{DOW[d]}</span>
                     {row.map((v, h) => (
                       <Tooltip key={h} content={`${DOW[d]} ${String(h).padStart(2, '0')}:00 · ${v} check-in${v === 1 ? '' : 's'}`}>
-                        <span
-                          className="h-3.5 flex-1 rounded-[3px] transition hover:scale-125 hover:ring-2 hover:ring-white"
+                        <button
+                          type="button"
+                          aria-label={`${DOW[d]} ${h}:00, ${v} check-ins`}
+                          onClick={() => openDrill({ title: `${DOW[d]} ${String(h).padStart(2, '0')}:00 check-ins`, params: { metric: 'arrived', weekday: d, hour: h } })}
+                          className="h-3.5 flex-1 rounded-[3px] transition hover:scale-125 hover:ring-2 hover:ring-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                           style={{ background: v ? pal.brand : 'rgb(226 232 240 / .7)', opacity: v ? 0.25 + (v / heatMax) * 0.75 : 1 }}
                         />
                       </Tooltip>
@@ -415,14 +503,77 @@ export default function AnalyticsPage() {
             </div>
           </ChartCard>
 
-          <ChartCard title="By purpose" icon={<BarChart3 size={16} />} info="Tap a purpose to see its visitors">
-            <BarList rows={data.byPurpose.map((x: any) => ({ label: x.purpose, count: x.count }))} color={pal.brand} onPick={(l) => openDrill({ title: l, params: { purpose: l } })} />
+          <ChartCard
+            title="Official vs personal"
+            icon={<BarChart3 size={16} />}
+            info="Invite descriptions are free text, so visits are grouped by purpose: official or personal. Tap any number for its records."
+          >
+            {(() => {
+              const rows = data.categoryDetail || [];
+              const totalReg = rows.reduce((a: number, r: any) => a + r.registered, 0);
+              return (
+                <div className="space-y-2.5">
+                  <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-200/70">
+                    {rows.map((r: any) => (
+                      <button
+                        key={r.category}
+                        type="button"
+                        aria-label={`${catLabel(r.category)} share`}
+                        onClick={() => openDrill({ title: `${catLabel(r.category)} visitors`, params: { metric: 'total', category: r.category } })}
+                        className={`h-full transition-all duration-700 hover:brightness-110 ${r.category === 'OFFICIAL' ? 'bg-gradient-to-r from-brand-400 to-brand-600' : 'bg-gradient-to-r from-violet-400 to-violet-600'}`}
+                        style={{ width: totalReg ? `${(r.registered / totalReg) * 100}%` : '0%' }}
+                      />
+                    ))}
+                  </div>
+                  {rows.map((r: any) => {
+                    const pct = totalReg ? Math.round((r.registered / totalReg) * 100) : 0;
+                    const c = r.category;
+                    return (
+                      <div key={c} className="tile flex items-center gap-3 !py-3">
+                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-sm font-bold ${c === 'OFFICIAL' ? 'from-brand-50 to-brand-100 text-brand-700' : 'from-violet-50 to-violet-100 text-violet-700'}`}>
+                          {pct}%
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                            {catLabel(c)}
+                            <Delta cur={r.registered} prev={r.previous} />
+                          </p>
+                          <p className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-slate-500">
+                            <span>
+                              <Num n={<b className="text-slate-700">{r.entries}</b>} title={`${catLabel(c)} entries`} onClick={() => openDrill({ title: `${catLabel(c)} entries`, params: { metric: 'arrived', category: c } })} /> entries
+                            </span>
+                            <span>
+                              <Num n={<b className="text-slate-700">{r.denied}</b>} title={`${catLabel(c)} declined`} onClick={() => openDrill({ title: `${catLabel(c)} declined`, params: { metric: 'denied', category: c } })} /> declined
+                            </span>
+                          </p>
+                        </div>
+                        <Num
+                          n={<span className="text-xl font-bold text-slate-900">{r.registered}</span>}
+                          title={`${catLabel(c)} visitors`}
+                          onClick={() => openDrill({ title: `${catLabel(c)} visitors`, params: { metric: 'total', category: c } })}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </ChartCard>
 
           <div className="grid grid-cols-2 gap-3">
             {[
-              { t: 'Category', rows: data.byCategory.map((x: any) => ({ name: titleCase(x.category), value: x.count, key: x.category })), colors: [pal.brand, VIOLET] },
-              { t: 'Arrived by', rows: data.byMode.map((x: any) => ({ name: MODE_LABEL[x.mode] || titleCase(x.mode), value: x.count, key: x.mode })), colors: [EMERALD, AMBER, pal.accent], mode: true },
+              {
+                t: 'Arrived by',
+                rows: data.byMode.map((x: any) => ({ name: MODE_LABEL[x.mode] || titleCase(x.mode), value: x.count, key: x.mode })),
+                colors: [EMERALD, AMBER, pal.accent],
+                pick: (r: any) => openDrill({ title: `Arrived by ${r.name}`, params: { metric: 'arrived', entryMode: r.key } }),
+              },
+              {
+                t: 'Invite status',
+                rows: (data.inviteStatus || []).map((x: any) => ({ name: titleCase(x.status), value: x.count, key: x.status })),
+                colors: [pal.brand, EMERALD, AMBER, ROSE, VIOLET, '#94a3b8'],
+                pick: (r: any) => openDrill({ title: `${r.name} invites`, params: { metric: 'invites', inviteStatus: r.key } }),
+              },
             ].map((g) => {
               const total = g.rows.reduce((a: number, r: any) => a + r.value, 0);
               return (
@@ -443,8 +594,8 @@ export default function AnalyticsPage() {
                               outerRadius={48}
                               paddingAngle={3}
                               stroke="none"
-                              onClick={(e: any) => g.mode && openDrill({ title: `Arrived by ${e.name}`, params: { entryMode: e.payload?.key } })}
-                              className={g.mode ? 'cursor-pointer' : ''}
+                              onClick={(e: any) => g.pick({ name: e.name, key: e.payload?.key ?? e.key })}
+                              className="cursor-pointer"
                             >
                               {g.rows.map((_: any, i: number) => (
                                 <Cell key={i} fill={g.colors[i % g.colors.length]} />
@@ -457,10 +608,12 @@ export default function AnalyticsPage() {
                       </div>
                       <ul className="mt-1 space-y-0.5">
                         {g.rows.map((r: any, i: number) => (
-                          <li key={r.name} className="flex items-center gap-1.5 text-[11px] text-slate-600">
-                            <span className="h-2 w-2 rounded-full" style={{ background: g.colors[i % g.colors.length] }} />
-                            <span className="truncate">{r.name}</span>
-                            <span className="ml-auto font-semibold">{Math.round((r.value / total) * 100)}%</span>
+                          <li key={r.name}>
+                            <button type="button" onClick={() => g.pick(r)} className="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[11px] text-slate-600 transition hover:bg-white hover:text-slate-900">
+                              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: g.colors[i % g.colors.length] }} />
+                              <span className="truncate">{r.name}</span>
+                              <span className="ml-auto font-semibold">{r.value} · {Math.round((r.value / total) * 100)}%</span>
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -471,11 +624,11 @@ export default function AnalyticsPage() {
             })}
           </div>
 
-          <ChartCard title="Locations & gates" icon={<MapPin size={16} />} info="Where visitors were invited to and which gates admitted them">
+          <ChartCard title="Locations & gates" icon={<MapPin size={16} />} info="Where visitors were invited to and which gates admitted them. Tap a row for its records.">
             <p className="eyebrow mb-2">Locations</p>
-            <BarList rows={data.byLocation.map((x: any) => ({ label: x.location, count: x.count }))} color={EMERALD} />
+            <BarList rows={data.byLocation.map((x: any) => ({ label: x.location, count: x.count, id: x.id || 'none' }))} color={EMERALD} onPick={(r) => openDrill({ title: `Invited to ${r.label}`, params: { metric: 'total', locationId: r.id } })} />
             <p className="eyebrow mb-2 mt-4">Gates</p>
-            <BarList rows={data.byGate.map((x: any) => ({ label: x.gate, count: x.count }))} color={VIOLET} />
+            <BarList rows={data.byGate.map((x: any) => ({ label: x.gate, count: x.count, id: x.id || 'none' }))} color={VIOLET} onPick={(r) => openDrill({ title: `Admitted at ${r.label}`, params: { metric: 'arrived', gateId: r.id } })} />
           </ChartCard>
 
           <ChartCard title="Top hosts" icon={<UserRound size={16} />} info="Staff who received the most visitors">
@@ -487,9 +640,21 @@ export default function AnalyticsPage() {
                     <Avatar name={h.name} size={34} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold"><PersonLink id={h.id} name={h.name} /></p>
-                      <p className="truncate text-[11px] text-slate-400">{h.portfolio || 'Host'}{h.onSite ? ` · ${h.onSite} on site` : ''}</p>
+                      <p className="truncate text-[11px] text-slate-400">
+                        {h.portfolio || 'Host'}
+                        {h.onSite ? (
+                          <>
+                            {' · '}
+                            <Num n={`${h.onSite} on site`} title={`on site for ${h.name}`} onClick={() => openDrill({ title: `On site for ${h.name}`, params: { metric: 'activeNow', hostId: h.id } })} />
+                          </>
+                        ) : null}
+                      </p>
                     </div>
-                    <span className="rounded-full bg-gradient-to-r from-brand-50 to-brand-100 px-2.5 py-0.5 text-xs font-bold text-brand-700">{h.count}</span>
+                    <Tooltip content={`Visitors hosted by ${h.name}`}>
+                      <button type="button" onClick={() => openDrill({ title: `Hosted by ${h.name}`, params: { metric: 'total', hostId: h.id } })} className="rounded-full bg-gradient-to-r from-brand-50 to-brand-100 px-2.5 py-0.5 text-xs font-bold text-brand-700 transition hover:from-brand-100 hover:to-brand-200 hover:shadow-sm">
+                        {h.count}
+                      </button>
+                    </Tooltip>
                   </li>
                 ))}
               </ul>
@@ -498,10 +663,17 @@ export default function AnalyticsPage() {
             )}
           </ChartCard>
 
-          <ChartCard title="Length of stay" icon={<Clock size={16} />} info="How long visitors stayed between check-in and check-out">
-            <div className="h-36 -ml-3">
+          <ChartCard title="Length of stay" icon={<Clock size={16} />} info="How long visitors stayed between check-in and check-out. Tap a bar for those visits.">
+            <div className="h-36 -ml-3 cursor-pointer">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.durationBuckets} margin={{ top: 4, right: 6, bottom: 0, left: 0 }}>
+                <BarChart
+                  data={data.durationBuckets}
+                  margin={{ top: 4, right: 6, bottom: 0, left: 0 }}
+                  onClick={(st: any) => {
+                    const i = st?.activeTooltipIndex;
+                    if (typeof i === 'number' && i >= 0) openDrill({ title: `Stayed ${data.durationBuckets[i]?.label}`, params: { metric: 'exited', duration: i } });
+                  }}
+                >
                   <defs>
                     <linearGradient id="gDur" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor={VIOLET} />
@@ -521,13 +693,15 @@ export default function AnalyticsPage() {
             {data.topVisitors.length ? (
               <ul className="rows stagger">
                 {data.topVisitors.map((v: any) => (
-                  <li key={v.name + v.phone} className="flex items-center gap-3 px-3.5 py-2.5">
+                  <li key={v.key || v.name + v.phone}>
+                   <button type="button" onClick={() => openDrill({ title: `Visits by ${v.name}`, params: { metric: 'total', visitorKey: v.key } })} className="row-link !py-2.5">
                     <Avatar name={v.name} src={photoUrl(v.photoPath)} size={34} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-800">{v.name}</p>
                       <p className="truncate text-[11px] text-slate-400">{v.phone || 'No phone'} · last {relTime(v.lastVisit)}</p>
                     </div>
                     <span className="rounded-full bg-gradient-to-r from-emerald-50 to-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">{v.visits}×</span>
+                   </button>
                   </li>
                 ))}
               </ul>
@@ -536,11 +710,20 @@ export default function AnalyticsPage() {
             )}
           </ChartCard>
 
-          <ChartCard title="Blacklist matches" icon={<ShieldAlert size={16} />} info="Registrations whose phone, ID or name matched an active blacklist entry" right={<StatusPill tone={data.blacklistHits.length ? 'rose' : 'emerald'} label={data.blacklistHits.length ? `${data.blacklistHits.length} flagged` : 'All clear'} />}>
+          <ChartCard title="Blacklist matches" icon={<ShieldAlert size={16} />} info="Registrations whose phone, ID or name matched an active blacklist entry" right={
+              data.blacklistHits.length ? (
+                <button type="button" onClick={() => openDrill({ title: 'Blacklist matches', params: { metric: 'blacklist' } })}>
+                  <StatusPill tone="rose" label={`${k.blacklistHits ?? data.blacklistHits.length} flagged`} />
+                </button>
+              ) : (
+                <StatusPill tone="emerald" label="All clear" />
+              )
+            }>
             {data.blacklistHits.length ? (
               <ul className="rows">
                 {data.blacklistHits.map((h: any, i: number) => (
-                  <li key={i} className="flex items-center gap-3 px-3.5 py-2.5">
+                  <li key={i}>
+                   <button type="button" onClick={() => openDrill({ title: 'Blacklist matches', params: { metric: 'blacklist' } })} className="row-link !py-2.5">
                     <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-rose-100 to-rose-50 text-rose-600"><Ban size={15} /></span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-800">{h.visitor}</p>
@@ -550,6 +733,7 @@ export default function AnalyticsPage() {
                       <StatusPill status={h.status} />
                       <p className="mt-0.5 text-[10px] text-slate-400">{relTime(h.at)}</p>
                     </div>
+                   </button>
                   </li>
                 ))}
               </ul>
@@ -559,59 +743,132 @@ export default function AnalyticsPage() {
           </ChartCard>
 
           <div className="grid grid-cols-2 gap-3">
-            <Kpi icon={<Percent size={18} />} label="Invites created" value={k.invitesCreated} cur={k.invitesCreated} prev={p.invitesCreated} tone="from-brand-50 to-brand-100 text-brand-600" tip="Invites created by hosts in this period" />
-            <Kpi icon={<ShieldAlert size={18} />} label="Approvals" value={k.approvals} tone="from-amber-50 to-amber-100 text-amber-600" tip="Walk-ins and invites approved by an administrator" />
+            <Kpi icon={<Percent size={18} />} label="Invites created" value={k.invitesCreated} cur={k.invitesCreated} prev={p.invitesCreated} tone="from-brand-50 to-brand-100 text-brand-600" tip="Invites created by hosts in this period" onClick={() => openDrill({ title: 'Invites created', params: { metric: 'invites' } })} />
+            <Kpi icon={<ShieldAlert size={18} />} label="Approvals" value={k.approvals} tone="from-amber-50 to-amber-100 text-amber-600" tip="Walk-ins and invites approved by an administrator" onClick={() => openDrill({ title: 'Approvals', params: { metric: 'approvals' } })} />
           </div>
         </div>
       )}
 
-      {/* Drill-down */}
+      {/* Drill-down: newest 100 records behind a number + capped CSV export */}
       <Sheet
         open={!!drill}
         onClose={() => { setDrill(null); setDetail(null); }}
-        icon={detail ? <UserRound size={20} /> : <Users size={20} />}
+        icon={detail ? <UserRound size={20} /> : res?.entity === 'invites' ? <FileText size={20} /> : <Users size={20} />}
         title={detail ? detail.fullName : drill?.title}
         subtitle={
           detail ? (
             <button type="button" className="text-brand-600 hover:underline" onClick={() => setDetail(null)}>
               ← Back to {drill?.title}
             </button>
-          ) : listLoading ? 'Loading…' : `${list.length} visitor${list.length === 1 ? '' : 's'}`
+          ) : listLoading ? 'Loading…' : res ? (
+            `${res.total.toLocaleString()} ${res.entity === 'invites' ? (res.total === 1 ? 'invite' : 'invites') : res.total === 1 ? 'visitor' : 'visitors'}${res.total > res.limit ? ` · showing newest ${res.limit}` : ''}`
+          ) : 'Could not load records'
         }
       >
         {detail ? (
           <div className="space-y-3">
             <VisitorCard v={detail} />
             <Fields>
-              <Field label="Visit">{detail.invite?.purpose}</Field>
-              <Field label="Category">{detail.invite?.category && <StatusPill status={detail.invite.category} />}</Field>
+              <Field label="Description">{detail.invite?.purpose}</Field>
+              <Field label="Purpose">{detail.invite?.category && <StatusPill status={detail.invite.category} />}</Field>
               <Field label="Host">{detail.invite?.host && <PersonLink id={detail.invite.host.id} name={detail.invite.host.fullName} />}</Field>
-              <Field label="Expected by">{detail.invite?.expectedMode && MODE_LABEL[detail.invite.expectedMode]}</Field>
+              <Field label="Arriving by">{detail.invite?.expectedMode && MODE_LABEL[detail.invite.expectedMode]}</Field>
+              <Field label="Arrived by">{detail.enteredAt ? MODE_LABEL[detail.entryMode || 'PEDESTRIAN'] : null}</Field>
+              <Field label="Location">{detail.locationName}</Field>
+              <Field label="Gate">{detail.gateName}</Field>
+              <Field label="Checked in">{detail.enteredAt && `${fmtDate(detail.enteredAt)}${detail.entryByName ? ` · ${detail.entryByName}` : ''}`}</Field>
+              <Field label="Checked out">{detail.exitedAt && `${fmtDate(detail.exitedAt)}${detail.exitByName ? ` · ${detail.exitByName}` : ''}`}</Field>
               <Field label="Email">{detail.email}</Field>
               <Field label="Phone">{detail.phone}</Field>
             </Fields>
           </div>
-        ) : listLoading ? (
-          <SkeletonList rows={5} />
-        ) : list.length === 0 ? (
-          <Empty icon={<Users size={22} />} title="No visitors" hint="Nothing matches this metric in the selected period." />
         ) : (
-          <ul className="rows stagger">
-            {list.map((v) => (
-              <li key={v.id}>
-                <button type="button" onClick={() => setDetail(v)} className="row-link group">
-                  <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={38} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold text-slate-800">{v.fullName}</span>
-                    <span className="block truncate text-xs text-slate-500">
-                      {[v.invite?.purpose, v.invite?.host?.fullName, relTime(v.enteredAt || v.createdAt)].filter(Boolean).join(' · ')}
-                    </span>
-                  </span>
-                  <StatusPill status={v.status} />
+          <div className="space-y-3">
+            {drill?.alts && (
+              <div className="segmented w-full">
+                {drill.alts.map((alt) => (
+                  <button
+                    key={alt.label}
+                    type="button"
+                    className="flex-1"
+                    data-active={alt.params.metric === drill.params.metric}
+                    onClick={() => openDrill({ ...drill, params: alt.params })}
+                  >
+                    {alt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-50/80 to-white px-3 py-2 ring-1 ring-brand-100/70">
+              <p className="min-w-0 flex-1 text-xs text-slate-600">
+                {listLoading || !res ? (
+                  'Fetching records…'
+                ) : (
+                  <>
+                    Showing <b className="text-slate-900">{Math.min(res.total, res.limit)}</b> of <b className="text-slate-900">{res.total.toLocaleString()}</b>, newest first
+                  </>
+                )}
+              </p>
+              <Tooltip
+                content={`Download as CSV — newest first, up to ${(res?.exportCap || 5000).toLocaleString()} rows. For more, narrow the date range.`}
+              >
+                <button
+                  type="button"
+                  onClick={exportDrill}
+                  disabled={exporting || listLoading || !res || res.total === 0}
+                  aria-label="Download CSV"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-700 text-white shadow-glow transition hover:-translate-y-0.5 hover:shadow-lg disabled:translate-y-0 disabled:opacity-40"
+                >
+                  {exporting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Download size={16} />}
                 </button>
-              </li>
-            ))}
-          </ul>
+              </Tooltip>
+            </div>
+            {res && res.total > res.exportCap && (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200">
+                {res.total.toLocaleString()} records match. The CSV holds the newest {res.exportCap.toLocaleString()} — narrow the date range to export the rest.
+              </p>
+            )}
+            {exportMsg && <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 ring-1 ring-slate-200">{exportMsg}</p>}
+            {listLoading ? (
+              <SkeletonList rows={5} />
+            ) : list.length === 0 ? (
+              <Empty icon={<Users size={22} />} title="No records" hint="Nothing matches this number in the selected period." />
+            ) : res?.entity === 'invites' ? (
+              <ul className="rows stagger">
+                {list.map((inv: any) => (
+                  <li key={inv.id} className="flex items-center gap-3 px-3.5 py-2.5">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${inv.category === 'PERSONAL' ? 'from-violet-50 to-violet-100 text-violet-600' : 'from-brand-50 to-brand-100 text-brand-600'}`}>
+                      <FileText size={16} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold text-slate-800">{inv.purpose || catLabel(inv.category)}</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {[catLabel(inv.category), inv.host?.fullName, `${inv.visitors?.length || 0}/${inv.guestCount || 1} guests`, relTime(inv.createdAt)].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <StatusPill status={inv.status} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul className="rows stagger">
+                {list.map((v: any) => (
+                  <li key={v.id}>
+                    <button type="button" onClick={() => setDetail(v)} className="row-link group">
+                      <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={38} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold text-slate-800">{v.fullName}</span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {[v.invite?.category && catLabel(v.invite.category), v.invite?.purpose, v.invite?.host?.fullName, relTime(v.enteredAt || v.createdAt)].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                      <StatusPill status={v.status} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </Sheet>
     </div>

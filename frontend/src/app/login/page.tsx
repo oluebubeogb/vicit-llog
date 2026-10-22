@@ -42,7 +42,6 @@ export default function LoginPage() {
 
   return (
     <div className="hero fixed inset-0 z-10 flex flex-col items-center justify-center overflow-y-auto !rounded-none px-6 pb-10 pt-[max(2rem,env(safe-area-inset-top))]">
-      <span className="hero-topo pointer-events-none absolute -bottom-40 -left-32 h-[460px] w-[460px] rotate-180 opacity-10" />
       <div className="relative w-full max-w-sm">
         <div className="animate-in mb-6">
           <InstallBanner variant="login" />

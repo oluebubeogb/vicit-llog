@@ -343,7 +343,7 @@ export default function NewInvitePage() {
         <section className="surface animate-in space-y-4">
           <p className="section-title">The visit</p>
           <div>
-            <span className="label">Category</span>
+            <span className="label">Purpose</span>
             <div className="segmented w-full">
               {(['OFFICIAL', 'PERSONAL'] as const).map((c) => (
                 <button key={c} type="button" data-active={purpose === c} onClick={() => setPurpose(c)} className="flex-1">
@@ -428,10 +428,8 @@ export default function NewInvitePage() {
                     <div className="grid grid-cols-1 gap-2 border-t border-slate-100 bg-gradient-to-b from-brand-50/40 to-white px-3.5 pb-3.5 pt-3">
                       <input value={g.fullName} onChange={(e) => updateGuest(i, 'fullName', e.target.value)} placeholder="Full name" className="input !py-2.5 text-sm" />
                       <input type="email" value={g.email} onChange={(e) => updateGuest(i, 'email', e.target.value)} placeholder="Email — invite link is sent here" className="input !py-2.5 text-sm" />
-                      <div className="grid grid-cols-2 gap-2">
-                        <input value={g.phone} onChange={(e) => updateGuest(i, 'phone', e.target.value)} placeholder="Phone" className="input !py-2.5 text-sm" />
-                        <input value={g.address} onChange={(e) => updateGuest(i, 'address', e.target.value)} placeholder="Address" className="input !py-2.5 text-sm" />
-                      </div>
+                      <input type="tel" inputMode="tel" value={g.phone} onChange={(e) => updateGuest(i, 'phone', e.target.value)} placeholder="Phone" className="input !py-2.5 text-sm" />
+                      <input value={g.address} onChange={(e) => updateGuest(i, 'address', e.target.value)} placeholder="Address" className="input !py-2.5 text-sm" />
                     </div>
                   </Collapse>
                 </div>

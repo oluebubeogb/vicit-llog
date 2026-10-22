@@ -174,12 +174,28 @@ export class AnalyticsService {
       mode,
       count,
     }));
-    const byLocation = countBy(cur.registered, (v) =>
-      v.invite?.locationId ? locName[v.invite.locationId] || 'Unknown location' : 'Main site',
-    ).map(([location, count]) => ({ location, count }));
-    const byGate = countBy(cur.entered, (v) => (v.gateId ? gateName[v.gateId] || 'Gate' : 'Main gate')).map(
-      ([gate, count]) => ({ gate, count }),
-    );
+    // keyed by id ('none' = not set) so every row can drill down to its records
+    const byLocation = countBy(cur.registered, (v) => v.invite?.locationId || 'none').map(([id, count]) => ({
+      id,
+      location: id === 'none' ? 'Main site' : locName[id] || 'Unknown location',
+      count,
+    }));
+    const byGate = countBy(cur.entered, (v) => v.gateId || 'none').map(([id, count]) => ({
+      id,
+      gate: id === 'none' ? 'Main gate' : gateName[id] || 'Gate',
+      count,
+    }));
+    // Official vs Personal (free-text descriptions are mostly unique, so purpose = category)
+    const categoryDetail = ['OFFICIAL', 'PERSONAL'].map((category) => {
+      const of = (xs: typeof visitors) => xs.filter((v) => (v.invite?.category || 'OFFICIAL') === category).length;
+      return {
+        category,
+        registered: of(cur.registered),
+        entries: of(cur.entered),
+        denied: of(cur.deniedL),
+        previous: of(prev.registered),
+      };
+    });
 
     const hostMap = new Map<string, { id: string; name: string; portfolio?: string | null; count: number; onSite: number }>();
     for (const v of cur.registered) {
@@ -195,12 +211,12 @@ export class AnalyticsService {
     // Returning / top visitors keyed by phone, else normalised name
     const vKey = (v: any) =>
       (v.phone && v.phone.replace(/\D/g, '').slice(-10)) || (v.fullName || '').trim().toLowerCase();
-    const visitorMap = new Map<string, { name: string; phone?: string | null; photoPath?: string | null; visits: number; lastVisit: Date }>();
+    const visitorMap = new Map<string, { key: string; name: string; phone?: string | null; photoPath?: string | null; visits: number; lastVisit: Date }>();
     for (const v of cur.registered) {
       if (/^guest \d+$/i.test(v.fullName || '')) continue;
       const k = vKey(v);
       if (!k) continue;
-      const e = visitorMap.get(k) || { name: v.fullName, phone: v.phone, photoPath: v.photoPath, visits: 0, lastVisit: v.createdAt };
+      const e = visitorMap.get(k) || { key: k, name: v.fullName, phone: v.phone, photoPath: v.photoPath, visits: 0, lastVisit: v.createdAt };
       e.visits++;
       if (v.createdAt > e.lastVisit) e.lastVisit = v.createdAt;
       if (!e.photoPath && v.photoPath) e.photoPath = v.photoPath;
@@ -256,6 +272,7 @@ export class AnalyticsService {
       peakHours,
       byPurpose,
       byCategory,
+      categoryDetail,
       byMode,
       byLocation,
       byGate,
@@ -265,74 +282,6 @@ export class AnalyticsService {
       blacklistHits: hits.slice(0, 20),
       inviteStatus,
     };
-  }
-
-  async listVisitors(
-    orgId: string,
-    days = 30,
-    filter?: {
-      status?: string;
-      purpose?: string;
-      entryMode?: string;
-      metric?: string;
-      from?: string;
-      to?: string;
-    },
-  ) {
-    let since = new Date();
-    since.setDate(since.getDate() - days);
-    let until = new Date();
-    if (filter?.from && !isNaN(+new Date(filter.from))) since = startOfDay(new Date(filter.from));
-    if (filter?.to && !isNaN(+new Date(filter.to))) until = endOfDay(new Date(filter.to));
-    const win = { gte: since, lte: until };
-    const where: any = {
-      invite: { organisationId: orgId },
-      createdAt: win,
-    };
-
-    const metric = filter?.metric;
-    if (metric === 'arrived') {
-      where.status = { in: ['ARRIVED', 'EXITED'] };
-      where.enteredAt = win;
-      delete where.createdAt;
-    } else if (metric === 'exited') {
-      where.status = 'EXITED';
-      where.exitedAt = win;
-      delete where.createdAt;
-    } else if (metric === 'activeNow') {
-      where.status = 'ARRIVED';
-      delete where.createdAt;
-    } else if (metric === 'denied') {
-      where.status = 'DENIED';
-      where.deniedAt = win;
-      delete where.createdAt;
-    } else if (filter?.status) {
-      where.status = filter.status;
-    }
-
-    if (filter?.purpose) {
-      where.invite = { ...where.invite, purpose: filter.purpose };
-    }
-    if (filter?.entryMode) {
-      where.entryMode = filter.entryMode;
-    }
-
-    return this.prisma.visitor.findMany({
-      where,
-      include: {
-        invite: {
-          select: {
-            purpose: true,
-            category: true,
-            expectedMode: true,
-            host: { select: { id: true, fullName: true, email: true } },
-            createdAt: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
   }
 
 }

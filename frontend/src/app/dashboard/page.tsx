@@ -1,5 +1,6 @@
 'use client';
 
+import LineArt from '@/components/ui/LineArt';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -97,7 +98,7 @@ function StatCard({
       onClick={onClick}
       className={`group relative isolate overflow-hidden rounded-3xl bg-gradient-to-br ${styles.bg} p-4 text-left text-white ${styles.glow} transition duration-300 hover:-translate-y-1 hover:shadow-lift active:scale-[0.98]`}
     >
-      <span className="hero-topo pointer-events-none absolute -right-10 -top-10 -z-10 h-32 w-32 opacity-20 transition duration-700 group-hover:rotate-12 group-hover:scale-110" />
+      <LineArt className="-z-10 text-white transition duration-700 group-hover:scale-110" opacity={0.09} />
       <div className="flex items-center justify-between">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 ring-1 ring-white/30 backdrop-blur transition group-hover:scale-110">
           {icon}
@@ -143,11 +144,13 @@ function Drill({ list, onPick, kind }: { list: any[]; onPick: (i: any) => void; 
   const registered = list.reduce((a, i) => a + (i.visitors?.length || 0), 0);
   const arrived = list.reduce((a, i) => a + (i.visitors || []).filter((v: any) => v.enteredAt).length, 0);
   const onSite = list.reduce((a, i) => a + (i.visitors || []).filter((v: any) => v.status === 'ARRIVED').length, 0);
-  const purposes = Object.entries(
-    list.reduce((m: Record<string, number>, i) => ((m[i.purpose] = (m[i.purpose] || 0) + 1), m), {}),
-  )
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4);
+  // Descriptions are free text (mostly unique), so the breakdown is Official vs Personal.
+  const [cat, setCat] = useState<'OFFICIAL' | 'PERSONAL' | null>(null);
+  const cats = (['OFFICIAL', 'PERSONAL'] as const).map((c) => ({
+    c,
+    n: list.filter((i) => (i.category || 'OFFICIAL') === c).length,
+  }));
+  const shown = cat ? list.filter((i) => (i.category || 'OFFICIAL') === cat) : list;
   const tiles =
     kind === 'active'
       ? [
@@ -162,7 +165,6 @@ function Drill({ list, onPick, kind }: { list: any[]; onPick: (i: any) => void; 
           { l: 'Registered', v: registered },
           { l: 'Oldest', v: list.length ? Math.max(...list.map((i) => Math.floor((Date.now() - +new Date(i.createdAt)) / DAY))) : 0 },
         ];
-  const max = Math.max(1, ...purposes.map((p) => p[1]));
   return (
     <div className="space-y-4">
       <div className="stagger grid grid-cols-4 gap-2">
@@ -176,28 +178,51 @@ function Drill({ list, onPick, kind }: { list: any[]; onPick: (i: any) => void; 
           </div>
         ))}
       </div>
-      {purposes.length > 0 && (
-        <div className="tile-muted space-y-2">
-          <p className="eyebrow">Top purposes</p>
-          {purposes.map(([p, n]) => (
-            <div key={p} className="text-xs">
-              <div className="mb-0.5 flex justify-between font-medium text-slate-600">
-                <span className="truncate">{p}</span>
-                <span>{n}</span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/70">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${kind === 'active' ? 'from-brand-400 to-accent-600' : 'from-amber-300 to-amber-500'}`}
-                  style={{ width: `${(n / max) * 100}%` }}
-                />
-              </div>
-            </div>
-          ))}
+      {list.length > 0 && (
+        <div className="tile-muted space-y-2.5">
+          <p className="eyebrow flex items-center justify-between">
+            Official vs personal
+            {cat && (
+              <button type="button" onClick={() => setCat(null)} className="text-[10px] font-semibold normal-case tracking-normal text-brand-600 hover:underline">
+                Show all
+              </button>
+            )}
+          </p>
+          {cats.map(({ c, n }) => {
+            const pct = list.length ? Math.round((n / list.length) * 100) : 0;
+            const on = cat === c;
+            return (
+                <button
+                  key={c}
+                  type="button"
+                  title={`Show only ${c === 'OFFICIAL' ? 'official' : 'personal'} invites`}
+                  onClick={() => setCat(on ? null : c)}
+                  aria-pressed={on}
+                  className={`block w-full rounded-xl px-2 py-1.5 text-left text-xs transition hover:bg-white ${on ? 'bg-white shadow-soft ring-1 ring-brand-200' : ''}`}
+                >
+                  <span className="mb-1 flex items-center justify-between font-medium text-slate-600">
+                    <span className="flex items-center gap-1.5">
+                      <span className={`h-2 w-2 rounded-full ${c === 'OFFICIAL' ? 'bg-brand-500' : 'bg-violet-500'}`} />
+                      {c === 'OFFICIAL' ? 'Official' : 'Personal'}
+                    </span>
+                    <span>
+                      <b className="text-slate-900">{n}</b> <span className="text-slate-400">· {pct}%</span>
+                    </span>
+                  </span>
+                  <span className="block h-1.5 overflow-hidden rounded-full bg-slate-200/70">
+                    <span
+                      className={`block h-full rounded-full bg-gradient-to-r ${c === 'OFFICIAL' ? 'from-brand-400 to-brand-600' : 'from-violet-400 to-violet-600'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </span>
+                </button>
+            );
+          })}
         </div>
       )}
-      {list.length ? (
+      {shown.length ? (
         <ul className="rows stagger">
-          {list.map((inv) => (
+          {shown.map((inv) => (
             <InviteRow key={inv.id} inv={inv} onClick={() => onPick(inv)} />
           ))}
         </ul>
@@ -416,6 +441,7 @@ export default function DashboardPage() {
           <InviteDetail inv={invite} />
         ) : (
           <Drill
+            key={drillKind === 'pending' ? 'pending' : 'active'}
             kind={drillKind === 'pending' ? 'pending' : 'active'}
             list={drillKind === 'pending' ? s.pend : s.act}
             onPick={(i) => setView({ kind: 'invite', invite: i, from: drillKind as any })}

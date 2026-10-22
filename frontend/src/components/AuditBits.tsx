@@ -13,7 +13,7 @@ import {
   ShieldOff,
   UserCog,
 } from 'lucide-react';
-import { titleCase } from '@/lib/format';
+import { MODE_LABEL, titleCase } from '@/lib/format';
 
 export type AuditTone = 'brand' | 'emerald' | 'amber' | 'rose' | 'violet';
 export type AuditGroup = 'gate' | 'invites' | 'people' | 'security';
@@ -46,6 +46,7 @@ export function fmtValue(v: any): string {
   if (v === true) return 'Yes';
   if (v === false) return 'No';
   if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'string' && MODE_LABEL[v]) return MODE_LABEL[v]; // PEDESTRIAN → On foot
   // Enum-like values (STAFF, OFFLINE_PENDING) read better title-cased; keep short acronyms (HR, IT) as typed
   if (typeof v === 'string' && /^[A-Z]+(_[A-Z]+)*$/.test(v) && v.length > 3) return v === 'GATE' ? 'Gate officer' : titleCase(v);
   if (typeof v === 'object') return JSON.stringify(v);

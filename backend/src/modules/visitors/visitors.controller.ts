@@ -58,11 +58,13 @@ export class VisitorsController {
     @Res() res: Response,
   ) {
     const id = visitorId.replace(/\.png$/i, '');
-    const png = await this.visitorsService.getQrPng(token, id);
+    const { png, filename } = await this.visitorsService.getQrPng(token, id);
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Length', String(png.length));
     res.setHeader('Cache-Control', 'private, max-age=86400');
-    res.setHeader('Content-Disposition', 'inline; filename="gate-qr.png"');
+    // ?download=1 forces a save dialog (visitor page "Download" button); default stays inline
+    const disposition = (res.req as any)?.query?.download ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
     res.end(png);
   }
 

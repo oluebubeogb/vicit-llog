@@ -76,7 +76,7 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (brand.name && typeof document !== 'undefined') {
       const base = brand.name;
-      if (!document.title || document.title === 'Vicit Llog' || !document.title.includes(base)) document.title = base;
+      if (document.title !== 'Not found' && (!document.title || document.title === 'Vicit Llog' || !document.title.includes(base))) document.title = base;
     }
   }, [brand.name]);
 

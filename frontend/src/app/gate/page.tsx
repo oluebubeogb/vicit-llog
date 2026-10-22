@@ -26,7 +26,7 @@ import Avatar from '@/components/ui/Avatar';
 import Collapse from '@/components/ui/Collapse';
 import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
-import { fmtDate } from '@/lib/format';
+import { fmtDate, MODE_LABEL } from '@/lib/format';
 import {
   cameraSupport,
   decodeFromSource,
@@ -452,7 +452,7 @@ export default function GatePage() {
           <div>
             <span className="label">
               Arriving by
-              <InfoTip text={`Pre-filled from the invite${result.expectedMode ? ` (expected: ${result.expectedMode.toLowerCase()})` : ''}; change it if the visitor arrives differently.`} />
+              <InfoTip text={`Pre-filled from the invite${result.expectedMode ? ` (arriving by: ${(MODE_LABEL[result.expectedMode] || result.expectedMode).toLowerCase()})` : ''}; change it if the visitor arrives differently.`} />
             </span>
             <div className="segmented w-full">
               {MODES.map((m) => (

@@ -38,9 +38,10 @@
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   /* topo-line artwork used as a mask so it can be tinted with brand colours */
-  --art-topo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' viewBox='0 0 240 240' fill='none' stroke='black' stroke-width='1'%3E%3Ccircle cx='200' cy='40' r='30'/%3E%3Ccircle cx='200' cy='40' r='52'/%3E%3Ccircle cx='200' cy='40' r='76'/%3E%3Ccircle cx='200' cy='40' r='102'/%3E%3Ccircle cx='200' cy='40' r='130'/%3E%3Ccircle cx='200' cy='40' r='160'/%3E%3C/svg%3E");
+  /* Edge-to-edge line art: every path starts and ends outside the viewBox, so with
+     mask-size: cover no line visibly begins or stops inside a card. */
+  --art-lines: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 240' preserveAspectRatio='xMidYMid slice' fill='none' stroke='black' stroke-width='1' vector-effect='non-scaling-stroke'%3E%3Cg vector-effect='non-scaling-stroke'%3E%3Cpath d='M-60 18 C 40 -8, 110 48, 200 22 S 340 -12, 460 28' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 46 C 40 20, 110 76, 200 50 S 340 16, 460 56' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 74 C 40 48, 110 104, 200 78 S 340 44, 460 84' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 102 C 40 76, 110 132, 200 106 S 340 72, 460 112' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 130 C 40 104, 110 160, 200 134 S 340 100, 460 140' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 158 C 40 132, 110 188, 200 162 S 340 128, 460 168' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 186 C 40 160, 110 216, 200 190 S 340 156, 460 196' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 214 C 40 188, 110 244, 200 218 S 340 184, 460 224' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M-60 242 C 40 216, 110 272, 200 246 S 340 212, 460 252' vector-effect='non-scaling-stroke'/%3E%3Ccircle cx='430' cy='-40' r='90' vector-effect='non-scaling-stroke'/%3E%3Ccircle cx='430' cy='-40' r='140' vector-effect='non-scaling-stroke'/%3E%3Ccircle cx='430' cy='-40' r='195' vector-effect='non-scaling-stroke'/%3E%3Ccircle cx='430' cy='-40' r='255' vector-effect='non-scaling-stroke'/%3E%3Ccircle cx='430' cy='-40' r='320' vector-effect='non-scaling-stroke'/%3E%3C/g%3E%3C/svg%3E");
   --art-dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='2' cy='2' r='1' fill='black'/%3E%3C/svg%3E");
-  --art-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='120' viewBox='0 0 320 120' fill='none' stroke='black' stroke-width='1.2'%3E%3Cpath d='M0 90 C 60 60, 110 120, 170 86 S 270 40, 320 70'/%3E%3Cpath d='M0 104 C 60 74, 110 134, 170 100 S 270 54, 320 84'/%3E%3Cpath d='M0 76 C 60 46, 110 106, 170 72 S 270 26, 320 56'/%3E%3C/svg%3E");
   color-scheme: light;
 }
 
@@ -110,10 +111,11 @@ body {
   }
   .surface::before {
     content: '';
-    @apply pointer-events-none absolute -right-10 -top-10 -z-10 h-56 w-56 opacity-[0.09];
+    @apply pointer-events-none absolute inset-0 -z-10;
     background: rgb(var(--brand-500));
-    -webkit-mask: var(--art-topo) no-repeat center / contain;
-    mask: var(--art-topo) no-repeat center / contain;
+    opacity: 0.05;
+    -webkit-mask: var(--art-lines) center / cover no-repeat;
+    mask: var(--art-lines) center / cover no-repeat;
   }
 
   /* ---------- level 2: card ---------- */
@@ -124,14 +126,14 @@ body {
   }
   .card::after {
     content: '';
-    @apply pointer-events-none absolute -right-6 -top-8 -z-10 h-28 w-28 opacity-0;
-    background: rgb(var(--brand-400));
-    -webkit-mask: var(--art-topo) no-repeat center / contain;
-    mask: var(--art-topo) no-repeat center / contain;
+    @apply pointer-events-none absolute inset-0 -z-10 opacity-0;
+    background: rgb(var(--brand-500));
+    -webkit-mask: var(--art-lines) center / cover no-repeat;
+    mask: var(--art-lines) center / cover no-repeat;
     transition: opacity 0.45s var(--ease-out), transform 0.6s var(--ease-out);
   }
   .card-art::after {
-    @apply opacity-[0.07];
+    @apply opacity-[0.045];
   }
   .card-hover {
     @apply cursor-pointer;
@@ -145,8 +147,9 @@ body {
   .card-hover:hover::after,
   a.card:hover::after,
   button.card:hover::after {
-    @apply opacity-[0.12];
-    transform: rotate(18deg) scale(1.08);
+    @apply opacity-[0.07];
+    /* scale only (>1) so the edge-to-edge lines keep covering the card */
+    transform: scale(1.06);
   }
   .card-hover:active,
   a.card:active,
@@ -298,20 +301,15 @@ body {
       radial-gradient(120% 140% at 100% 0%, rgb(var(--accent-400) / 0.55), transparent 55%),
       linear-gradient(135deg, rgb(var(--brand-600)), rgb(var(--brand-800)) 60%, rgb(var(--accent-900)));
   }
+  /* One faint, edge-to-edge line-art layer (shared with .line-art / <LineArt />). Very low
+     opacity so it never competes with the text on top of it. */
   .hero::before {
     content: '';
-    @apply pointer-events-none absolute -right-16 -top-16 -z-10 h-72 w-72 opacity-25;
+    @apply pointer-events-none absolute inset-0 -z-10;
     background: white;
-    -webkit-mask: var(--art-topo) no-repeat center / contain;
-    mask: var(--art-topo) no-repeat center / contain;
-    animation: float 9s ease-in-out infinite;
-  }
-  .hero::after {
-    content: '';
-    @apply pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-24 opacity-20;
-    background: white;
-    -webkit-mask: var(--art-wave) repeat-x bottom / 320px 120px;
-    mask: var(--art-wave) repeat-x bottom / 320px 120px;
+    opacity: 0.085;
+    -webkit-mask: var(--art-lines) center / cover no-repeat;
+    mask: var(--art-lines) center / cover no-repeat;
   }
 
   /* ---------- dotted artwork overlay ---------- */
@@ -394,8 +392,11 @@ body {
   }
 }
 
-.hero-topo {
-  background: white;
-  -webkit-mask: var(--art-topo) no-repeat center / contain;
-  mask: var(--art-topo) no-repeat center / contain;
+.line-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: currentColor;
+  -webkit-mask: var(--art-lines) center / cover no-repeat;
+  mask: var(--art-lines) center / cover no-repeat;
 }
