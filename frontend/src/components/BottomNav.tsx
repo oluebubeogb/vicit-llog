@@ -67,7 +67,12 @@ export default function BottomNav() {
     // Clear badge when viewing alerts; also refresh on route change
     if (pathname === '/notifications') setUnread(0);
     const t = setInterval(load, 60000);
-    return () => clearInterval(t);
+    // Foreground push → refresh badge right away
+    window.addEventListener('vicit:notification', load);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('vicit:notification', load);
+    };
   }, [pathname]);
 
   if (!mounted) return null;

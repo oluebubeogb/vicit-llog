@@ -4,6 +4,7 @@ import BottomNav from '@/components/BottomNav';
 import BrandProvider from '@/components/BrandProvider';
 import SplashScreen from '@/components/SplashScreen';
 import BackgroundArt from '@/components/BackgroundArt';
+import PushRegister from '@/components/PushRegister';
 import { BRAND_BOOT_SCRIPT } from '@/lib/brand';
 
 const APP = process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog';
@@ -71,10 +72,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <SplashScreen />
           <main className="relative mx-auto min-h-screen max-w-lg pb-28 pt-[env(safe-area-inset-top)]">{children}</main>
           <BottomNav />
+          <PushRegister />
         </BrandProvider>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}`,
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'}).catch(()=>{});});}`,
           }}
         />
       </body>

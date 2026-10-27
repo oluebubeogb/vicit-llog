@@ -16,8 +16,26 @@ export function setToken(token: string) {
   localStorage.setItem('vicit_token', token);
 }
 
+const PUSH_TOKEN_KEY = 'vicit_push_token';
+
 export function clearToken() {
   if (typeof window === 'undefined') return;
+  // Best-effort: detach this device's push token from the account before the JWT goes away.
+  try {
+    const push = localStorage.getItem(PUSH_TOKEN_KEY);
+    const jwt = localStorage.getItem('vicit_token');
+    if (push && jwt) {
+      fetch(`${API_URL}/notifications/push-token`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ token: push }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    localStorage.removeItem(PUSH_TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
   localStorage.removeItem('vicit_token');
   localStorage.removeItem('vicit_user');
 }
@@ -123,6 +141,14 @@ export const api = {
     request(`/notifications/${id}/read`, { method: 'PATCH' }),
   markAllRead: () =>
     request('/notifications/read-all', { method: 'PATCH' }),
+  registerPushToken: (token: string, platform = 'web', userAgent?: string) =>
+    request('/notifications/push-token', {
+      method: 'POST',
+      body: JSON.stringify({ token, platform, ...(userAgent ? { userAgent: userAgent.slice(0, 500) } : {}) }),
+    }),
+  unregisterPushToken: (token: string) =>
+    request('/notifications/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
+  pushStatus: (): Promise<{ enabled: boolean }> => request('/notifications/push-status'),
   users: () => request('/users'),
   createUser: (data: any) =>
     request('/users', { method: 'POST', body: JSON.stringify(data) }),

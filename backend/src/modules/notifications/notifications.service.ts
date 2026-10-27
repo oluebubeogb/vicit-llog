@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { sendSms } from './providers/sms.provider';
 import { sendWhatsApp } from './providers/whatsapp.provider';
+import { isPushReady, pushEnabledFlag, sendPush } from './providers/push.provider';
 
 @Injectable()
 export class NotificationsService {
@@ -10,7 +11,8 @@ export class NotificationsService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Create in-app notification and optionally fan-out to SMS / WhatsApp.
+   * Create in-app notification and fan-out to SMS / WhatsApp (when requested)
+   * and Firebase web push (every in-app notification, when ENABLE_PUSH + service account).
    */
   async create(data: {
     userId: string;
@@ -54,6 +56,19 @@ export class NotificationsService {
       }
     }
 
+    if (channels.includes('in_app') && pushEnabledFlag()) {
+      try {
+        delivery.push = await this.pushToUser(data.userId, {
+          title: data.title,
+          body: data.body,
+          notificationId: notification.id,
+        });
+      } catch (e: any) {
+        delivery.push = { ok: false, error: e?.message || String(e) };
+        this.logger.warn(`Push failed for user ${data.userId}: ${delivery.push.error}`);
+      }
+    }
+
     if (Object.keys(delivery).length) {
       await this.prisma.notification.update({
         where: { id: notification.id },
@@ -62,6 +77,59 @@ export class NotificationsService {
     }
 
     return notification;
+  }
+
+  /** Send an FCM push to every registered device of a user; prunes dead tokens. */
+  private async pushToUser(userId: string, msg: { title: string; body: string; notificationId: string }) {
+    const devices = await (this.prisma as any).pushDevice.findMany({
+      where: { userId },
+      select: { token: true },
+    });
+    const tokens: string[] = devices.map((d: any) => d.token);
+    if (!tokens.length) return { ok: false, sent: 0, devices: 0, error: 'No registered devices' };
+    const url = '/notifications';
+    const res = await sendPush(tokens, {
+      title: msg.title,
+      body: msg.body,
+      link: url,
+      data: { url, notificationId: msg.notificationId },
+    });
+    if (res.invalidTokens.length) {
+      await (this.prisma as any).pushDevice
+        .deleteMany({ where: { token: { in: res.invalidTokens } } })
+        .catch(() => {});
+    }
+    if (!res.ok && res.error) this.logger.warn(`Push not delivered for user ${userId}: ${res.error}`);
+    return {
+      ok: res.ok,
+      sent: res.sent,
+      failed: res.failed,
+      devices: tokens.length,
+      pruned: res.invalidTokens.length,
+      ...(res.error ? { error: res.error } : {}),
+    };
+  }
+
+  async registerPushToken(userId: string, dto: { token: string; platform?: string; userAgent?: string }) {
+    const token = dto.token.trim();
+    const platform = (dto.platform || 'web').slice(0, 32);
+    const userAgent = dto.userAgent ? dto.userAgent.slice(0, 512) : null;
+    // Upsert by token: a shared device that logs in as another user is reassigned.
+    await (this.prisma as any).pushDevice.upsert({
+      where: { token },
+      update: { userId, platform, userAgent },
+      create: { userId, token, platform, userAgent },
+    });
+    return { ok: true, enabled: isPushReady() };
+  }
+
+  async removePushToken(userId: string, token: string) {
+    const r = await (this.prisma as any).pushDevice.deleteMany({ where: { token: token.trim(), userId } });
+    return { ok: true, removed: r.count };
+  }
+
+  pushStatus() {
+    return { enabled: isPushReady() };
   }
 
   /**

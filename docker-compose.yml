@@ -37,6 +37,8 @@ services:
       PORT: "4000"
       PHOTO_RETENTION_DAYS: ${PHOTO_RETENTION_DAYS:-90}
       ENABLE_PUSH: ${ENABLE_PUSH:-false}
+      # Firebase Admin service-account JSON (single line). Secret — set only in Coolify.
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
       SMS_PROVIDER: ${SMS_PROVIDER:-}
       WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
@@ -74,6 +76,14 @@ services:
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Vicit Llog}
       # Server-side URL the Next server uses to read branding for the dynamic PWA manifest
       API_INTERNAL_URL: ${API_INTERNAL_URL:-http://backend:4000}
+      # Firebase web push (public web config + VAPID public key), read at runtime — no rebuild
+      FIREBASE_API_KEY: ${FIREBASE_API_KEY:-}
+      FIREBASE_AUTH_DOMAIN: ${FIREBASE_AUTH_DOMAIN:-}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-}
+      FIREBASE_MESSAGING_SENDER_ID: ${FIREBASE_MESSAGING_SENDER_ID:-}
+      FIREBASE_APP_ID: ${FIREBASE_APP_ID:-}
+      FIREBASE_VAPID_KEY: ${FIREBASE_VAPID_KEY:-}
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
     expose:
