@@ -30,7 +30,7 @@ export class AuditService {
       take: limit,
       orderBy: { createdAt: 'desc' },
       include: {
-        user: { select: { id: true, fullName: true, email: true } },
+        user: { select: { id: true, fullName: true, email: true, role: true, avatarPath: true } },
       },
     });
 
@@ -38,15 +38,17 @@ export class AuditService {
     const visitorIds = new Set<string>();
     const inviteIds = new Set<string>();
     const userIds = new Set<string>();
+    const blacklistIds = new Set<string>();
     for (const r of rows) {
       if (!r.entityId) continue;
       const e = (r.entity || '').toLowerCase();
       if (e === 'visitor') visitorIds.add(r.entityId);
       else if (e === 'invite') inviteIds.add(r.entityId);
       else if (e === 'user') userIds.add(r.entityId);
+      else if (e === 'blacklistentry') blacklistIds.add(r.entityId);
     }
 
-    const [visitors, invites, users] = await Promise.all([
+    const [visitors, invites, users, blacklist] = await Promise.all([
       visitorIds.size
         ? this.prisma.visitor.findMany({
             where: { id: { in: [...visitorIds] } },
@@ -118,8 +120,15 @@ export class AuditService {
             },
           })
         : Promise.resolve([] as any[]),
+      blacklistIds.size
+        ? this.prisma.blacklistEntry.findMany({
+            where: { id: { in: [...blacklistIds] } },
+            select: { id: true, fullName: true, phone: true, idNumber: true, reason: true, isActive: true, createdAt: true },
+          })
+        : Promise.resolve([] as any[]),
     ]);
 
+    const bMap = Object.fromEntries(blacklist.map((b) => [b.id, b]));
     const vMap = Object.fromEntries(visitors.map((v) => [v.id, v]));
     const iMap = Object.fromEntries(invites.map((i) => [i.id, i]));
     const uMap = Object.fromEntries(users.map((u) => [u.id, u]));
@@ -131,6 +140,7 @@ export class AuditService {
         if (e === 'visitor') related = vMap[r.entityId] || null;
         else if (e === 'invite') related = iMap[r.entityId] || null;
         else if (e === 'user') related = uMap[r.entityId] || null;
+        else if (e === 'blacklistentry') related = bMap[r.entityId] || null;
       }
       return { ...r, related };
     });

@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { isValidEmail } from '../../common/utils/email';
+import { AuditService } from '../audit/audit.service';
 
 const userSelect = {
   id: true,
@@ -40,6 +41,7 @@ export class UsersService {
     private prisma: PrismaService,
     private mail: MailService,
     private notifications: NotificationsService,
+    private audit: AuditService,
   ) {}
 
   async create(dto: CreateUserDto, orgId: string) {
@@ -82,14 +84,14 @@ export class UsersService {
   async findAll(orgId: string) {
     return this.prisma.user.findMany({
       where: { organisationId: orgId },
-      select: userSelect,
+      select: { ...userSelect, updatedAt: true, _count: { select: { invites: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findById(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
+  async findById(id: string, orgId?: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, ...(orgId ? { organisationId: orgId } : {}) },
       select: { ...userSelect, organisationId: true },
     });
     if (!user) throw new NotFoundException('User not found');
@@ -121,27 +123,89 @@ export class UsersService {
     };
   }
 
+  /**
+   * Admin edit of a staff member. Editable: fullName, email, phone, portfolio, role, isActive.
+   * Validated, org-scoped, self-lockout protected and audit-logged with a from → to diff.
+   */
   async updateStaff(
     userId: string,
     orgId: string,
-    data: { fullName?: string; phone?: string; portfolio?: string; role?: Role; isActive?: boolean },
+    data: {
+      fullName?: string;
+      email?: string;
+      phone?: string | null;
+      portfolio?: string | null;
+      role?: Role;
+      isActive?: boolean;
+    },
+    actorId?: string,
   ) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, organisationId: orgId },
     });
     if (!user) throw new NotFoundException('User not found');
 
-    return this.prisma.user.update({
+    const next: Record<string, any> = {};
+    if (data.fullName !== undefined) {
+      const v = String(data.fullName || '').trim();
+      if (v.length < 2 || v.length > 120) throw new BadRequestException('Full name must be 2–120 characters');
+      next.fullName = v;
+    }
+    if (data.email !== undefined) {
+      const v = String(data.email || '').trim().toLowerCase();
+      if (!isValidEmail(v)) throw new BadRequestException('Please enter a valid email address that can receive mail.');
+      if (v !== user.email) {
+        const taken = await this.prisma.user.findUnique({ where: { email: v } });
+        if (taken) throw new ConflictException('Email already registered');
+      }
+      next.email = v;
+    }
+    if (data.phone !== undefined) {
+      const v = String(data.phone || '').trim();
+      if (v && !/^\+?[0-9 ()-]{7,20}$/.test(v)) throw new BadRequestException('Phone number looks invalid');
+      next.phone = v || null;
+    }
+    if (data.portfolio !== undefined) {
+      const v = String(data.portfolio || '').trim();
+      if (v.length > 120) throw new BadRequestException('Portfolio is too long');
+      next.portfolio = v || null;
+    }
+    if (data.role !== undefined) {
+      if (!Object.values(Role).includes(data.role as Role)) throw new BadRequestException('Invalid role');
+      next.role = data.role;
+    }
+    if (data.isActive !== undefined) next.isActive = Boolean(data.isActive);
+
+    if (actorId && actorId === userId) {
+      if (next.isActive === false) throw new BadRequestException('You cannot deactivate your own account');
+      if (next.role && next.role !== Role.ADMIN) throw new BadRequestException('You cannot remove your own admin role');
+    }
+
+    const changes: Record<string, { from: any; to: any }> = {};
+    for (const [k, v] of Object.entries(next)) {
+      const before = (user as any)[k] ?? null;
+      if (before !== v) changes[k] = { from: before, to: v };
+      else delete next[k];
+    }
+    if (!Object.keys(next).length) {
+      return this.prisma.user.findUnique({ where: { id: userId }, select: userSelect });
+    }
+
+    const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        fullName: data.fullName,
-        phone: data.phone,
-        portfolio: data.portfolio,
-        role: data.role,
-        isActive: data.isActive,
-      },
+      data: next,
       select: userSelect,
     });
+
+    await this.audit.log({
+      action: 'USER_UPDATED',
+      entity: 'User',
+      entityId: userId,
+      userId: actorId,
+      details: { changes },
+    });
+
+    return updated;
   }
 
   async bulkCreate(

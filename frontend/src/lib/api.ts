@@ -16,8 +16,26 @@ export function setToken(token: string) {
   localStorage.setItem('vicit_token', token);
 }
 
+const PUSH_TOKEN_KEY = 'vicit_push_token';
+
 export function clearToken() {
   if (typeof window === 'undefined') return;
+  // Best-effort: detach this device's push token from the account before the JWT goes away.
+  try {
+    const push = localStorage.getItem(PUSH_TOKEN_KEY);
+    const jwt = localStorage.getItem('vicit_token');
+    if (push && jwt) {
+      fetch(`${API_URL}/notifications/push-token`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ token: push }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    localStorage.removeItem(PUSH_TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
   localStorage.removeItem('vicit_token');
   localStorage.removeItem('vicit_user');
 }
@@ -35,6 +53,12 @@ export function getUser() {
 export function setUser(user: any) {
   if (typeof window === 'undefined') return;
   localStorage.setItem('vicit_user', JSON.stringify(user));
+}
+
+function toQuery(params: Record<string, string | number | undefined | null>) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+  return q.toString();
 }
 
 async function request(path: string, options: RequestInit = {}) {
@@ -117,26 +141,69 @@ export const api = {
     request(`/notifications/${id}/read`, { method: 'PATCH' }),
   markAllRead: () =>
     request('/notifications/read-all', { method: 'PATCH' }),
+  registerPushToken: (token: string, platform = 'web', userAgent?: string) =>
+    request('/notifications/push-token', {
+      method: 'POST',
+      body: JSON.stringify({ token, platform, ...(userAgent ? { userAgent: userAgent.slice(0, 500) } : {}) }),
+    }),
+  unregisterPushToken: (token: string) =>
+    request('/notifications/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
+  pushStatus: (): Promise<{ enabled: boolean }> => request('/notifications/push-status'),
   users: () => request('/users'),
   createUser: (data: any) =>
     request('/users', { method: 'POST', body: JSON.stringify(data) }),
   audit: () => request('/audit'),
-  analytics: (days = 30) => request(`/analytics/dashboard?days=${days}`),
+  analytics: (days = 30, from?: string, to?: string) => {
+    const q = new URLSearchParams({ days: String(days) });
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    return request(`/analytics/dashboard?${q.toString()}`);
+  },
   analyticsVisitors: (params: {
     days?: number;
     metric?: string;
     purpose?: string;
     entryMode?: string;
     status?: string;
+    from?: string;
+    to?: string;
   }) => {
     const q = new URLSearchParams();
     if (params.days) q.set('days', String(params.days));
+    if (params.from) q.set('from', params.from);
+    if (params.to) q.set('to', params.to);
     if (params.metric) q.set('metric', params.metric);
     if (params.purpose) q.set('purpose', params.purpose);
     if (params.entryMode) q.set('entryMode', params.entryMode);
     if (params.status) q.set('status', params.status);
     return request(`/analytics/visitors?${q.toString()}`);
   },
+  /** Newest 100 records behind any analytics number, plus the real total. */
+  analyticsDrill: (params: Record<string, string | number | undefined | null>) =>
+    request(`/analytics/drill?${toQuery(params)}`),
+  /** Full CSV (server-capped) of a drill-down; returns the file plus cap info from headers. */
+  analyticsExport: async (params: Record<string, string | number | undefined | null>) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/analytics/drill/export?${toQuery(params)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || 'Export failed');
+    }
+    const cd = res.headers.get('content-disposition') || '';
+    const name = /filename="?([^";]+)"?/i.exec(cd)?.[1] || 'vicit-export.csv';
+    return {
+      blob: await res.blob(),
+      name,
+      total: Number(res.headers.get('x-export-total') || 0),
+      cap: Number(res.headers.get('x-export-cap') || 0),
+      truncated: res.headers.get('x-export-truncated') === 'true',
+    };
+  },
+  /** Ranked multi-word search across invites and their visitors (server-side). */
+  searchInvites: (q: string, page = 1, pageSize = 30) =>
+    request(`/invites/search?${toQuery({ q, page, pageSize })}`),
   blacklist: () => request('/blacklist'),
   addBlacklist: (data: any) =>
     request('/blacklist', { method: 'POST', body: JSON.stringify(data) }),
@@ -169,6 +236,7 @@ export const api = {
   visitorHistory: (q: string) =>
     request(`/reports/history?q=${encodeURIComponent(q)}`),
   branding: () => request('/branding'),
+  publicBranding: () => request('/branding/public'),
   updateBranding: (data: any) =>
     request('/branding', { method: 'PATCH', body: JSON.stringify(data) }),
   health: () => request('/health'),

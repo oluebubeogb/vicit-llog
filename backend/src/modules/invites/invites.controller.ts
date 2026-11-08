@@ -19,7 +19,7 @@ export class InvitesController {
   @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
   @ApiOperation({ summary: 'Create visitor invite' })
   create(@Body() dto: CreateInviteDto, @CurrentUser() user: any) {
-    return this.invitesService.create(dto, user.id, user.orgId);
+    return this.invitesService.create(dto, user.id, user.orgId, user.role);
   }
 
   @Get('mine')
@@ -29,6 +29,25 @@ export class InvitesController {
   @ApiOperation({ summary: 'List my invites' })
   mine(@CurrentUser() user: any) {
     return this.invitesService.findMyInvites(user.id);
+  }
+
+  @Get('search')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
+  @ApiOperation({ summary: 'Ranked multi-word search across invites and their visitors' })
+  search(
+    @CurrentUser() user: any,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.invitesService.search(
+      { id: user.id, role: user.role, orgId: user.orgId },
+      typeof q === 'string' ? q.slice(0, 200) : '',
+      parseInt(page || '1', 10) || 1,
+      parseInt(pageSize || '30', 10) || 30,
+    );
   }
 
   @Get()
@@ -59,7 +78,7 @@ export class InvitesController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Admin: approve offline visitor request' })
+  @ApiOperation({ summary: 'Admin: approve an offline request or an invite awaiting approval' })
   approveOffline(@Param('id') id: string, @CurrentUser() user: any) {
     return this.invitesService.approveOffline(id, user.id, user.orgId);
   }

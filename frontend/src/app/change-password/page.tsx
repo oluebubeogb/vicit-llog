@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Check, KeyRound, Lock } from 'lucide-react';
 import { api, getUser, setUser } from '@/lib/api';
+import BrandMark from '@/components/BrandMark';
+import { InfoTip } from '@/components/ui/Tooltip';
+import { Notice } from '@/components/ui/Bits';
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -11,6 +15,13 @@ export default function ChangePasswordPage() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const checks = [
+    { ok: newPassword.length >= 5, l: 'At least 5 characters' },
+    { ok: !!newPassword && newPassword !== currentPassword, l: 'Different from the temporary one' },
+    { ok: !!confirm && newPassword === confirm, l: 'Both entries match' },
+  ];
+  const strength = Math.min(4, Math.floor(newPassword.length / 3) + (/[0-9]/.test(newPassword) ? 1 : 0) + (/[^a-z0-9]/i.test(newPassword) ? 1 : 0));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,50 +53,48 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <div className="px-4 pt-10 pb-28">
-      <h1 className="mb-2 text-xl font-bold">Change password</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        You must set a new password before continuing. Do not reuse the temporary password.
-      </p>
-      <form onSubmit={submit} className="space-y-4">
+    <div className="page pt-10">
+      <div className="hero animate-in mb-5 flex items-center gap-4">
+        <BrandMark size={52} />
         <div>
-          <label className="mb-1 block text-sm font-medium">Current (temporary) password</label>
-          <input
-            type="password"
-            value={currentPassword}
-            onChange={(e) => setCurrent(e.target.value)}
-            className="w-full rounded-xl border px-4 py-3"
-            required
-          />
+          <h1 className="text-xl font-bold">Set your password</h1>
+          <p className="flex items-center gap-1 text-sm text-white/75">
+            One quick step before you continue
+            <InfoTip text="You signed in with a temporary password. Choose a new one — don’t reuse the temporary password." className="!text-white/80" />
+          </p>
         </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">New password</label>
-          <input
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNew(e.target.value)}
-            className="w-full rounded-xl border px-4 py-3"
-            minLength={5}
-            required
-          />
+      </div>
+      <form onSubmit={submit} className="surface animate-in space-y-4">
+        {[
+          { l: 'Current (temporary) password', v: currentPassword, s: setCurrent, icon: <KeyRound size={16} />, ac: 'current-password' },
+          { l: 'New password', v: newPassword, s: setNew, icon: <Lock size={16} />, ac: 'new-password' },
+          { l: 'Confirm new password', v: confirm, s: setConfirm, icon: <Lock size={16} />, ac: 'new-password' },
+        ].map((f) => (
+          <label key={f.l} className="block">
+            <span className="label">{f.l}</span>
+            <span className="relative block">
+              <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">{f.icon}</span>
+              <input type="password" value={f.v} onChange={(e) => f.s(e.target.value)} autoComplete={f.ac} className="input pl-10" required />
+            </span>
+          </label>
+        ))}
+        <div className="tile space-y-2">
+          <div className="flex gap-1">
+            {[0, 1, 2, 3].map((i) => (
+              <span key={i} className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${i < strength ? (strength > 2 ? 'bg-emerald-500' : strength > 1 ? 'bg-amber-400' : 'bg-rose-400') : 'bg-slate-200'}`} />
+            ))}
+          </div>
+          {checks.map((c) => (
+            <p key={c.l} className={`flex items-center gap-2 text-xs transition ${c.ok ? 'text-emerald-700' : 'text-slate-400'}`}>
+              <span className={`flex h-4 w-4 items-center justify-center rounded-full transition ${c.ok ? 'bg-emerald-500 text-white' : 'bg-slate-200'}`}>
+                <Check size={10} />
+              </span>
+              {c.l}
+            </p>
+          ))}
         </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">Confirm new password</label>
-          <input
-            type="password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            className="w-full rounded-xl border px-4 py-3"
-            minLength={5}
-            required
-          />
-        </div>
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-xl bg-brand-600 py-3.5 font-semibold text-white disabled:opacity-60"
-        >
+        {error && <Notice tone="error">{error}</Notice>}
+        <button type="submit" disabled={loading} className="btn-primary w-full !py-3.5">
           {loading ? 'Saving…' : 'Save new password'}
         </button>
       </form>

@@ -26,6 +26,12 @@ import { Response } from 'express';
 export class BrandingController {
   constructor(private branding: BrandingService) {}
 
+  @Get('public')
+  @ApiOperation({ summary: 'Public: cosmetic branding (name, logo, colours) for login / PWA / visitor pages' })
+  publicBranding() {
+    return this.branding.getPublic();
+  }
+
   @Get()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

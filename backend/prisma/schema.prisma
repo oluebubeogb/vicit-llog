@@ -123,6 +123,7 @@ model User {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   auditLogs      AuditLog[]
+  pushDevices    PushDevice[]
 }
 
 model Invite {
@@ -224,6 +225,20 @@ model Notification {
   channel   String   @default("in_app")
   meta      Json?
   createdAt DateTime @default(now())
+}
+
+/// Firebase Cloud Messaging registration tokens (one row per browser/device).
+model PushDevice {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String   @default("web")
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model ProfileEditRequest {

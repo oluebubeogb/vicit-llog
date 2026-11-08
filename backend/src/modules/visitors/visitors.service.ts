@@ -11,7 +11,13 @@ import { InviteStatus, VisitStatus } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import * as QRCode from 'qrcode';
+import { publicFrontendBase } from '../../common/utils/urls';
+import { buildGateQrPayload } from '../../common/utils/qr';
+import { gatePassCaption, qrFileName, renderCaptionedQrPng } from '../../common/utils/qr-caption';
+
+function isLocalUrl(u: string) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(u);
+}
 
 @Injectable()
 export class VisitorsService {
@@ -36,7 +42,7 @@ export class VisitorsService {
       include: {
         visitors: true,
         host: { select: { id: true, fullName: true, email: true, phone: true } },
-        organisation: { select: { name: true } },
+        organisation: { select: { name: true, customDomain: true } },
       },
     });
 
@@ -66,12 +72,19 @@ export class VisitorsService {
 
     fs.writeFileSync(filepath, file.buffer);
 
-    const qrPayload = JSON.stringify({
-      v: visitorId,
-      p: invite.passphrase,
-      t: invite.token.slice(0, 8),
+    const qrPayload = buildGateQrPayload(visitorId, invite.passphrase, invite.token);
+    const locationName = invite.locationId
+      ? (await this.prisma.location.findUnique({ where: { id: invite.locationId }, select: { name: true } }))?.name
+      : undefined;
+    const caption = gatePassCaption({
+      fullName: visitor.fullName,
+      visitorId,
+      date: invite.expectedAt || new Date(),
+      orgName: invite.organisation?.name,
+      locationName,
     });
-    const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 300, margin: 2 });
+    const qrPng = renderCaptionedQrPng(qrPayload, caption);
+    const qrDataUrl = `data:image/png;base64,${qrPng.toString('base64')}`;
 
     const updated = await this.prisma.visitor.update({
       where: { id: visitorId },
@@ -129,13 +142,22 @@ export class VisitorsService {
     }
 
     if (visitor.email) {
+      const frontend = publicFrontendBase((invite as any).organisation?.customDomain);
+      const apiPublic = (process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
       await this.mail.sendVisitorQrEmail({
         to: visitor.email,
         guestName: visitor.fullName,
         hostName: invite.host.fullName,
         purpose: invite.purpose,
         passphrase: invite.passphrase,
-        qrDataUrl,
+        qrPng,
+        qrFileName: qrFileName(visitor.fullName, invite.expectedAt || new Date()),
+        // Links in emails must be reachable from the visitor's phone — skip localhost URLs.
+        qrImageUrl:
+          apiPublic && !isLocalUrl(apiPublic)
+            ? `${apiPublic}/visitors/qr/${invite.token}/${visitorId}.png`
+            : undefined,
+        registrationLink: frontend ? `${frontend}/visitor/${invite.token}` : undefined,
         orgName: invite.organisation?.name,
       });
     }
@@ -145,6 +167,43 @@ export class VisitorsService {
       passphrase: invite.passphrase,
       qrCodeData: qrDataUrl,
       message: 'Photo captured successfully. Show QR or passphrase at the gate.',
+    };
+  }
+
+  /**
+   * Fresh, scan-optimised QR PNG for a registered visitor. Public but gated by the
+   * unguessable invite token (same access level as the visitor page itself).
+   * Used for the email "open image" link and the "Download QR" button.
+   */
+  async getQrPng(token: string, visitorId: string): Promise<{ png: Buffer; filename: string }> {
+    const invite = await this.prisma.invite.findUnique({
+      where: { token },
+      include: {
+        visitors: { where: { id: visitorId } },
+        organisation: { select: { name: true } },
+      },
+    });
+    const visitor = invite?.visitors?.[0];
+    if (!invite || !visitor) throw new NotFoundException('QR code not found');
+    if (!visitor.photoPath) {
+      throw new BadRequestException('Photo not captured yet — QR is issued after registration');
+    }
+    const locationName = invite.locationId
+      ? (await this.prisma.location.findUnique({ where: { id: invite.locationId }, select: { name: true } }))?.name
+      : undefined;
+    const date = invite.expectedAt || visitor.createdAt;
+    return {
+      png: renderCaptionedQrPng(
+        buildGateQrPayload(visitor.id, invite.passphrase, invite.token),
+        gatePassCaption({
+          fullName: visitor.fullName,
+          visitorId: visitor.id,
+          date,
+          orgName: invite.organisation?.name,
+          locationName,
+        }),
+      ),
+      filename: qrFileName(visitor.fullName, date),
     };
   }
 
