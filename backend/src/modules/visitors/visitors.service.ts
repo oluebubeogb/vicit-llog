@@ -42,7 +42,7 @@ export class VisitorsService {
       include: {
         visitors: true,
         host: { select: { id: true, fullName: true, email: true, phone: true } },
-        organisation: { select: { name: true, customDomain: true } },
+        organisation: { select: { id: true, name: true, customDomain: true } },
       },
     });
 
@@ -138,6 +138,7 @@ export class VisitorsService {
         purpose: invite.purpose,
         event: 'photo',
         orgName: invite.organisation?.name,
+        organisationId: invite.organisation?.id,
       });
     }
 
@@ -159,6 +160,7 @@ export class VisitorsService {
             : undefined,
         registrationLink: frontend ? `${frontend}/visitor/${invite.token}` : undefined,
         orgName: invite.organisation?.name,
+        organisationId: invite.organisation?.id,
       });
     }
 

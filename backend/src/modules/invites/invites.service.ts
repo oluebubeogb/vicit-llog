@@ -48,7 +48,7 @@ export class InvitesService {
       include: {
         visitors: true,
         host: { select: { fullName: true } },
-        organisation: { select: { name: true, customDomain: true } },
+        organisation: { select: { id: true, name: true, customDomain: true } },
       },
     });
     if (!invite) return [] as string[];
@@ -67,6 +67,7 @@ export class InvitesService {
         ttlMinutes: ttl,
         expectedAt: invite.expectedAt ? invite.expectedAt.toISOString() : null,
         orgName: invite.organisation?.name,
+        organisationId: invite.organisation?.id,
       });
       if (r.ok) sent.push(v.email);
     }

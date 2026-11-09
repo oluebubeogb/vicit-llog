@@ -28,11 +28,10 @@ export class GateController {
   @Post('particular-image')
   @UseInterceptors(FileInterceptor('image', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
   async uploadParticularImage(@UploadedFile() file: Express.Multer.File) {
-    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) throw new BadRequestException('Upload a JPG, PNG or WebP image (max 5MB)');
+    if (!file || file.mimetype !== 'image/webp') throw new BadRequestException('Checkpoint evidence must be captured and converted to WebP (max 5MB)');
     const dir = path.join(process.env.PHOTO_STORAGE_PATH || '/data/photos', 'particulars');
     fs.mkdirSync(dir, { recursive: true });
-    const ext = file.mimetype === 'image/png' ? '.png' : file.mimetype === 'image/webp' ? '.webp' : '.jpg';
-    const filename = `${uuidv4()}${ext}`;
+    const filename = `${uuidv4()}.webp`;
     fs.writeFileSync(path.join(dir, filename), file.buffer);
     return { imagePath: `/visitors/particulars/${filename}` };
   }

@@ -55,7 +55,9 @@ export default function GatePage() {
   const [activeGateId, setActiveGateId] = useState('');
   const [withheldItems, setWithheldItems] = useState('');
   const [allowedItems, setAllowedItems] = useState('');
-  const [particularImage, setParticularImage] = useState<File | null>(null);
+  const [evidencePhotos, setEvidencePhotos] = useState<Array<{ file: File; preview: string }>>([]);
+  const [evidenceCameraOpen, setEvidenceCameraOpen] = useState(false);
+  const [evidenceCameraError, setEvidenceCameraError] = useState('');
   const [particularsChecked, setParticularsChecked] = useState(false);
 
   const [photoDecoding, setPhotoDecoding] = useState(false);
@@ -64,6 +66,9 @@ export default function GatePage() {
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const evidenceVideoRef = useRef<HTMLVideoElement>(null);
+  const evidenceStreamRef = useRef<MediaStream | null>(null);
+  const evidencePreviewUrlsRef = useRef<string[]>([]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -99,6 +104,15 @@ export default function GatePage() {
   }, []);
 
   useEffect(() => {
+    const video = evidenceVideoRef.current;
+    const stream = evidenceStreamRef.current;
+    if (evidenceCameraOpen && video && stream) {
+      video.srcObject = stream;
+      video.play().catch(() => { /* browser will resume when media is ready */ });
+    }
+  }, [evidenceCameraOpen]);
+
+  useEffect(() => {
     if (!result || !checkpoints.length) return;
     const relevant = checkpoints.filter((g: any) => result.locationId ? g.locationId === result.locationId : g.location?.organisationId === result.organisationId);
     const passed = new Set((result.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
@@ -131,21 +145,81 @@ export default function GatePage() {
     if (!activeGateId) { setError('Choose the checkpoint first.'); return; }
     setActionLoading(visitorId + '-checkpoint');
     try {
-      let imagePath: string | undefined;
-      if (particularImage) { const uploaded = await api.uploadParticularImage(particularImage); imagePath = uploaded.imagePath; }
+      const uploadedEvidence = await Promise.all(evidencePhotos.map(async (photo) => (await api.uploadParticularImage(photo.file)).imagePath));
       const particulars: any[] = [
         ...withheldItems.split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'WITHHELD', description })),
         ...allowedItems.split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'ALLOWED', description })),
       ];
-      if (imagePath && particulars.length) particulars[0].imagePath = imagePath;
-      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, notes: decision === 'DENIED' ? denyReason : '', particulars, particularsChecked });
+      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, notes: decision === 'DENIED' ? denyReason : '', particulars, particularsChecked, evidencePhotos: uploadedEvidence });
       const currentGate = checkpoints.find((g: any) => g.id === activeGateId);
       const nextGate = currentGate && checkpoints.filter((g: any) => g.locationId === currentGate.locationId && g.sequence > currentGate.sequence).sort((a: any,b: any)=>a.sequence-b.sequence)[0];
       if (nextGate) setActiveGateId(nextGate.id);
-      setWithheldItems(''); setAllowedItems(''); setParticularImage(null); setParticularsChecked(false); setDenyFor(null); setDenyReason('');
+      setWithheldItems(''); setAllowedItems(''); clearEvidenceRack(); setParticularsChecked(false); setDenyFor(null); setDenyReason('');
       await lookup();
     } catch (err: any) { setError(err.message || 'Checkpoint could not be recorded'); } finally { setActionLoading(''); }
   }
+
+  function stopEvidenceCamera() {
+    evidenceStreamRef.current?.getTracks().forEach(track => track.stop());
+    evidenceStreamRef.current = null;
+    if (evidenceVideoRef.current) {
+      evidenceVideoRef.current.pause();
+      evidenceVideoRef.current.srcObject = null;
+    }
+    setEvidenceCameraOpen(false);
+  }
+
+  async function startEvidenceCamera() {
+    setEvidenceCameraError('');
+    if (evidencePhotos.length >= 10) { setEvidenceCameraError('You can capture up to 10 photos per checkpoint.'); return; }
+    if (!navigator.mediaDevices?.getUserMedia) { setEvidenceCameraError('Live camera access requires HTTPS and a supported browser.'); return; }
+    stopEvidenceCamera();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      evidenceStreamRef.current = stream;
+      setEvidenceCameraOpen(true);
+    } catch (err: any) {
+      setEvidenceCameraError(err?.name === 'NotAllowedError' ? 'Allow camera access in your browser to capture checkpoint evidence.' : 'Could not open the live camera. Check camera permissions and try again.');
+    }
+  }
+
+  async function captureEvidencePhoto() {
+    const video = evidenceVideoRef.current;
+    if (!video || video.readyState < 2 || !video.videoWidth) { setEvidenceCameraError('Camera is still starting. Try again in a moment.'); return; }
+    if (evidencePhotos.length >= 10) { setEvidenceCameraError('You can capture up to 10 photos per checkpoint.'); return; }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { setEvidenceCameraError('Could not process the camera frame.'); return; }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob: Blob | null = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.82));
+    if (!blob) { setEvidenceCameraError('Could not convert the photo to WebP.'); return; }
+    const file = new File([blob], `checkpoint-${Date.now()}.webp`, { type: 'image/webp' });
+    const preview = URL.createObjectURL(blob);
+    evidencePreviewUrlsRef.current.push(preview);
+    setEvidencePhotos(current => [...current, { file, preview }]);
+    setEvidenceCameraError('');
+  }
+
+  function removeEvidencePhoto(index: number) {
+    setEvidencePhotos(current => {
+      const item = current[index];
+      if (item) { URL.revokeObjectURL(item.preview); evidencePreviewUrlsRef.current = evidencePreviewUrlsRef.current.filter(url => url !== item.preview); }
+      return current.filter((_, i) => i !== index);
+    });
+  }
+
+  function clearEvidenceRack() {
+    evidencePreviewUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+    evidencePreviewUrlsRef.current = [];
+    setEvidencePhotos([]);
+    stopEvidenceCamera();
+  }
+
+  useEffect(() => () => {
+    evidenceStreamRef.current?.getTracks().forEach(track => track.stop());
+    evidencePreviewUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+  }, []);
 
   async function doEntry(visitorId: string) {
     setActionLoading(visitorId + '-in');
@@ -550,6 +624,7 @@ export default function GatePage() {
                   <p className="mt-0.5 text-[10px] text-slate-400">{event.officer?.fullName || 'Officer'} · {fmtDate(event.occurredAt)}</p>
                   {(event.particulars || []).filter((x:any)=>x.kind==='WITHHELD').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-rose-50 px-2.5 py-2 text-xs text-rose-800"><b>WITHHELD</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>} {x.returnedAt?<span className="ml-2 font-semibold text-emerald-700">Returned</span>:<button type="button" onClick={()=>markParticularReturned(x.id)} disabled={!!actionLoading} className="ml-2 font-semibold underline">Mark returned</button>}</div>)}
                   {(event.particulars || []).filter((x:any)=>x.kind==='ALLOWED').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-2 text-xs text-emerald-800"><b>ALLOWED</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>}</div>)}
+                  {(event.evidencePhotos || []).length > 0 && <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{event.evidencePhotos.map((path: string, i: number) => <a key={`${path}-${i}`} href={particularPhoto(path)} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-slate-200"><img src={particularPhoto(path)} alt={`Checkpoint evidence ${i + 1}`} className="aspect-square w-full object-cover"/></a>)}</div>}
                 </div>)}
               </div>}
 
@@ -560,13 +635,17 @@ export default function GatePage() {
                 {v.status === 'INVITED' && currentCheckpoints.length > 0 && (
                   <div className="w-full space-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
                     <p className="text-xs font-semibold text-slate-700">Checkpoint inspection</p>{checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false&&<p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">Admissions are disabled at this gate.</p>}
-                    <select className="input !py-2 text-sm" value={activeGateId} onChange={e => setActiveGateId(e.target.value)}>
+                    <select className="input !py-2 text-sm" value={activeGateId} onChange={e => { setActiveGateId(e.target.value); setWithheldItems(''); setAllowedItems(''); clearEvidenceRack(); setParticularsChecked(false); }}>
                       {currentCheckpoints.map((g: any) => <option key={g.id} value={g.id}>{g.location?.organisation?.name ? `${g.location.organisation.name} · ` : ''}{g.location?.name} · {g.sequence + 1}. {g.name}</option>)}
                     </select>
                     <label className="block text-[11px] font-semibold text-rose-700">Withheld items (one per line)<textarea rows={2} value={withheldItems} onChange={e=>setWithheldItems(e.target.value)} className="input mt-1 !py-2 text-sm" placeholder="Item retained at this gate…"/></label>
                     <label className="block text-[11px] font-semibold text-emerald-700">Allowed items (one per line)<textarea rows={2} value={allowedItems} onChange={e=>setAllowedItems(e.target.value)} className="input mt-1 !py-2 text-sm" placeholder="Items permitted through…"/></label>
-                    <label className="flex items-center gap-2 text-xs text-slate-600"><Camera size={14}/><span>Optional particulars photo</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="min-w-0 text-xs" onChange={e=>setParticularImage(e.target.files?.[0] || null)}/></label>
-                    {particularImage && <p className="text-[11px] text-slate-500">{particularImage.name}</p>}
+                    <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-slate-700">Checkpoint photo evidence</p><p className="text-[10px] text-slate-500">Live camera · WebP · up to 10 photos ({evidencePhotos.length}/10)</p></div><button type="button" onClick={evidenceCameraOpen ? stopEvidenceCamera : startEvidenceCamera} className="btn-ghost !py-2 !px-3 text-xs"><Camera size={14}/>{evidenceCameraOpen ? 'Close camera' : 'Open camera'}</button></div>
+                      {evidenceCameraOpen && <div className="overflow-hidden rounded-xl bg-black"><video ref={evidenceVideoRef} autoPlay muted playsInline className="aspect-video w-full object-cover"/><div className="flex justify-center p-3"><button type="button" onClick={captureEvidencePhoto} disabled={evidencePhotos.length >= 10} className="btn-primary !rounded-full !px-6 !py-2"><Camera size={16}/> Capture photo</button></div></div>}
+                      {evidenceCameraError && <p className="text-[11px] text-rose-600">{evidenceCameraError}</p>}
+                      {evidencePhotos.length > 0 && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">{evidencePhotos.map((item, index) => <div key={item.preview} className="relative overflow-hidden rounded-lg border border-slate-200"><img src={item.preview} alt={`Checkpoint evidence ${index + 1}`} className="aspect-square w-full object-cover"/><button type="button" onClick={() => removeEvidencePhoto(index)} aria-label={`Remove photo ${index + 1}`} className="absolute right-1 top-1 rounded-full bg-slate-950/80 p-1.5 text-white shadow"><X size={13}/></button><span className="absolute bottom-1 left-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[9px] text-white">{index + 1}</span></div>)}</div>}
+                    </div>
                     {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900"><input type="checkbox" checked={particularsChecked} onChange={e=>setParticularsChecked(e.target.checked)}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">
                       <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false || (checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false && !particularsChecked)} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…':'Pass checkpoint'}</button>

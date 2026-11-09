@@ -71,7 +71,7 @@ export class UsersService {
     });
 
     // Always try welcome email
-    await this.mail.sendWelcome(user.email, user.fullName, initialPassword);
+    await this.mail.sendWelcome(user.email, user.fullName, initialPassword, undefined, orgId);
 
     return {
       user,
@@ -112,7 +112,7 @@ export class UsersService {
       data: { passwordHash, mustChangePassword: true },
     });
 
-    await this.mail.sendPasswordReset(user.email, user.fullName, initialPassword);
+    await this.mail.sendPasswordReset(user.email, user.fullName, initialPassword, undefined, orgId);
 
     return {
       userId: user.id,
@@ -260,6 +260,8 @@ export class UsersService {
           row.email.toLowerCase().trim(),
           row.fullName.trim(),
           initialPassword,
+          undefined,
+          orgId,
         );
         created.push({
           fullName: row.fullName.trim(),

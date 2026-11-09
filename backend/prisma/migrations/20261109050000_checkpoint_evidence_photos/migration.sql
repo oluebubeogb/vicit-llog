@@ -1,0 +1,1 @@
+ALTER TABLE "GateVisit" ADD COLUMN "evidencePhotos" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

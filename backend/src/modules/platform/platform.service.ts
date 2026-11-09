@@ -62,7 +62,7 @@ export class PlatformService {
       await tx.location.create({ data: { name: 'Main Site', code: 'MAIN', organisationId: org.id } });
       return { org, admin };
     });
-    const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword);
+    const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword, undefined, agency.org.id);
     await this.audit.log({ action: 'AGENCY_CREATED', entity: 'Organisation', entityId: agency.org.id, userId: actor.id, details: { name, code, adminId: agency.admin.id } });
     return { agency: agency.org, admin: { id: agency.admin.id, email, fullName, phone, role: agency.admin.role, mustChangePassword: true }, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
   }
@@ -177,7 +177,7 @@ export class PlatformService {
       if (role === 'GATE' && gateIds.length) await tx.gateOfficerAssignment.createMany({ data: uniqueGateIds.map((gateId: string) => ({ gateId, userId: created.id })) });
       return created;
     });
-    const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword);
+    const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword, undefined, agencyId);
     await this.audit.log({ action: 'AGENCY_USER_CREATED', entity: 'User', entityId: user.id, userId: actor.id, details: { role, agencyId, assignedGateIds: gateIds } });
     return { user: { id: user.id, email, fullName, role: user.role, organisationId: agencyId, mustChangePassword: true }, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
   }
@@ -228,7 +228,7 @@ export class PlatformService {
     const initialPassword = generateNigerianPassword();
     const passwordHash = await bcrypt.hash(initialPassword, 12);
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: true } });
-    const mailResult = await this.mail.sendPasswordReset(target.email, target.fullName, initialPassword);
+    const mailResult = await this.mail.sendPasswordReset(target.email, target.fullName, initialPassword, undefined, (target.role === Role.ADMIN || target.role === Role.STAFF || target.role === Role.GATE) ? target.organisationId : undefined);
     await this.audit.log({ action: 'PLATFORM_PASSWORD_RESET', entity: 'User', entityId: userId, userId: actor.id, details: { targetRole: target.role, email: target.email } });
     return { userId, email: target.email, fullName: target.fullName, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
   }

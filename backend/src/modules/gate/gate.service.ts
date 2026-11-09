@@ -142,10 +142,13 @@ export class GateService {
     const particulars = Array.isArray(body.particulars) ? body.particulars : [];
     for (const item of particulars) {
       if (!['WITHHELD', 'ALLOWED'].includes(String(item.kind || '').toUpperCase()) || !String(item.description || '').trim()) throw new BadRequestException('Each particular needs a description and WITHHELD or ALLOWED classification');
-      if (item.imagePath && !/^\/visitors\/particulars\/[a-f0-9-]+\.(jpg|png|webp)$/i.test(String(item.imagePath))) throw new BadRequestException('Particular image must be uploaded through the evidence capture endpoint');
+      if (item.imagePath && !/^\/visitors\/particulars\/[a-f0-9-]+\.webp$/i.test(String(item.imagePath))) throw new BadRequestException('Particular image must be uploaded through the evidence capture endpoint');
     }
+    const evidencePhotos = Array.isArray(body.evidencePhotos) ? body.evidencePhotos.map((p: unknown) => String(p)) : [];
+    if (evidencePhotos.length > 10) throw new BadRequestException('A checkpoint can have at most 10 evidence photos');
+    if (evidencePhotos.some((p: string) => !/^\/visitors\/particulars\/[a-f0-9-]+\.webp$/i.test(p))) throw new BadRequestException('All checkpoint photos must be uploaded WebP evidence images');
     const event = await this.prisma.$transaction(async tx => {
-      const created = await tx.gateVisit.create({ data: { visitorId, gateId, officerId: actor.id, decision, particularsChecked: body.particularsChecked === true, notes: body.notes ? String(body.notes).slice(0, 2000) : null } });
+      const created = await tx.gateVisit.create({ data: { visitorId, gateId, officerId: actor.id, decision, particularsChecked: body.particularsChecked === true, evidencePhotos, notes: body.notes ? String(body.notes).slice(0, 2000) : null } });
       if (particulars.length) await tx.gateParticular.createMany({ data: particulars.map(item => ({ gateVisitId: created.id, kind: String(item.kind).toUpperCase(), description: String(item.description).trim().slice(0, 500), quantity: Math.max(1, Math.min(1000, Number(item.quantity) || 1)), imagePath: item.imagePath ? String(item.imagePath).slice(0, 1000) : null, createdById: actor.id })) });
       if (decision === 'DENIED') await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.DENIED, deniedAt: new Date(), deniedReason: String(body.notes || 'Denied at checkpoint').slice(0, 1000), entryById: actor.id } });
       else {
@@ -158,7 +161,7 @@ export class GateService {
     if (decision === 'DENIED') {
       await this.notifications.create({ userId: visitor.invite.hostId, title: 'Visitor entry declined', body: `${visitor.fullName} was declined at ${gate.name}: ${String(body.notes).trim()}`, meta: { visitorId, inviteId: visitor.inviteId, type: 'ENTRY_DENIED' }, channels: ['in_app'] });
       const host = await this.prisma.user.findUnique({ where: { id: visitor.invite.hostId }, select: { email: true, fullName: true } });
-      if (host?.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'denied', reason: String(body.notes).trim(), at: new Date().toISOString() }).catch(() => {});
+      if (host?.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'denied', reason: String(body.notes).trim(), at: new Date().toISOString(), organisationId: visitor.invite.organisationId }).catch(() => {});
     }
     if (decision === 'PASSED') {
       const fresh = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: true } });
@@ -169,7 +172,7 @@ export class GateService {
           if (process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== 'log' && host.phone) channels.push('sms');
           if (process.env.WHATSAPP_PROVIDER && process.env.WHATSAPP_PROVIDER !== 'log' && host.phone) channels.push('whatsapp');
           await this.notifications.create({ userId: host.id, title: 'Visitor Arrived', body: `${visitor.fullName} has completed all checkpoints and entered the premises.`, meta: { visitorId, inviteId: visitor.inviteId, type: 'ARRIVAL' }, channels, phone: host.phone || undefined });
-          if (host.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'arrival', at: fresh.enteredAt?.toISOString() });
+          if (host.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'arrival', at: fresh.enteredAt?.toISOString(), organisationId: fresh.invite.organisationId });
         }
       }
     }
@@ -274,6 +277,7 @@ export class GateService {
         purpose: visitor.invite.purpose,
         event: 'arrival',
         at: updated.enteredAt?.toISOString(),
+        organisationId: visitor.invite.organisationId,
       });
     }
 
@@ -345,6 +349,7 @@ export class GateService {
           purpose: visitor.invite.purpose,
           event: 'exit',
           at: updated.exitedAt?.toISOString(),
+          organisationId: visitor.invite.organisationId,
         });
       }
     }
@@ -413,6 +418,7 @@ export class GateService {
         event: 'denied',
         reason: reason.trim(),
         at: updated.deniedAt?.toISOString(),
+        organisationId: visitor.invite.organisationId,
       }).catch(() => {});
     }
 

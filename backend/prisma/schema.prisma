@@ -290,6 +290,7 @@ model GateVisit {
   officerId   String
   decision    String
   particularsChecked Boolean @default(false)
+  evidencePhotos String[] @default([])
   notes       String?
   occurredAt  DateTime @default(now())
   visitor     Visitor  @relation(fields: [visitorId], references: [id], onDelete: Cascade)

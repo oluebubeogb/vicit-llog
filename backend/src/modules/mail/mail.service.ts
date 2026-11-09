@@ -47,7 +47,6 @@ const FONT =
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private brandCache: { at: number; value: MailBrand } | null = null;
 
   constructor(@Optional() private prisma?: PrismaService) {}
 
@@ -57,17 +56,13 @@ export class MailService {
 
   /**
    * Branding for emails comes from Branding & Settings (organisation name, logo, colours,
-   * email icon background), falling back to env. Cached for 60s.
+   * email icon background), falling back field-by-field to the environment defaults.
    */
-  async brand(): Promise<MailBrand> {
-    if (this.brandCache && Date.now() - this.brandCache.at < 60_000) return this.brandCache.value;
+  async brand(organisationId?: string): Promise<MailBrand> {
     let org: any = null;
     try {
-      if (this.prisma) {
-        const code = (process.env.ORGANIZATION_CODE || '').toUpperCase().trim();
-        org =
-          (code ? await this.prisma.organisation.findUnique({ where: { code } }) : null) ||
-          (await this.prisma.organisation.findFirst({ orderBy: { createdAt: 'asc' } }));
+      if (this.prisma && organisationId) {
+        org = await this.prisma.organisation.findUnique({ where: { id: organisationId } });
       }
     } catch {
       org = null;
@@ -76,22 +71,18 @@ export class MailService {
       ? `https://${String(org.customDomain).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
       : (process.env.FRONTEND_URL || '').replace(/\/$/, '');
     const api = (process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-    let logo = process.env.EMAIL_LOGO_URL || '';
-    if (!logo && org?.logoUrl) {
-      logo = /^https?:\/\//.test(org.logoUrl) ? org.logoUrl : api ? `${api}${org.logoUrl}` : '';
-    }
-    if (!logo && frontend) logo = `${frontend}/icon-192.png`;
-    const value: MailBrand = {
+    let logo = org?.logoUrl || '';
+    if (logo && !/^https?:\/\//i.test(logo)) logo = api ? `${api}${logo}` : (process.env.EMAIL_LOGO_URL || '');
+    if (!logo) logo = process.env.EMAIL_LOGO_URL || (frontend ? `${frontend}/icon-192.png` : '');
+    return {
       name: org?.name || process.env.ORGANIZATION || process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
       appName: process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
       color: org?.primaryColor || process.env.EMAIL_BRAND_COLOR || '#2563eb',
-      color2: org?.secondaryColor || '#1e40af',
+      color2: org?.secondaryColor || process.env.EMAIL_BRAND_COLOR_2 || '#1e40af',
       url: frontend,
       iconBg: org?.emailIconBg || process.env.EMAIL_ICON_BG || '#ffffff',
       logoPath: logo,
     };
-    this.brandCache = { at: Date.now(), value };
-    return value;
   }
 
   // ------------------------------------------------------------------ building blocks
@@ -245,8 +236,8 @@ export class MailService {
 
   // ------------------------------------------------------------------ templates
 
-  async sendWelcome(to: string, fullName: string, tempPassword: string, loginUrl?: string) {
-    const b = await this.brand();
+  async sendWelcome(to: string, fullName: string, tempPassword: string, loginUrl?: string, organisationId?: string) {
+    const b = await this.brand(organisationId);
     const url = loginUrl || (b.url ? `${b.url}/login` : '');
     const subject = `Welcome to ${b.name} — your login details`;
     const text = [
@@ -274,8 +265,8 @@ export class MailService {
     return this.sendMail({ to, subject, text, html });
   }
 
-  async sendPasswordReset(to: string, fullName: string, tempPassword: string, loginUrl?: string) {
-    const b = await this.brand();
+  async sendPasswordReset(to: string, fullName: string, tempPassword: string, loginUrl?: string, organisationId?: string) {
+    const b = await this.brand(organisationId);
     const url = loginUrl || (b.url ? `${b.url}/login` : '');
     const subject = `${b.name} — password reset`;
     const text = [
@@ -308,9 +299,10 @@ export class MailService {
     ttlMinutes: number;
     expectedAt?: string | null;
     orgName?: string;
+    organisationId?: string;
   }) {
-    const b = await this.brand();
-    const subject = `You're invited: ${opts.purpose}`;
+    const b = await this.brand(opts.organisationId);
+    const subject = `${b.name} — You're invited: ${opts.purpose}`;
     const when = opts.expectedAt ? fmtWhen(opts.expectedAt) : null;
     const text = [
       `Hello ${opts.guestName},`,
@@ -356,11 +348,12 @@ export class MailService {
     /** Visitor page link — QR is always shown there too */
     registrationLink?: string;
     orgName?: string;
+    organisationId?: string;
     /** Descriptive attachment name, e.g. vicit-pass_ibe-okafor_2026-10-21.png */
     qrFileName?: string;
   }) {
-    const b = await this.brand();
-    const subject = `Your gate QR code — ${opts.purpose}`;
+    const b = await this.brand(opts.organisationId);
+    const subject = `${b.name} — Your gate QR code: ${opts.purpose}`;
     const fileName = opts.qrFileName || 'gate-qr.png';
     const text = [
       `Hello ${opts.guestName},`,
@@ -450,8 +443,9 @@ export class MailService {
     orgName?: string;
     at?: string | null;
     reason?: string;
+    organisationId?: string;
   }) {
-    const b = await this.brand();
+    const b = await this.brand(opts.organisationId);
     const labels = {
       photo: { title: 'Guest photo captured', verb: 'completed photo registration', eyebrow: 'Registration', color: b.color },
       arrival: { title: 'Visitor arrived', verb: 'has entered the premises', eyebrow: 'Arrival', color: '#059669' },
@@ -459,7 +453,7 @@ export class MailService {
       denied: { title: 'Visitor entry declined', verb: 'was declined at the gate', eyebrow: 'Entry declined', color: '#dc2626' },
     };
     const L = labels[opts.event];
-    const subject = `${L.title}: ${opts.guestName}`;
+    const subject = `${b.name} — ${L.title}: ${opts.guestName}`;
     const when = fmtWhen(opts.at);
     const text = [
       `Hello ${opts.hostName},`,
