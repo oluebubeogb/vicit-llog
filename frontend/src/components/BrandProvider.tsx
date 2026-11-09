@@ -27,6 +27,7 @@ function identityScope() {
   const user = getUser();
   if (!getToken() || !user) return 'public';
   if (['ADMIN', 'STAFF', 'GATE'].includes(String(user.role))) return `agency:${user.organisationId || user.organisation?.id || 'unknown'}`;
+  if (['SUPER_ADMIN','GLOBAL_ADMIN','GLOBAL_GATE'].includes(String(user.role))) return `platform:${user.organisationId || user.organisation?.id || 'default'}`;
   return 'platform';
 }
 
@@ -57,9 +58,9 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
     const user = getUser();
     const role = String(user?.role || '');
     try {
-      if (token && ['ADMIN', 'STAFF', 'GATE'].includes(role)) {
-        // The authenticated endpoint is scoped by the JWT organisation, never by a
-        // caller-supplied organisation id. Missing fields fall back independently.
+      if (token) {
+        // The authenticated endpoint returns the user's agency identity, or the platform
+        // owner's branding for platform operators. The server resolves the scope from JWT.
         const agency = await api.branding();
         commit({
           ...DEFAULT_BRANDING,
@@ -71,18 +72,13 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
           secondaryColor: agency?.secondaryColor || DEFAULT_BRANDING.secondaryColor,
           emailIconBg: agency?.emailIconBg || DEFAULT_BRANDING.emailIconBg,
         }, identityScope());
-      } else if (token) {
-        // Platform operators retain Vicit's identity; do not inherit the first
-        // organisation returned by the public white-label endpoint.
-        commit({ ...DEFAULT_BRANDING }, 'platform');
       } else {
         const res = await fetch(`${API_URL}/branding/public`, { cache: 'no-store' });
         if (res.ok) commit({ ...DEFAULT_BRANDING, ...(await res.json()) }, 'public');
       }
     } catch {
       // Do not leave a previous agency's branding visible after an account switch.
-      if (token && ['ADMIN', 'STAFF', 'GATE'].includes(role)) commit({ ...DEFAULT_BRANDING }, identityScope());
-      else if (token) commit({ ...DEFAULT_BRANDING }, 'platform');
+      if (token) commit({ ...DEFAULT_BRANDING }, identityScope());
       else commit({ ...DEFAULT_BRANDING }, 'public');
     } finally {
       setReady(true);

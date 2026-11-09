@@ -51,7 +51,7 @@ export class PlatformService {
       this.prisma.invite.findMany({ where, include: {
         organisation: { select: { id: true, name: true, code: true, logoUrl: true } },
         host: { select: { id: true, fullName: true, email: true, avatarPath: true } },
-        visitors: { select: { id: true, fullName: true, photoPath: true, status: true, enteredAt: true, exitedAt: true, deniedAt: true } },
+        visitors: { select: { id: true, fullName: true, photoPath: true, status: true, enteredAt: true, exitedAt: true, deniedAt: true, deniedReason: true } },
       }, orderBy: { createdAt: 'desc' }, skip: (Math.max(1, page) - 1) * take, take }),
       this.prisma.invite.count({ where }),
     ]);

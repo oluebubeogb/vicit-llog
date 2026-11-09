@@ -186,6 +186,10 @@ model Visitor {
   entryById   String?
   exitById    String?
   gateNotes   String?
+  hostAvailabilityStatus String @default("PENDING")
+  hostWaitUntil DateTime?
+  hostRespondedAt DateTime?
+  lastHostPromptAt DateTime?
   idNumber    String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt

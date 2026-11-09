@@ -1,0 +1,4 @@
+ALTER TABLE "Visitor" ADD COLUMN "hostAvailabilityStatus" TEXT NOT NULL DEFAULT 'PENDING';
+ALTER TABLE "Visitor" ADD COLUMN "hostWaitUntil" TIMESTAMP(3);
+ALTER TABLE "Visitor" ADD COLUMN "hostRespondedAt" TIMESTAMP(3);
+ALTER TABLE "Visitor" ADD COLUMN "lastHostPromptAt" TIMESTAMP(3);

@@ -11,6 +11,7 @@ import {
   Camera,
   X,
   Ban,
+  BellRing,
   ImagePlus,
   Flashlight,
   SwitchCamera,
@@ -140,6 +141,18 @@ export default function GatePage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!result?.visitors?.some((v:any)=>v.status==='ARRIVED')) return;
+    const timer = window.setInterval(async () => {
+      const current = normalizeScannedCode(code);
+      if (!current) return;
+      const waiting = (result.visitors || []).filter((v:any) => v.status === 'ARRIVED' && v.hostAvailabilityStatus === 'WAITING' && v.hostWaitUntil && new Date(v.hostWaitUntil).getTime() <= Date.now());
+      for (const visitor of waiting) { try { await api.requestHostAvailability(visitor.id); } catch { /* server cooldown prevents duplicate prompts */ } }
+      await lookup(current).catch(()=>{});
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [result, code]);
 
   async function doCheckpoint(visitorId: string, decision: 'PASSED' | 'DENIED') {
     if (!activeGateId) { setError('Choose the checkpoint first.'); return; }
@@ -629,6 +642,12 @@ export default function GatePage() {
               </div>}
 
               <div className="mt-4 space-y-2">
+                {v.status === 'ARRIVED' && ['GATE','GLOBAL_GATE'].includes(currentRole) && <div className={`rounded-2xl border p-3 ${v.hostAvailabilityStatus==='AVAILABLE'?'border-emerald-200 bg-emerald-50':v.hostAvailabilityStatus==='WAITING'?'border-amber-200 bg-amber-50':'border-slate-200 bg-slate-50'}`}>
+                  <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-800">Host availability</b><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${v.hostAvailabilityStatus==='AVAILABLE'?'bg-emerald-100 text-emerald-800':v.hostAvailabilityStatus==='WAITING'?'bg-amber-100 text-amber-800':'bg-slate-200 text-slate-700'}`}>{v.hostAvailabilityStatus==='AVAILABLE'?'Available':v.hostAvailabilityStatus==='WAITING'?'Asked guest to wait':'Awaiting response'}</span></div>
+                  {v.hostAvailabilityStatus==='WAITING' && v.hostWaitUntil && <p className="mt-1 text-xs text-amber-800">Host asked the visitor to wait until {new Date(v.hostWaitUntil).toLocaleTimeString()}.</p>}
+                  {v.hostAvailabilityStatus==='AVAILABLE' && <p className="mt-1 text-xs text-emerald-800">Host has confirmed availability to receive this visitor.</p>}
+                  <button type="button" onClick={async()=>{try{await api.requestHostAvailability(v.id);await lookup()}catch(e:any){setError(e.message||'Could not contact host')}}} className="btn-quiet mt-2 w-full !py-2 text-xs"><BellRing size={14}/> Ask host to confirm again</button>
+                </div>}
                 {v.status === 'INVITED' && !v.photoPath && (
                   <p className="tile-muted !py-2 text-center text-xs font-medium text-amber-700">Photo not captured yet — entry unlocks once the visitor adds a photo</p>
                 )}

@@ -67,14 +67,11 @@ export class BrandingService {
    */
   async getPublic() {
     const code = (process.env.ORGANIZATION_CODE || '').toUpperCase().trim();
+    const platformOwner = await this.prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' }, select: { organisationId: true } });
     const org =
-      (code
-        ? await this.prisma.organisation.findUnique({ where: { code }, select: BRANDING_SELECT })
-        : null) ||
-      (await this.prisma.organisation.findFirst({
-        orderBy: { createdAt: 'asc' },
-        select: BRANDING_SELECT,
-      }));
+      (platformOwner?.organisationId ? await this.prisma.organisation.findUnique({ where: { id: platformOwner.organisationId }, select: BRANDING_SELECT }) : null) ||
+      (code ? await this.prisma.organisation.findUnique({ where: { code }, select: BRANDING_SELECT }) : null) ||
+      (await this.prisma.organisation.findFirst({ orderBy: { createdAt: 'asc' }, select: BRANDING_SELECT }));
     return {
       name: org?.name || process.env.ORGANIZATION || 'Vicit Llog',
       appName: process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',

@@ -36,6 +36,7 @@ import { MODE_ICON } from '@/components/InviteBits';
 type Tone = 'brand' | 'emerald' | 'amber' | 'rose' | 'violet';
 const TYPE: Record<string, { label: string; icon: ReactNode; tone: Tone }> = {
   ARRIVAL: { label: 'Visitor arrival', icon: <LogIn size={18} />, tone: 'emerald' },
+  HOST_ARRIVAL_CONFIRMATION: { label: 'Host availability required', icon: <BellRing size={18} />, tone: 'amber' },
   EXIT: { label: 'Visitor exit', icon: <LogOut size={18} />, tone: 'brand' },
   ENTRY_DENIED: { label: 'Entry declined', icon: <Ban size={18} />, tone: 'rose' },
   PHOTO_CAPTURED: { label: 'Visitor registered', icon: <Camera size={18} />, tone: 'violet' },
@@ -99,6 +100,9 @@ function Timeline({ v }: { v: any }) {
 }
 
 function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
+  const [responseBusy,setResponseBusy] = useState(false);
+  const [waitMinutes,setWaitMinutes] = useState(10);
+  const [response,setResponse] = useState<any>(null);
   const m = n.meta || {};
   const v = n.context?.visitor;
   const inv = n.context?.invite;
@@ -108,6 +112,17 @@ function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
   return (
     <div className="space-y-4">
       <p className="text-[15px] leading-relaxed text-slate-700">{n.body}</p>
+      {m.type === 'HOST_ARRIVAL_CONFIRMATION' && v && (
+        <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4">
+          <div className="flex items-center gap-2 text-amber-900"><BellRing size={18}/><b className="text-sm">Can you receive this visitor now?</b></div>
+          <p className="mt-1 text-xs leading-5 text-amber-800">Confirm availability, or ask the guest to wait. You can change your response before the wait period ends.</p>
+          {response ? <p className="mt-3 rounded-xl bg-white p-3 text-sm font-semibold text-emerald-800">Response sent: {response.status === 'AVAILABLE' ? 'You are available to receive the guest.' : `Guest asked to wait until ${response.waitUntil ? new Date(response.waitUntil).toLocaleTimeString() : 'further notice'}.`}</p> : <div className="mt-3 space-y-2">
+            <button disabled={responseBusy} onClick={async()=>{setResponseBusy(true);try{setResponse(await api.hostArrivalResponse(v.id,true));}catch(e:any){alert(e.message||'Could not send response')}finally{setResponseBusy(false)}}} className="btn-primary w-full !py-3"><CheckCircle2 size={16}/> I am available now</button>
+            <div className="flex gap-2"><select aria-label="Wait duration" className="input min-w-0 flex-1" value={waitMinutes} onChange={e=>setWaitMinutes(Number(e.target.value))}>{[5,10,15,20,30,45,60].map(n=><option key={n} value={n}>{n} minutes</option>)}</select><button disabled={responseBusy} onClick={async()=>{setResponseBusy(true);try{setResponse(await api.hostArrivalResponse(v.id,false,waitMinutes));}catch(e:any){alert(e.message||'Could not send response')}finally{setResponseBusy(false)}}} className="btn-quiet !border-amber-200 !bg-white">Ask guest to wait</button></div>
+          </div>}
+          {v.hostAvailabilityStatus === 'WAITING' && v.hostWaitUntil && <p className="mt-2 text-[11px] text-slate-500">Your previous wait request ends {new Date(v.hostWaitUntil).toLocaleTimeString()}.</p>}
+        </div>
+      )}
 
       {v && (
         <div className="card card-art p-4">

@@ -90,6 +90,10 @@ export class GateService {
         fullName: v.fullName,
         photoPath: v.photoPath,
         status: v.status,
+        hostAvailabilityStatus: (v as any).hostAvailabilityStatus,
+        hostWaitUntil: (v as any).hostWaitUntil,
+        hostRespondedAt: (v as any).hostRespondedAt,
+        lastHostPromptAt: (v as any).lastHostPromptAt,
         entryMode: v.entryMode,
         enteredAt: v.enteredAt,
         exitedAt: v.exitedAt,
@@ -153,7 +157,7 @@ export class GateService {
       if (decision === 'DENIED') await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.DENIED, deniedAt: new Date(), deniedReason: String(body.notes || 'Denied at checkpoint').slice(0, 1000), entryById: actor.id } });
       else {
         const remaining = await tx.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { gt: gate.sequence } } });
-        if (remaining === 0) await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.ARRIVED, enteredAt: visitor.enteredAt || new Date(), entryById: actor.id, gateId, entryMode: Object.values(EntryMode).includes(body.entryMode) ? body.entryMode : EntryMode.PEDESTRIAN } });
+        if (remaining === 0) await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.ARRIVED, hostAvailabilityStatus: 'PENDING', hostWaitUntil: null, hostRespondedAt: null, lastHostPromptAt: new Date(), enteredAt: visitor.enteredAt || new Date(), entryById: actor.id, gateId, entryMode: Object.values(EntryMode).includes(body.entryMode) ? body.entryMode : EntryMode.PEDESTRIAN } });
       }
       return tx.gateVisit.findUnique({ where: { id: created.id }, include: { gate: { include: { location: true } }, officer: { select: { id: true, fullName: true } }, particulars: true } });
     });
@@ -171,14 +175,45 @@ export class GateService {
           const channels: Array<'in_app' | 'sms' | 'whatsapp'> = ['in_app'];
           if (process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== 'log' && host.phone) channels.push('sms');
           if (process.env.WHATSAPP_PROVIDER && process.env.WHATSAPP_PROVIDER !== 'log' && host.phone) channels.push('whatsapp');
-          await this.notifications.create({ userId: host.id, title: 'Visitor Arrived', body: `${visitor.fullName} has completed all checkpoints and entered the premises.`, meta: { visitorId, inviteId: visitor.inviteId, type: 'ARRIVAL' }, channels, phone: host.phone || undefined });
-          if (host.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'arrival', at: fresh.enteredAt?.toISOString(), organisationId: fresh.invite.organisationId });
+          await this.notifications.create({ userId: host.id, title: 'Visitor Arrived', body: `${visitor.fullName} has completed all checkpoints and entered the premises.`, meta: { visitorId, inviteId: visitor.inviteId, type: 'HOST_ARRIVAL_CONFIRMATION', requiresHostResponse: true }, channels, phone: host.phone || undefined });
+          if (host.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'arrival', at: fresh.enteredAt?.toISOString(), organisationId: fresh.invite.organisationId }).catch(() => {});
         }
       }
     }
     return event;
   }
 
+
+  async respondHostAvailability(visitorId: string, body: any, actor: any) {
+    const visitor = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: true } });
+    if (!visitor) throw new NotFoundException('Visitor not found');
+    if (visitor.invite.hostId !== actor.id) throw new NotFoundException('Visitor not found');
+    if (visitor.status !== VisitStatus.ARRIVED) throw new BadRequestException('Host availability can only be confirmed after the final checkpoint');
+    const available = body.available === true;
+    const waitMinutes = Math.max(1, Math.min(60, Number(body.waitMinutes) || 1));
+    const updated = await this.prisma.visitor.update({ where: { id: visitorId }, data: {
+      hostAvailabilityStatus: available ? 'AVAILABLE' : 'WAITING',
+      hostWaitUntil: available ? null : new Date(Date.now() + waitMinutes * 60000),
+      hostRespondedAt: new Date(),
+    } });
+    await this.audit.log({ action: available ? 'HOST_CONFIRMED_AVAILABILITY' : 'HOST_REQUESTED_VISITOR_WAIT', entity: 'Visitor', entityId: visitorId, userId: actor.id, details: { waitMinutes: available ? 0 : waitMinutes } });
+    return { status: updated.hostAvailabilityStatus, waitUntil: updated.hostWaitUntil, respondedAt: updated.hostRespondedAt };
+  }
+
+  async requestHostAvailability(visitorId: string, actor: any) {
+    if (!['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN'].includes(actor.role)) throw new ForbiddenException('Only checkpoint officers can request host availability');
+    const visitor = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: { include: { host: true } } } });
+    if (!visitor || visitor.status !== VisitStatus.ARRIVED) throw new NotFoundException('Arrived visitor not found');
+    const platformAdmin = actor.role === 'SUPER_ADMIN';
+    const assignments = await this.prisma.gateOfficerAssignment.findMany({ where: { userId: actor.id, gate: { location: { organisationId: visitor.invite.organisationId } } }, select: { gateId: true } });
+    if (!platformAdmin && (!assignments.length || (actor.role === 'GATE' && visitor.invite.organisationId !== actor.orgId))) throw new NotFoundException('Visitor not found');
+    if (visitor.lastHostPromptAt && Date.now() - visitor.lastHostPromptAt.getTime() < 60000) throw new BadRequestException('Please wait at least one minute before asking the host again');
+    await this.prisma.visitor.update({ where: { id: visitorId }, data: { lastHostPromptAt: new Date(), hostAvailabilityStatus: 'PENDING' } });
+    const host = visitor.invite.host;
+    await this.notifications.create({ userId: host.id, title: 'Host availability requested', body: `${visitor.fullName} is waiting at the final checkpoint. Please confirm availability or choose a wait time.`, meta: { visitorId, inviteId: visitor.inviteId, type: 'HOST_ARRIVAL_CONFIRMATION', requiresHostResponse: true }, channels: ['in_app'] });
+    if (host.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'arrival', at: new Date().toISOString(), organisationId: visitor.invite.organisationId }).catch(() => {});
+    return { ok: true, requestedAt: new Date() };
+  }
 
   async returnParticular(particularId: string, actor: any) {
     if (actor.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Global Admin accounts provide oversight, not custody operations');

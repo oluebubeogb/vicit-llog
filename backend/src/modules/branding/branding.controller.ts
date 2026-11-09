@@ -35,7 +35,7 @@ export class BrandingController {
   @Get()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
   @ApiOperation({ summary: 'Get organisation branding & settings' })
   get(@CurrentUser() user: any) {
     return this.branding.get(user.orgId);

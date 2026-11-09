@@ -48,6 +48,19 @@ export class GateController {
     return this.gateService.listVisits(user, filter);
   }
 
+  @Patch('host-response/:visitorId')
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
+  @ApiOperation({ summary: 'Host confirms availability or asks a visitor to wait' })
+  hostResponse(@Param('visitorId') visitorId: string, @Body() body: any, @CurrentUser() user: any) {
+    return this.gateService.respondHostAvailability(visitorId, body, user);
+  }
+
+  @Post('host-prompt/:visitorId')
+  @ApiOperation({ summary: 'Gate officer requests an updated host availability response' })
+  promptHost(@Param('visitorId') visitorId: string, @CurrentUser() user: any) {
+    return this.gateService.requestHostAvailability(visitorId, user);
+  }
+
   @Post('checkpoint')
   @ApiOperation({ summary: 'Record a visitor checkpoint decision and inspection particulars' })
   checkpoint(@Body() body: any, @CurrentUser() user: any) {

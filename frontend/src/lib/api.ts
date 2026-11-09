@@ -259,6 +259,8 @@ export const api = {
   checkpointHistory: (visitorId: string) => request(`/gate/history/${visitorId}`),
   returnParticular: (id: string) => request(`/gate/particulars/${id}/return`, { method: 'POST' }),
   recordCheckpoint: (data: any) => request('/gate/checkpoint', { method: 'POST', body: JSON.stringify(data) }),
+  hostArrivalResponse: (visitorId: string, available: boolean, waitMinutes?: number) => request(`/gate/host-response/${visitorId}`, { method: 'PATCH', body: JSON.stringify({ available, waitMinutes }) }),
+  requestHostAvailability: (visitorId: string) => request(`/gate/host-prompt/${visitorId}`, { method: 'POST' }),
   exportCsv: (from?: string, to?: string, columns?: string[]) => {
     const q = new URLSearchParams();
     if (from) q.set('from', from);
