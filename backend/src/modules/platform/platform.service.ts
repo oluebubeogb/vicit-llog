@@ -23,27 +23,49 @@ export class PlatformService {
   }
 
 
-  async people(actor: any) {
+  async people(actor: any, page = 1, pageSize = 50) {
     this.assertPermission(actor, 'people.view');
-    return this.prisma.user.findMany({ select: { ...userSelect, organisation: { select: { id: true, name: true, code: true } } }, orderBy: [{ organisationId: 'asc' }, { createdAt: 'desc' }] });
+    const take = Math.min(100, Math.max(1, pageSize));
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({ select: { ...userSelect, organisation: { select: { id: true, name: true, code: true } } }, orderBy: [{ organisationId: 'asc' }, { createdAt: 'desc' }], skip: (Math.max(1, page) - 1) * take, take }),
+      this.prisma.user.count(),
+    ]);
+    return { rows, total, page: Math.max(1, page), pageSize: take, hasMore: Math.max(1, page) * take < total };
   }
 
-  async platformInvites(actor: any) {
+  async platformInvites(actor: any, page = 1, pageSize = 30, query = '') {
     this.assertPermission(actor, 'visits.view');
-    return this.prisma.invite.findMany({
-      include: {
-        organisation: { select: { id: true, name: true, code: true } },
-        host: { select: { id: true, fullName: true, email: true } },
-        visitors: { select: { id: true, fullName: true, status: true, enteredAt: true, exitedAt: true, deniedAt: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 1000,
-    });
+    const take = Math.min(60, Math.max(1, pageSize));
+    const q = String(query || '').trim();
+    const terms = q.split(/\s+/).filter(Boolean).slice(0, 6);
+    const searchable = (term: string) => ({ OR: [
+      { purpose: { contains: term, mode: 'insensitive' } },
+      { guestNames: { has: term } },
+      { host: { fullName: { contains: term, mode: 'insensitive' } } },
+      { organisation: { name: { contains: term, mode: 'insensitive' } } },
+      { visitors: { some: { fullName: { contains: term, mode: 'insensitive' } } } },
+      { category: { equals: term.toUpperCase() as any } },
+    ] });
+    const where: any = terms.length ? { AND: terms.map(searchable) } : {};
+    const [rows, total] = await Promise.all([
+      this.prisma.invite.findMany({ where, include: {
+        organisation: { select: { id: true, name: true, code: true, logoUrl: true } },
+        host: { select: { id: true, fullName: true, email: true, avatarPath: true } },
+        visitors: { select: { id: true, fullName: true, photoPath: true, status: true, enteredAt: true, exitedAt: true, deniedAt: true } },
+      }, orderBy: { createdAt: 'desc' }, skip: (Math.max(1, page) - 1) * take, take }),
+      this.prisma.invite.count({ where }),
+    ]);
+    return { rows, total, page: Math.max(1, page), pageSize: take, hasMore: Math.max(1, page) * take < total };
   }
 
-  async platformAudit(actor: any) {
+  async platformAudit(actor: any, page = 1, pageSize = 40) {
     this.assertPermission(actor, 'audit.view');
-    return this.audit.findAll(200);
+    const take = Math.min(80, Math.max(1, pageSize));
+    const [rows, total] = await Promise.all([this.audit.findAll(take, undefined, (Math.max(1, page) - 1) * take), this.prisma.auditLog.count()]);
+    const orgIds = rows.filter(r => (r.entity || '').toLowerCase() === 'organisation' && r.entityId).map(r => r.entityId as string);
+    const orgs = orgIds.length ? await this.prisma.organisation.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true, code: true, logoUrl: true } }) : [];
+    const orgMap = new Map(orgs.map(o => [o.id, o]));
+    return { rows: rows.map((r: any) => ({ ...r, related: r.related || ((r.entity || '').toLowerCase() === 'organisation' ? orgMap.get(r.entityId as string) || null : null) })), total, page: Math.max(1, page), pageSize: take, hasMore: Math.max(1, page) * take < total };
   }
 
   async agencies(actor: any) {
@@ -53,12 +75,13 @@ export class PlatformService {
       orderBy: { createdAt: 'desc' },
     });
     return Promise.all(organisations.map(async (org) => {
-      const [visitors, gates, activeVisitors] = await Promise.all([
+      const [agencyAccounts, visitors, gates, activeVisitors] = await Promise.all([
+        this.prisma.user.count({ where: { organisationId: org.id, role: { in: [Role.ADMIN, Role.STAFF, Role.GATE] } } }),
         this.prisma.visitor.count({ where: { invite: { organisationId: org.id } } }),
-        this.prisma.gate.count({ where: { location: { organisationId: org.id } } }),
+        this.prisma.gate.count({ where: { location: { OR: [{ organisationId: org.id }, { isShared: true }] } } }),
         this.prisma.visitor.count({ where: { invite: { organisationId: org.id }, status: 'ARRIVED' } }),
       ]);
-      return { ...org, _count: { ...org._count, visitors, gates, activeVisitors } };
+      return { ...org, _count: { ...org._count, users: agencyAccounts, visitors, gates, activeVisitors } };
     }));
   }
 
@@ -188,7 +211,7 @@ export class PlatformService {
     const gateIds: string[] = Array.isArray(input.gateIds) ? (input.gateIds as unknown[]).map((id): string => String(id)) : [];
     const uniqueGateIds: string[] = Array.from(new Set<string>(gateIds));
     if (role === 'GATE' && gateIds.length) {
-      const count = await this.prisma.gate.count({ where: { id: { in: gateIds }, location: { organisationId: agencyId } } });
+      const count = await this.prisma.gate.count({ where: { id: { in: gateIds }, location: { OR: [{ organisationId: agencyId }, { isShared: true }] } } });
       if (count !== uniqueGateIds.length) throw new BadRequestException('One or more selected gates do not belong to this agency');
     }
     const initialPassword = generateNigerianPassword();
@@ -223,6 +246,20 @@ export class PlatformService {
       }
     }
     return { total: rows.length, createdCount: results.filter(r => r.success).length, errorCount: results.filter(r => !r.success).length, results };
+  }
+
+  async locations(actor: any) {
+    this.assertPermission(actor, 'agencies.view');
+    return this.prisma.location.findMany({ include: { organisation: { select: { id: true, name: true, code: true } }, gates: { select: { id: true, name: true, code: true } } }, orderBy: [{ isShared: 'desc' }, { name: 'asc' }] });
+  }
+
+  async setLocationShared(actor: any, locationId: string, isShared: boolean) {
+    this.assertPermission(actor, 'agencies.create');
+    const location = await this.prisma.location.findUnique({ where: { id: locationId } });
+    if (!location) throw new NotFoundException('Location not found');
+    const updated = await this.prisma.location.update({ where: { id: locationId }, data: { isShared: !!isShared }, include: { organisation: { select: { id: true, name: true, code: true } } } });
+    await this.audit.log({ action: isShared ? 'LOCATION_SHARED' : 'LOCATION_UNSHARED', entity: 'Location', entityId: locationId, userId: actor.id, details: { organisationId: location.organisationId } });
+    return updated;
   }
 
   async gates(actor: any) {

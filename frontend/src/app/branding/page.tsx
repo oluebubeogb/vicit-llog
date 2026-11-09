@@ -1,7 +1,7 @@
 'use client';
 
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, getUser } from '@/lib/api';
 import {
   Bell,
   Check,
@@ -74,6 +74,8 @@ function ColorField({ label, value, onChange, tip }: { label: string; value: str
 
 export default function BrandingPage() {
   const { brand, refresh } = useBrand();
+  const viewer = getUser();
+  const platformBack = viewer?.role === 'SUPER_ADMIN' || viewer?.role === 'GLOBAL_ADMIN' ? '/platform/tools' : '/admin';
   const brandRef = useRef(brand);
   brandRef.current = brand;
   const [form, setForm] = useState({
@@ -180,7 +182,7 @@ export default function BrandingPage() {
 
   return (
     <div className="page">
-      <PageHeader back="/admin" icon={<Palette size={20} />} title="Branding & settings" subtitle="Your identity, everywhere" info="Changes preview live. Saving applies them to every page, the installed app, and all outgoing emails." />
+      <PageHeader back={platformBack} icon={<Palette size={20} />} title="Branding & settings" subtitle="Your identity, everywhere" info="Changes preview live. Saving applies them to every page, the installed app, and all outgoing emails." />
 
       {msg && (
         <Notice tone={msg.tone} onClose={() => setMsg(null)}>

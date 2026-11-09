@@ -1,0 +1,1 @@
+ALTER TABLE "Location" ADD COLUMN "isShared" BOOLEAN NOT NULL DEFAULT false;

@@ -15,24 +15,24 @@ export class BlacklistController {
   constructor(private blacklist: BlacklistService) {}
 
   @Get()
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
   @ApiOperation({ summary: 'List blacklist entries' })
   list(@CurrentUser() user: any) {
-    return this.blacklist.list(user.orgId);
+    return this.blacklist.list(user.orgId, [Role.SUPER_ADMIN, Role.GLOBAL_ADMIN].includes(user.role));
   }
 
   @Post()
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
   @ApiOperation({ summary: 'Add to blacklist' })
   add(@Body() body: any, @CurrentUser() user: any) {
-    return this.blacklist.add(user.orgId, user.id, body);
+    return this.blacklist.add(user.orgId, user.id, body, [Role.SUPER_ADMIN, Role.GLOBAL_ADMIN].includes(user.role));
   }
 
   @Patch(':id/deactivate')
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
   @ApiOperation({ summary: 'Deactivate blacklist entry' })
   deactivate(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.blacklist.deactivate(id, user.orgId, user.id);
+    return this.blacklist.deactivate(id, user.orgId, user.id, [Role.SUPER_ADMIN, Role.GLOBAL_ADMIN].includes(user.role));
   }
 
   @Get('check')

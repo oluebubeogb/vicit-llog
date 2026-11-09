@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, UseGuards, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, UploadedFile, UseInterceptors, BadRequestException, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ApiConsumes } from '@nestjs/swagger';
@@ -18,9 +18,9 @@ import { PlatformService } from './platform.service';
 export class PlatformController {
   constructor(private service: PlatformService) {}
   @Post('people/bulk') bulkPeople(@Body('rows') rows: any[], @CurrentUser() user: any) { return this.service.bulkCreateAgencyPeople(user, rows || []); }
-  @Get('people') people(@CurrentUser() user: any) { return this.service.people(user); }
-  @Get('invites') invites(@CurrentUser() user: any) { return this.service.platformInvites(user); }
-  @Get('audit') audit(@CurrentUser() user: any) { return this.service.platformAudit(user); }
+  @Get('people') people(@CurrentUser() user: any, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.service.people(user, Number(page) || 1, Number(pageSize) || 50); }
+  @Get('invites') invites(@CurrentUser() user: any, @Query('page') page?: string, @Query('pageSize') pageSize?: string, @Query('q') q?: string) { return this.service.platformInvites(user, Number(page) || 1, Number(pageSize) || 30, q || ''); }
+  @Get('audit') audit(@CurrentUser() user: any, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.service.platformAudit(user, Number(page) || 1, Number(pageSize) || 40); }
   @Get('agencies') agencies(@CurrentUser() user: any) { return this.service.agencies(user); }
   @Patch('agencies/:agencyId') updateAgency(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updateAgency(user, agencyId, body); }
   @Post('people/:id/reset-password') resetPersonPassword(@Param('id') id: string, @CurrentUser() user: any) { return this.service.resetPersonPassword(user, id); }
@@ -31,6 +31,8 @@ export class PlatformController {
   @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), limits: { fileSize: 3 * 1024 * 1024 }, fileFilter: (_req, file, cb) => file.mimetype.startsWith('image/') ? cb(null, true) : cb(new BadRequestException('Only image files are allowed') as any, false) }))
   uploadAgencyLogo(@Param('agencyId') agencyId: string, @UploadedFile() file: Express.Multer.File, @CurrentUser() user: any) { return this.service.uploadAgencyLogo(user, agencyId, file); }
   @Post('agencies/:agencyId/users') createAgencyUser(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.createAgencyUser(user, agencyId, body); }
+  @Get('locations') locations(@CurrentUser() user: any) { return this.service.locations(user); }
+  @Patch('locations/:id/shared') setLocationShared(@Param('id') id: string, @Body('isShared') isShared: boolean, @CurrentUser() user: any) { return this.service.setLocationShared(user, id, !!isShared); }
   @Get('gates') gates(@CurrentUser() user: any) { return this.service.gates(user); }
   @Post('gates/:gateId/global-officers/:userId') assignGlobalGate(@Param('gateId') gateId: string, @Param('userId') userId: string, @CurrentUser() user: any) { return this.service.assignGlobalGate(user, gateId, userId); }
   @Get('administrators') administrators(@CurrentUser() user: any) { return this.service.globalAdmins(user); }

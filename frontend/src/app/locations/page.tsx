@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, getUser } from '@/lib/api';
 import { Building2, DoorOpen, MapPin, Plus, ChevronUp, ChevronDown, UserPlus } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Collapse from '@/components/ui/Collapse';
@@ -9,6 +9,7 @@ import { Empty, SkeletonList } from '@/components/ui/Bits';
 
 export default function LocationsPage() {
   const [locations, setLocations] = useState<any[]>([]);
+  const ownOrgId = getUser()?.orgId;
   const [officers, setOfficers] = useState<any[]>([]);
   const [showLoc, setShowLoc] = useState(false);
   const [showGate, setShowGate] = useState<string | null>(null);
@@ -91,7 +92,7 @@ export default function LocationsPage() {
                   <p className="font-semibold text-slate-800">{loc.name}</p>
                   <p className="truncate text-xs text-slate-500">
                     <span className="chip mr-1 !py-0 font-mono">{loc.code}</span>
-                    {loc.address}
+                    {loc.address} {loc.isShared ? '· Shared site' : ''} {loc.organisation?.id && loc.organisation.id !== ownOrgId ? `· Managed by ${loc.organisation.name}` : ''}
                   </p>
                 </div>
               </div>
@@ -102,14 +103,14 @@ export default function LocationsPage() {
                     <DoorOpen size={14} className="text-brand-500" />
                     <span className="min-w-0 flex-1 font-medium text-slate-700">{g.sequence + 1}. {g.name}</span>
                     <span className="font-mono text-[11px] text-slate-400">{g.code}</span>
-                    <button type="button" title="Move earlier" disabled={g.sequence === 0} onClick={async () => { await api.reorderGate(g.id, Math.max(0, g.sequence - 1)); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronUp size={14}/></button>
-                    <button type="button" title="Move later" onClick={async () => { await api.reorderGate(g.id, g.sequence + 1); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white"><ChevronDown size={14}/></button>
+                    <button type="button" title="Move earlier" disabled={g.sequence === 0 || (!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId)} onClick={async () => { await api.reorderGate(g.id, Math.max(0, g.sequence - 1)); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronUp size={14}/></button>
+                    <button type="button" title="Move later" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} onClick={async () => { await api.reorderGate(g.id, g.sequence + 1); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white"><ChevronDown size={14}/></button>
                     <select aria-label={`Assign officer to ${g.name}`} className="input !w-full !py-1.5 text-xs sm:!w-auto" defaultValue="" onChange={async e => { if (e.target.value) { await api.assignGateOfficer(g.id, e.target.value); load(); e.target.value = ''; } }}>
                       <option value="">Assign gate officer…</option>
                       {officers.map((o: any) => <option key={o.id} value={o.id}>{o.fullName}</option>)}
                     </select>
                     <span className="w-full pl-6 text-[11px] text-slate-500">{(g.assignments || []).map((a: any) => a.user?.fullName).filter(Boolean).join(', ') || 'No officers assigned'}</span>
-                    <button type="button" className="ml-6 text-[11px] font-semibold text-brand-700 underline" onClick={()=>{setGateSettingsOpen(gateSettingsOpen===g.id?null:g.id);setGateSettings({admissionsEnabled:g.admissionsEnabled??true,particularsCheckEnabled:g.particularsCheckEnabled??true,dailyAdmissionLimit:g.dailyAdmissionLimit??''})}}>Gate settings</button>
+                    <button type="button" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} title="Shared checkpoint settings are managed by the owning agency" className="ml-6 text-[11px] font-semibold text-brand-700 underline disabled:opacity-40" onClick={()=>{setGateSettingsOpen(gateSettingsOpen===g.id?null:g.id);setGateSettings({admissionsEnabled:g.admissionsEnabled??true,particularsCheckEnabled:g.particularsCheckEnabled??true,dailyAdmissionLimit:g.dailyAdmissionLimit??''})}}>Gate settings</button>
                     {gateSettingsOpen===g.id&&<form className="grid w-full gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2" onSubmit={async e=>{e.preventDefault();try{await api.updateGateSettings(g.id,{...gateSettings,dailyAdmissionLimit:gateSettings.dailyAdmissionLimit||null});setGateSettingsOpen(null);load()}catch(err:any){window.alert(err.message)}}}>
                       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.admissionsEnabled} onChange={e=>setGateSettings({...gateSettings,admissionsEnabled:e.target.checked})}/> Admissions enabled</label>
                       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.particularsCheckEnabled} onChange={e=>setGateSettings({...gateSettings,particularsCheckEnabled:e.target.checked})}/> Require particulars check</label>
@@ -119,7 +120,7 @@ export default function LocationsPage() {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setShowGate(showGate === loc.id ? null : loc.id)} className="mt-3 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 transition hover:bg-brand-50">
+              <button disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} title={loc.isShared && loc.organisation?.id !== ownOrgId ? "Shared location gates are managed by the owning agency" : "Add gate"} onClick={() => setShowGate(showGate === loc.id ? null : loc.id)} className="mt-3 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40">
                 <Plus size={13} className={`transition-transform ${showGate === loc.id ? 'rotate-45' : ''}`} /> Add gate
               </button>
               <Collapse open={showGate === loc.id}>

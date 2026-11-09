@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, getUser } from '@/lib/api';
 import { Ban, Plus, ShieldCheck, ShieldOff } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Collapse from '@/components/ui/Collapse';
@@ -11,6 +11,8 @@ import { Empty, Notice, SkeletonList } from '@/components/ui/Bits';
 import { relTime } from '@/lib/format';
 
 export default function BlacklistPage() {
+  const viewer = getUser();
+  const platformBack = viewer?.role === 'SUPER_ADMIN' || viewer?.role === 'GLOBAL_ADMIN' ? '/platform/tools' : '/admin';
   const [items, setItems] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ fullName: '', idNumber: '', phone: '', reason: '' });
@@ -33,7 +35,7 @@ export default function BlacklistPage() {
     e.preventDefault();
     try {
       await api.addBlacklist(form);
-      setMsg({ tone: 'success', text: 'Added to blacklist — gate officers will be alerted on a match' });
+      setMsg({ tone: 'success', text: viewer?.role === 'SUPER_ADMIN' || viewer?.role === 'GLOBAL_ADMIN' ? 'Added to the platform-wide blacklist — all agencies will be alerted on a match' : 'Added to blacklist — gate officers will be alerted on a match' });
       setShowForm(false);
       setForm({ fullName: '', idNumber: '', phone: '', reason: '' });
       load();
@@ -53,7 +55,7 @@ export default function BlacklistPage() {
   return (
     <div className="page">
       <PageHeader
-        back="/admin"
+        back={platformBack}
         icon={<Ban size={20} />}
         title="Blacklist"
         subtitle={loading ? 'Loading…' : `${active.length} active · ${lifted.length} lifted`}
@@ -101,7 +103,7 @@ export default function BlacklistPage() {
                 <p className="truncate font-semibold text-slate-800">{item.fullName || item.idNumber || item.phone}</p>
                 <p className="truncate text-xs text-rose-700/80">{item.reason}</p>
                 <p className="truncate text-[11px] text-slate-400">
-                  {[item.idNumber && `ID ${item.idNumber}`, item.phone, item.createdAt && `added ${relTime(item.createdAt)}`].filter(Boolean).join(' · ')}
+                  {[item.organisation?.name && (item.isGlobal ? 'Platform-wide' : item.organisation.name), item.idNumber && `ID ${item.idNumber}`, item.phone, item.createdAt && `added ${relTime(item.createdAt)}`].filter(Boolean).join(' · ')}
                 </p>
               </div>
               {item.isActive ? (

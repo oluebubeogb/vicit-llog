@@ -171,7 +171,7 @@ export class AnalyticsDrillService {
     }
     if (f.metric === 'blacklist') {
       const bl = await this.prisma.blacklistEntry.findMany({
-        where: { organisationId: orgId, isActive: true },
+        where: { OR: [{ organisationId: orgId }, { isGlobal: true }], isActive: true },
         select: { fullName: true, phone: true, idNumber: true },
       });
       out = out.filter((v) =>

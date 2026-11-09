@@ -60,27 +60,32 @@ export class MailService {
    */
   async brand(organisationId?: string): Promise<MailBrand> {
     let org: any = null;
+    let platform: any = null;
     try {
-      if (this.prisma && organisationId) {
-        org = await this.prisma.organisation.findUnique({ where: { id: organisationId } });
+      if (this.prisma && organisationId) org = await this.prisma.organisation.findUnique({ where: { id: organisationId } });
+      if (this.prisma) {
+        const root = await this.prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' }, select: { organisationId: true } });
+        if (root?.organisationId && root.organisationId !== organisationId) platform = await this.prisma.organisation.findUnique({ where: { id: root.organisationId } });
       }
     } catch {
-      org = null;
+      org = org || null;
+      platform = platform || null;
     }
-    const frontend = org?.customDomain
-      ? `https://${String(org.customDomain).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
+    const emailDomain = org?.customDomain || platform?.customDomain;
+    const frontend = emailDomain
+      ? `https://${String(emailDomain).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
       : (process.env.FRONTEND_URL || '').replace(/\/$/, '');
     const api = (process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-    let logo = org?.logoUrl || '';
+    let logo = org?.logoUrl || platform?.logoUrl || '';
     if (logo && !/^https?:\/\//i.test(logo)) logo = api ? `${api}${logo}` : (process.env.EMAIL_LOGO_URL || '');
     if (!logo) logo = process.env.EMAIL_LOGO_URL || (frontend ? `${frontend}/icon-192.png` : '');
     return {
-      name: org?.name || process.env.ORGANIZATION || process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
+      name: org?.name || platform?.name || process.env.ORGANIZATION || process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
       appName: process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
-      color: org?.primaryColor || process.env.EMAIL_BRAND_COLOR || '#2563eb',
-      color2: org?.secondaryColor || process.env.EMAIL_BRAND_COLOR_2 || '#1e40af',
+      color: org?.primaryColor && String(org.primaryColor).toLowerCase() !== '#2563eb' ? org.primaryColor : platform?.primaryColor || org?.primaryColor || process.env.EMAIL_BRAND_COLOR || '#2563eb',
+      color2: org?.secondaryColor && String(org.secondaryColor).toLowerCase() !== '#1e40af' ? org.secondaryColor : platform?.secondaryColor || org?.secondaryColor || process.env.EMAIL_BRAND_COLOR_2 || '#1e40af',
       url: frontend,
-      iconBg: org?.emailIconBg || process.env.EMAIL_ICON_BG || '#ffffff',
+      iconBg: org?.emailIconBg && String(org.emailIconBg).toLowerCase() !== '#ffffff' ? org.emailIconBg : platform?.emailIconBg || org?.emailIconBg || process.env.EMAIL_ICON_BG || '#ffffff',
       logoPath: logo,
     };
   }

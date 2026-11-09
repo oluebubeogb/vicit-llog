@@ -9,9 +9,10 @@ export class BlacklistService {
     private audit: AuditService,
   ) {}
 
-  async list(orgId: string) {
+  async list(orgId: string, global = false) {
     return this.prisma.blacklistEntry.findMany({
-      where: { organisationId: orgId },
+      where: global ? {} : { OR: [{ organisationId: orgId }, { isGlobal: true }] },
+      include: { organisation: { select: { id: true, name: true, code: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -20,10 +21,12 @@ export class BlacklistService {
     orgId: string,
     userId: string,
     data: { fullName?: string; idNumber?: string; phone?: string; reason: string },
+    global = false,
   ) {
     const entry = await this.prisma.blacklistEntry.create({
       data: {
         organisationId: orgId,
+        isGlobal: global,
         fullName: data.fullName,
         idNumber: data.idNumber,
         phone: data.phone,
@@ -41,9 +44,9 @@ export class BlacklistService {
     return entry;
   }
 
-  async deactivate(id: string, orgId: string, userId: string) {
+  async deactivate(id: string, orgId: string, userId: string, global = false) {
     const entry = await this.prisma.blacklistEntry.findFirst({
-      where: { id, organisationId: orgId },
+      where: global ? { id } : { id, organisationId: orgId },
     });
     if (!entry) throw new NotFoundException('Entry not found');
     const updated = await this.prisma.blacklistEntry.update({
@@ -68,9 +71,8 @@ export class BlacklistService {
 
     const hit = await this.prisma.blacklistEntry.findFirst({
       where: {
-        organisationId: orgId,
+        AND: [{ OR: [{ organisationId: orgId }, { isGlobal: true }] }, { OR: conditions }],
         isActive: true,
-        OR: conditions,
       },
     });
     return { blocked: !!hit, entry: hit || null };

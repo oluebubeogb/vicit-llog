@@ -25,7 +25,7 @@ export class AuditService {
     });
   }
 
-  async findAll(limit = 100, organisationId?: string) {
+  async findAll(limit = 100, organisationId?: string, skip = 0) {
     let scope: any = undefined;
     if (organisationId) {
       const [inviteIds, visitorIds] = await Promise.all([
@@ -38,6 +38,7 @@ export class AuditService {
     const rows = await this.prisma.auditLog.findMany({
       where: scope,
       take: limit,
+      skip,
       orderBy: { createdAt: 'desc' },
       include: {
         user: { select: { id: true, fullName: true, email: true, role: true, avatarPath: true } },
@@ -127,6 +128,7 @@ export class AuditService {
               role: true,
               avatarPath: true,
               isActive: true,
+              organisation: { select: { id: true, name: true, code: true } },
             },
           })
         : Promise.resolve([] as any[]),

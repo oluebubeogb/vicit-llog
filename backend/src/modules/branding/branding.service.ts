@@ -46,7 +46,19 @@ export class BrandingService {
       select: BRANDING_SELECT,
     });
     if (!org) throw new NotFoundException('Organisation not found');
-    return org;
+    const platformAdmin = await this.prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' }, select: { organisationId: true } });
+    const platform = platformAdmin?.organisationId && platformAdmin.organisationId !== orgId
+      ? await this.prisma.organisation.findUnique({ where: { id: platformAdmin.organisationId }, select: BRANDING_SELECT })
+      : null;
+    // Each agency field falls back independently to the platform's configured brand.
+    return {
+      ...org,
+      name: org.name || platform?.name || process.env.ORGANIZATION || 'Vicit',
+      logoUrl: org.logoUrl || platform?.logoUrl || null,
+      primaryColor: org.primaryColor && org.primaryColor.toLowerCase() !== '#2563eb' ? org.primaryColor : platform?.primaryColor || org.primaryColor || '#2563eb',
+      secondaryColor: org.secondaryColor && org.secondaryColor.toLowerCase() !== '#1e40af' ? org.secondaryColor : platform?.secondaryColor || org.secondaryColor || '#1e40af',
+      emailIconBg: org.emailIconBg && org.emailIconBg.toLowerCase() !== '#ffffff' ? org.emailIconBg : platform?.emailIconBg || org.emailIconBg || '#ffffff',
+    };
   }
 
   /**

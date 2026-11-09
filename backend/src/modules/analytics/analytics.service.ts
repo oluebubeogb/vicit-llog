@@ -90,12 +90,12 @@ export class AnalyticsService {
       }),
       this.prisma.visitor.count({ where: { invite: { organisationId: orgId }, status: 'ARRIVED' } }),
       this.prisma.blacklistEntry.findMany({
-        where: { organisationId: orgId, isActive: true },
+        where: { OR: [{ organisationId: orgId }, { isGlobal: true }], isActive: true },
         select: { id: true, fullName: true, phone: true, idNumber: true, reason: true },
       }),
-      this.prisma.location.findMany({ where: { organisationId: orgId }, select: { id: true, name: true } }),
+      this.prisma.location.findMany({ where: { OR: [{ organisationId: orgId }, { isShared: true }] }, select: { id: true, name: true } }),
       this.prisma.gate.findMany({
-        where: { location: { organisationId: orgId } },
+        where: { location: { OR: [{ organisationId: orgId }, { isShared: true }] } },
         select: { id: true, name: true, location: { select: { name: true } } },
       }),
     ]);

@@ -35,7 +35,7 @@ export class BrandingController {
   @Get()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
   @ApiOperation({ summary: 'Get organisation branding & settings' })
   get(@CurrentUser() user: any) {
     return this.branding.get(user.orgId);
@@ -44,7 +44,7 @@ export class BrandingController {
   @Patch()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Update branding settings' })
   update(@Body() body: any, @CurrentUser() user: any) {
     // logoUrl from file upload only preferred; allow clear
@@ -54,7 +54,7 @@ export class BrandingController {
   @Post('logo')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload organisation logo (image file)' })
   @UseInterceptors(
