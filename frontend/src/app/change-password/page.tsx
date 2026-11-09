@@ -43,7 +43,8 @@ export default function ChangePasswordPage() {
       await api.changePassword(currentPassword, newPassword);
       const u = getUser();
       if (u) setUser({ ...u, mustChangePassword: false });
-      if (u?.role === 'GATE') router.replace('/gate');
+      if (u?.role === 'SUPER_ADMIN' || u?.role === 'GLOBAL_ADMIN') router.replace('/platform');
+      else if (u?.role === 'GATE' || u?.role === 'GLOBAL_GATE') router.replace('/gate');
       else router.replace('/dashboard');
     } catch (err: any) {
       setError(err.message || 'Failed to change password');

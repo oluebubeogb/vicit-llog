@@ -31,7 +31,8 @@ export default function LoginPage() {
         router.replace('/change-password');
         return;
       }
-      if (data.user.role === 'GATE') router.replace('/gate');
+      if (data.user.role === 'SUPER_ADMIN' || data.user.role === 'GLOBAL_ADMIN') router.replace('/platform');
+      else if (data.user.role === 'GATE' || data.user.role === 'GLOBAL_GATE') router.replace('/gate');
       else router.replace('/dashboard');
     } catch (err: any) {
       setError(err.message || 'Login failed');

@@ -12,7 +12,8 @@ export default function HomePage() {
     const token = getToken();
     const user = getUser();
     if (token && user) {
-      if (user.role === 'GATE') router.replace('/gate');
+      if (user.role === 'SUPER_ADMIN' || user.role === 'GLOBAL_ADMIN') router.replace('/platform');
+      else if (user.role === 'GATE' || user.role === 'GLOBAL_GATE') router.replace('/gate');
       else router.replace('/dashboard');
     } else {
       router.replace('/login');
