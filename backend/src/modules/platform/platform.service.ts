@@ -101,11 +101,15 @@ export class PlatformService {
     const data: any = { fullName, email, phone };
     if (input.role !== undefined) {
       const role = String(input.role).toUpperCase();
-      const agencyRoles = [Role.ADMIN, Role.STAFF, Role.GATE];
-      const globalRoles = [Role.GLOBAL_ADMIN, Role.GLOBAL_GATE];
-      if (agencyRoles.includes(target.role) && !agencyRoles.includes(role as Role)) throw new BadRequestException('Agency accounts can only use agency roles');
-      if (globalRoles.includes(target.role) && !globalRoles.includes(role as Role)) throw new BadRequestException('Platform accounts can only use platform roles');
-      data.role = role as Role;
+      // Explicitly type these collections as Role[] so TypeScript does not
+      // narrow Array.includes() to a smaller enum-literal union.
+      const agencyRoles: Role[] = [Role.ADMIN, Role.STAFF, Role.GATE];
+      const globalRoles: Role[] = [Role.GLOBAL_ADMIN, Role.GLOBAL_GATE];
+      const requestedRole = role as Role;
+      if (agencyRoles.includes(target.role) && !agencyRoles.includes(requestedRole)) throw new BadRequestException('Agency accounts can only use agency roles');
+      if (globalRoles.includes(target.role) && !globalRoles.includes(requestedRole)) throw new BadRequestException('Platform accounts can only use platform roles');
+      if (![...agencyRoles, ...globalRoles].includes(requestedRole)) throw new BadRequestException('Unsupported account role');
+      data.role = requestedRole;
     }
     if (target.role === Role.GLOBAL_ADMIN && Array.isArray(input.permissions)) data.permissions = input.permissions.filter((p: string) => GLOBAL_PERMISSIONS.includes(p));
     const updated = await this.prisma.user.update({ where: { id: userId }, data, select: userSelect });
