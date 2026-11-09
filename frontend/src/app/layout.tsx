@@ -5,6 +5,7 @@ import BrandProvider from '@/components/BrandProvider';
 import SplashScreen from '@/components/SplashScreen';
 import BackgroundArt from '@/components/BackgroundArt';
 import PushRegister from '@/components/PushRegister';
+import AgencyIdentity from '@/components/AgencyIdentity';
 import { BRAND_BOOT_SCRIPT } from '@/lib/brand';
 
 const APP = process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog';
@@ -70,7 +71,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <BrandProvider>
           <BackgroundArt />
           <SplashScreen />
-          <main className="relative mx-auto min-h-screen max-w-lg pb-28 pt-[env(safe-area-inset-top)]">{children}</main>
+          <main className="relative mx-auto min-h-screen max-w-lg pb-28 pt-[env(safe-area-inset-top)]">
+            <AgencyIdentity />
+            {children}
+          </main>
           <BottomNav />
           <PushRegister />
         </BrandProvider>

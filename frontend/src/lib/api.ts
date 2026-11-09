@@ -38,6 +38,7 @@ export function clearToken() {
   }
   localStorage.removeItem('vicit_token');
   localStorage.removeItem('vicit_user');
+  window.dispatchEvent(new Event('vicit-auth-updated'));
 }
 
 export function getUser() {
@@ -53,6 +54,7 @@ export function getUser() {
 export function setUser(user: any) {
   if (typeof window === 'undefined') return;
   localStorage.setItem('vicit_user', JSON.stringify(user));
+  window.dispatchEvent(new Event('vicit-auth-updated'));
 }
 
 function toQuery(params: Record<string, string | number | undefined | null>) {
