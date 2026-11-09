@@ -36,7 +36,7 @@ export class PlatformService {
   async agencies(actor: any) {
     this.assertPermission(actor, 'agencies.view');
     return this.prisma.organisation.findMany({
-      include: { _count: { select: { users: true, invites: true, locations: true } }, users: { where: { role: Role.ADMIN }, select: { id: true, fullName: true, email: true, phone: true, isActive: true }, take: 1 } },
+      include: { _count: { select: { users: true, invites: true, locations: true } }, users: { where: { role: { in: [Role.ADMIN, Role.STAFF, Role.GATE] } }, select: { id: true, fullName: true, email: true, phone: true, role: true, isActive: true }, orderBy: [{ role: 'asc' }, { fullName: 'asc' }] } },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -65,6 +65,53 @@ export class PlatformService {
     const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword);
     await this.audit.log({ action: 'AGENCY_CREATED', entity: 'Organisation', entityId: agency.org.id, userId: actor.id, details: { name, code, adminId: agency.admin.id } });
     return { agency: agency.org, admin: { id: agency.admin.id, email, fullName, phone, role: agency.admin.role, mustChangePassword: true }, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
+  }
+
+
+  async updateAgency(actor: any, agencyId: string, input: any) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can edit agencies');
+    const current = await this.prisma.organisation.findUnique({ where: { id: agencyId } });
+    if (!current) throw new NotFoundException('Agency not found');
+    const data: any = {};
+    if (input.name !== undefined) {
+      const name = String(input.name).trim();
+      if (!name) throw new BadRequestException('Agency name is required');
+      data.name = name;
+    }
+    if (input.logoUrl !== undefined) {
+      const logoUrl = String(input.logoUrl || '').trim();
+      if (logoUrl && !/^https:\/\//i.test(logoUrl) && !logoUrl.startsWith('/branding/logo/')) throw new BadRequestException('Agency logo must use HTTPS or be an uploaded Vicit logo');
+      data.logoUrl = logoUrl || null;
+    }
+    const updated = await this.prisma.organisation.update({ where: { id: agencyId }, data });
+    await this.audit.log({ action: 'AGENCY_UPDATED', entity: 'Organisation', entityId: agencyId, userId: actor.id, details: data });
+    return updated;
+  }
+
+  async updatePlatformPerson(actor: any, userId: string, input: any) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can edit platform and agency accounts');
+    const target = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!target || target.role === Role.SUPER_ADMIN) throw new NotFoundException('Editable account not found');
+    const fullName = input.fullName === undefined ? target.fullName : String(input.fullName).trim();
+    const email = input.email === undefined ? target.email : String(input.email).trim().toLowerCase();
+    const phone = input.phone === undefined ? target.phone : (String(input.phone).trim() || null);
+    if (!fullName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException('A valid name and email are required');
+    const duplicate = await this.prisma.user.findUnique({ where: { email } });
+    if (duplicate && duplicate.id !== userId) throw new ConflictException('That email is already registered');
+    const data: any = { fullName, email, phone };
+    if (input.role !== undefined) {
+      const role = String(input.role).toUpperCase();
+      const agencyRoles = [Role.ADMIN, Role.STAFF, Role.GATE];
+      const globalRoles = [Role.GLOBAL_ADMIN, Role.GLOBAL_GATE];
+      if (agencyRoles.includes(target.role) && !agencyRoles.includes(role as Role)) throw new BadRequestException('Agency accounts can only use agency roles');
+      if (globalRoles.includes(target.role) && !globalRoles.includes(role as Role)) throw new BadRequestException('Platform accounts can only use platform roles');
+      data.role = role as Role;
+    }
+    if (target.role === Role.GLOBAL_ADMIN && Array.isArray(input.permissions)) data.permissions = input.permissions.filter((p: string) => GLOBAL_PERMISSIONS.includes(p));
+    const updated = await this.prisma.user.update({ where: { id: userId }, data, select: userSelect });
+    if (updated.role !== Role.GATE) await this.prisma.gateOfficerAssignment.deleteMany({ where: { userId } });
+    await this.audit.log({ action: 'PLATFORM_PERSON_UPDATED', entity: 'User', entityId: userId, userId: actor.id, details: { role: updated.role, email: updated.email } });
+    return updated;
   }
 
   async createGlobalAdmin(actor: any, input: any) {

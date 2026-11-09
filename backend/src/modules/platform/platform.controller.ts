@@ -20,6 +20,8 @@ export class PlatformController {
   @Get('people') people(@CurrentUser() user: any) { return this.service.people(user); }
   @Get('audit') audit(@CurrentUser() user: any) { return this.service.platformAudit(user); }
   @Get('agencies') agencies(@CurrentUser() user: any) { return this.service.agencies(user); }
+  @Patch('agencies/:agencyId') updateAgency(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updateAgency(user, agencyId, body); }
+  @Patch('people/:id') updatePerson(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updatePlatformPerson(user, id, body); }
   @Post('agencies') createAgency(@Body() body: any, @CurrentUser() user: any) { return this.service.createAgency(user, body); }
   @Post('agencies/:agencyId/logo')
   @ApiConsumes('multipart/form-data')
