@@ -87,8 +87,11 @@ export default function BottomNav() {
     return null;
   }
 
-  const isGate = role === 'GATE';
-  const links = isGate ? gateLinks : staffLinks;
+  const isGate = role === 'GATE' || role === 'GLOBAL_GATE';
+  const canSeeGlobalVisits = role === 'SUPER_ADMIN' || (getUser()?.permissions || []).includes('visits.view');
+  const links = (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN')
+    ? [{ href: '/platform', icon: LayoutDashboard, label: 'Platform' }, ...(canSeeGlobalVisits ? [{ href: '/gate/visits', icon: Users, label: 'Visits' }] : []), ...(role === 'SUPER_ADMIN' ? [{ href: '/gate', icon: ScanLine, label: 'Gate' }] : []), { href: '/profile', icon: User, label: 'Profile' }]
+    : isGate ? gateLinks : staffLinks;
 
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bottom-nav">

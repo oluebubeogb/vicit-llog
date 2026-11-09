@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { Building2, DoorOpen, MapPin, Plus } from 'lucide-react';
+import { Building2, DoorOpen, MapPin, Plus, ChevronUp, ChevronDown, UserPlus } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Collapse from '@/components/ui/Collapse';
 import { Empty, SkeletonList } from '@/components/ui/Bits';
 
 export default function LocationsPage() {
   const [locations, setLocations] = useState<any[]>([]);
+  const [officers, setOfficers] = useState<any[]>([]);
   const [showLoc, setShowLoc] = useState(false);
   const [showGate, setShowGate] = useState<string | null>(null);
   const [locForm, setLocForm] = useState({ name: '', code: '', address: '' });
@@ -17,9 +18,8 @@ export default function LocationsPage() {
 
   function load() {
     setLoading(true);
-    api
-      .locations()
-      .then(setLocations)
+    Promise.all([api.locations(), api.users()])
+      .then(([locs, people]) => { setLocations(locs); setOfficers((people || []).filter((p: any) => p.role === 'GATE')); })
       .finally(() => setLoading(false));
   }
 
@@ -93,10 +93,17 @@ export default function LocationsPage() {
               <div className="mt-3 space-y-1.5 border-l-2 border-emerald-100 pl-3">
                 {(loc.gates || []).length === 0 && <p className="text-xs text-slate-400">No gates yet</p>}
                 {(loc.gates || []).map((g: any) => (
-                  <div key={g.id} className="tile flex items-center gap-2 !py-2 text-sm transition hover:translate-x-0.5">
+                  <div key={g.id} className="tile flex flex-wrap items-center gap-2 !py-2 text-sm">
                     <DoorOpen size={14} className="text-brand-500" />
-                    <span className="flex-1 font-medium text-slate-700">{g.name}</span>
+                    <span className="min-w-0 flex-1 font-medium text-slate-700">{g.sequence + 1}. {g.name}</span>
                     <span className="font-mono text-[11px] text-slate-400">{g.code}</span>
+                    <button type="button" title="Move earlier" disabled={g.sequence === 0} onClick={async () => { await api.reorderGate(g.id, Math.max(0, g.sequence - 1)); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronUp size={14}/></button>
+                    <button type="button" title="Move later" onClick={async () => { await api.reorderGate(g.id, g.sequence + 1); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white"><ChevronDown size={14}/></button>
+                    <select aria-label={`Assign officer to ${g.name}`} className="input !w-full !py-1.5 text-xs sm:!w-auto" defaultValue="" onChange={async e => { if (e.target.value) { await api.assignGateOfficer(g.id, e.target.value); load(); e.target.value = ''; } }}>
+                      <option value="">Assign gate officer…</option>
+                      {officers.map((o: any) => <option key={o.id} value={o.id}>{o.fullName}</option>)}
+                    </select>
+                    <span className="w-full pl-6 text-[11px] text-slate-500">{(g.assignments || []).map((a: any) => a.user?.fullName).filter(Boolean).join(', ') || 'No officers assigned'}</span>
                   </div>
                 ))}
               </div>

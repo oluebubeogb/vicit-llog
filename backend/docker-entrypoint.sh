@@ -46,7 +46,7 @@ const p = new PrismaClient();
     update: {
       passwordHash,
       fullName: adminName,
-      role: 'ADMIN',
+      role: 'SUPER_ADMIN',
       isActive: true,
       mustChangePassword: false,
       organisationId: org.id,
@@ -56,7 +56,7 @@ const p = new PrismaClient();
       email: adminEmail,
       passwordHash,
       fullName: adminName,
-      role: 'ADMIN',
+      role: 'SUPER_ADMIN',
       portfolio: 'Administration',
       phone: adminPhone,
       organisationId: org.id,
@@ -64,7 +64,7 @@ const p = new PrismaClient();
       isActive: true,
     },
   });
-  console.log('Admin ready:', adminEmail, '(password synced from ADMIN_PASSWORD)');
+  console.log('Super Admin ready:', adminEmail, '(password synced from ADMIN_PASSWORD)');
   await p.$disconnect();
 })().catch(async (e) => {
   console.error('Seed failed:', e);

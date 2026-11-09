@@ -42,6 +42,7 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        permissions: user.permissions,
         portfolio: user.portfolio,
         phone: user.phone,
         mustChangePassword: user.mustChangePassword,

@@ -257,6 +257,14 @@ export default function DashboardPage() {
       router.replace('/change-password');
       return;
     }
+    if (u.role === 'SUPER_ADMIN' || u.role === 'GLOBAL_ADMIN') {
+      router.replace('/platform');
+      return;
+    }
+    if (u.role === 'GLOBAL_GATE') {
+      router.replace('/gate');
+      return;
+    }
     setUserState(u);
     api
       .myInvites()

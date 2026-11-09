@@ -1,4 +1,10 @@
-import { Controller, Post, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, UseGuards, UploadedFile, UseInterceptors, Res, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { Response } from 'express';
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { GateService } from './gate.service';
 import { EntryDto } from './dto/entry.dto';
@@ -11,27 +17,57 @@ import { Role } from '@prisma/client';
 @ApiTags('Gate')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN, Role.GATE)
+@Roles(Role.ADMIN, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
 @Controller('gate')
 export class GateController {
   constructor(private gateService: GateService) {}
 
+  @Get('checkpoints')
+  checkpoints(@CurrentUser() user: any) { return this.gateService.listCheckpoints(user); }
+
+  @Post('particular-image')
+  @UseInterceptors(FileInterceptor('image', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
+  async uploadParticularImage(@UploadedFile() file: Express.Multer.File) {
+    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) throw new BadRequestException('Upload a JPG, PNG or WebP image (max 5MB)');
+    const dir = path.join(process.env.PHOTO_STORAGE_PATH || '/data/photos', 'particulars');
+    fs.mkdirSync(dir, { recursive: true });
+    const ext = file.mimetype === 'image/png' ? '.png' : file.mimetype === 'image/webp' ? '.webp' : '.jpg';
+    const filename = `${uuidv4()}${ext}`;
+    fs.writeFileSync(path.join(dir, filename), file.buffer);
+    return { imagePath: `/visitors/particulars/${filename}` };
+  }
+
   @Get('lookup')
   @ApiOperation({ summary: 'Lookup visitor by passphrase or QR payload' })
-  lookup(@Query('code') code: string) {
-    return this.gateService.lookup(code);
+  lookup(@Query('code') code: string, @CurrentUser() user: any) {
+    return this.gateService.lookup(code, user);
   }
 
   @Get('visits')
   @ApiOperation({ summary: 'List visits for gate dashboard' })
   visits(@CurrentUser() user: any, @Query('filter') filter?: string) {
-    return this.gateService.listVisits(user.orgId, filter);
+    return this.gateService.listVisits(user, filter);
+  }
+
+  @Post('checkpoint')
+  @ApiOperation({ summary: 'Record a visitor checkpoint decision and inspection particulars' })
+  checkpoint(@Body() body: any, @CurrentUser() user: any) {
+    return this.gateService.recordCheckpoint(body, user);
+  }
+
+  @Post('particulars/:id/return')
+  returnParticular(@Param('id') id: string, @CurrentUser() user: any) { return this.gateService.returnParticular(id, user); }
+
+  @Get('history/:visitorId')
+  history(@Param('visitorId') visitorId: string, @CurrentUser() user: any) {
+    return this.gateService.checkpointHistory(visitorId, user);
   }
 
   @Post('entry')
   @ApiOperation({ summary: 'Record visitor entry' })
   entry(@Body() dto: EntryDto, @CurrentUser() user: any) {
-    return this.gateService.recordEntry(dto, user.id);
+    if (['GATE', 'GLOBAL_GATE', 'GLOBAL_ADMIN'].includes(user.role)) throw new ForbiddenException('Use the assigned checkpoint workflow to record visitor entry');
+    return this.gateService.recordEntry(dto, user);
   }
 
   @Post('exit/:visitorId')
@@ -41,7 +77,8 @@ export class GateController {
     @Body('notes') notes: string,
     @CurrentUser() user: any,
   ) {
-    return this.gateService.recordExit(visitorId, user.id, notes);
+    if (user.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Global Admin accounts provide oversight, not gate operations');
+    return this.gateService.recordExit(visitorId, user, notes);
   }
 
   @Post('deny/:visitorId')
@@ -51,6 +88,7 @@ export class GateController {
     @Body('reason') reason: string,
     @CurrentUser() user: any,
   ) {
-    return this.gateService.denyEntry(visitorId, user.id, reason);
+    if (['GATE', 'GLOBAL_GATE', 'GLOBAL_ADMIN'].includes(user.role)) throw new ForbiddenException('Use the assigned checkpoint workflow to deny visitor entry');
+    return this.gateService.denyEntry(visitorId, user, reason);
   }
 }

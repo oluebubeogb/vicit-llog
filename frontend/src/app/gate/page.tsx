@@ -51,6 +51,11 @@ export default function GatePage() {
   const [previewPhoto, setPreviewPhoto] = useState<{ url: string; name: string } | null>(null);
   const [denyFor, setDenyFor] = useState<string | null>(null);
   const [denyReason, setDenyReason] = useState('');
+  const [checkpoints, setCheckpoints] = useState<any[]>([]);
+  const [activeGateId, setActiveGateId] = useState('');
+  const [withheldItems, setWithheldItems] = useState('');
+  const [allowedItems, setAllowedItems] = useState('');
+  const [particularImage, setParticularImage] = useState<File | null>(null);
 
   const [photoDecoding, setPhotoDecoding] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
@@ -67,6 +72,7 @@ export default function GatePage() {
 
   useEffect(() => {
     const u = getUser();
+    if (u) api.checkpoints().then((rows: any[]) => { setCheckpoints(rows || []); if (rows?.length) setActiveGateId(rows[0].id); }).catch(() => {});
     if (!u) {
       router.replace('/login');
       return;
@@ -91,6 +97,14 @@ export default function GatePage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!result || !checkpoints.length) return;
+    const relevant = checkpoints.filter((g: any) => result.locationId ? g.locationId === result.locationId : g.location?.organisationId === result.organisationId);
+    const passed = new Set((result.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
+    const next = relevant.sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
+    if (next && !relevant.some((g: any) => g.id === activeGateId && !passed.has(g.id))) setActiveGateId(next.id);
+  }, [result, checkpoints, activeGateId]);
+
   async function lookup(raw?: string) {
     const value = normalizeScannedCode(raw ?? code);
     if (!value) return;
@@ -101,11 +115,35 @@ export default function GatePage() {
       const data = await api.gateLookup(value);
       setResult(data);
       if (data?.expectedMode) setEntryMode(data.expectedMode);
+      const relevant = checkpoints.filter((g: any) => data?.locationId ? g.locationId === data.locationId : g.location?.organisationId === data?.organisationId);
+      const passed = new Set((data?.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
+      const next = relevant.sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
+      if (next) setActiveGateId(next.id);
     } catch (err: any) {
       setError(err.message || 'Not found');
     } finally {
       setLoading(false);
     }
+  }
+
+  async function doCheckpoint(visitorId: string, decision: 'PASSED' | 'DENIED') {
+    if (!activeGateId) { setError('Choose the checkpoint first.'); return; }
+    setActionLoading(visitorId + '-checkpoint');
+    try {
+      let imagePath: string | undefined;
+      if (particularImage) { const uploaded = await api.uploadParticularImage(particularImage); imagePath = uploaded.imagePath; }
+      const particulars: any[] = [
+        ...withheldItems.split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'WITHHELD', description })),
+        ...allowedItems.split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'ALLOWED', description })),
+      ];
+      if (imagePath && particulars.length) particulars[0].imagePath = imagePath;
+      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, notes: decision === 'DENIED' ? denyReason : '', particulars });
+      const currentGate = checkpoints.find((g: any) => g.id === activeGateId);
+      const nextGate = currentGate && checkpoints.filter((g: any) => g.locationId === currentGate.locationId && g.sequence > currentGate.sequence).sort((a: any,b: any)=>a.sequence-b.sequence)[0];
+      if (nextGate) setActiveGateId(nextGate.id);
+      setWithheldItems(''); setAllowedItems(''); setParticularImage(null); setDenyFor(null); setDenyReason('');
+      await lookup();
+    } catch (err: any) { setError(err.message || 'Checkpoint could not be recorded'); } finally { setActionLoading(''); }
   }
 
   async function doEntry(visitorId: string) {
@@ -118,6 +156,11 @@ export default function GatePage() {
     } finally {
       setActionLoading('');
     }
+  }
+
+  async function markParticularReturned(id: string) {
+    setActionLoading('particular-' + id);
+    try { await api.returnParticular(id); await lookup(); } catch (err: any) { setError(err.message || 'Could not update item custody'); } finally { setActionLoading(''); }
   }
 
   async function doExit(visitorId: string) {
@@ -344,6 +387,9 @@ export default function GatePage() {
   }, []);
 
   const photo = (p: string) => `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/visitors/photo/${p}`;
+  const particularPhoto = (p: string) => `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}${p}`;
+  const currentRole = getUser()?.role;
+  const currentCheckpoints = checkpoints.filter((g: any) => result ? (result.locationId ? g.locationId === result.locationId : g.location?.organisationId === result.organisationId) : true);
   const MODES = [
     { v: 'PEDESTRIAN', l: 'On foot', icon: <Footprints size={16} /> },
     { v: 'MOTORCYCLE', l: 'Motorcycle', icon: <Bike size={16} /> },
@@ -489,6 +535,7 @@ export default function GatePage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-lg font-bold text-slate-900">{v.fullName}</p>
                   <StatusPill status={v.status} className="mt-1" />
+                  {(v.gateVisits || []).length > 0 && <p className="mt-1 text-[11px] text-slate-500">{v.gateVisits.length} checkpoint record{v.gateVisits.length===1?'':'s'}</p>}
                   <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
                     {v.enteredAt && <p className="flex items-center gap-1"><LogIn size={11} className="text-emerald-600" /> In {fmtDate(v.enteredAt)}</p>}
                     {v.exitedAt && <p className="flex items-center gap-1"><LogOut size={11} /> Out {fmtDate(v.exitedAt)}</p>}
@@ -496,11 +543,40 @@ export default function GatePage() {
                 </div>
               </div>
 
+              {(v.gateVisits || []).length > 0 && <div className="mt-3 space-y-2">
+                {v.gateVisits.map((event: any) => <div key={event.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-700">{event.gate?.name || 'Checkpoint'}</b><span className={`text-[10px] font-bold ${event.decision==='DENIED'?'text-rose-700':'text-emerald-700'}`}>{event.decision}</span></div>
+                  <p className="mt-0.5 text-[10px] text-slate-400">{event.officer?.fullName || 'Officer'} · {fmtDate(event.occurredAt)}</p>
+                  {(event.particulars || []).filter((x:any)=>x.kind==='WITHHELD').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-rose-50 px-2.5 py-2 text-xs text-rose-800"><b>WITHHELD</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>} {x.returnedAt?<span className="ml-2 font-semibold text-emerald-700">Returned</span>:<button type="button" onClick={()=>markParticularReturned(x.id)} disabled={!!actionLoading} className="ml-2 font-semibold underline">Mark returned</button>}</div>)}
+                  {(event.particulars || []).filter((x:any)=>x.kind==='ALLOWED').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-2 text-xs text-emerald-800"><b>ALLOWED</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>}</div>)}
+                </div>)}
+              </div>}
+
               <div className="mt-4 space-y-2">
                 {v.status === 'INVITED' && !v.photoPath && (
                   <p className="tile-muted !py-2 text-center text-xs font-medium text-amber-700">Photo not captured yet — entry unlocks once the visitor adds a photo</p>
                 )}
-                {v.status === 'INVITED' && (
+                {v.status === 'INVITED' && currentCheckpoints.length > 0 && (
+                  <div className="w-full space-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+                    <p className="text-xs font-semibold text-slate-700">Checkpoint inspection</p>
+                    <select className="input !py-2 text-sm" value={activeGateId} onChange={e => setActiveGateId(e.target.value)}>
+                      {currentCheckpoints.map((g: any) => <option key={g.id} value={g.id}>{g.location?.organisation?.name ? `${g.location.organisation.name} · ` : ''}{g.location?.name} · {g.sequence + 1}. {g.name}</option>)}
+                    </select>
+                    <label className="block text-[11px] font-semibold text-rose-700">Withheld items (one per line)<textarea rows={2} value={withheldItems} onChange={e=>setWithheldItems(e.target.value)} className="input mt-1 !py-2 text-sm" placeholder="Item retained at this gate…"/></label>
+                    <label className="block text-[11px] font-semibold text-emerald-700">Allowed items (one per line)<textarea rows={2} value={allowedItems} onChange={e=>setAllowedItems(e.target.value)} className="input mt-1 !py-2 text-sm" placeholder="Items permitted through…"/></label>
+                    <label className="flex items-center gap-2 text-xs text-slate-600"><Camera size={14}/><span>Optional particulars photo</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="min-w-0 text-xs" onChange={e=>setParticularImage(e.target.files?.[0] || null)}/></label>
+                    {particularImage && <p className="text-[11px] text-slate-500">{particularImage.name}</p>}
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…':'Pass checkpoint'}</button>
+                      <button type="button" onClick={() => { setDenyFor(denyFor===v.id?null:v.id); setDenyReason(''); }} disabled={!!actionLoading} className="btn-danger !px-4"><Ban size={17}/></button>
+                    </div>
+                    <Collapse open={denyFor === v.id}><textarea value={denyReason} onChange={e=>setDenyReason(e.target.value)} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!denyReason.trim()} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
+                  </div>
+                )}
+                {v.status === 'INVITED' && currentCheckpoints.length === 0 && ['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
+                  <Notice tone="warn">No checkpoint is assigned to your account for this agency or destination. Contact an administrator.</Notice>
+                )}
+                {v.status === 'INVITED' && currentCheckpoints.length === 0 && !['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
                   <div className="flex w-full flex-col gap-2">
                     <div className="flex gap-2">
                       <button type="button" onClick={() => doEntry(v.id)} disabled={!!actionLoading || !v.photoPath} aria-label="Permit entry" className="btn-success flex-1 !py-3">

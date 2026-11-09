@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { LocationsService } from './locations.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -31,6 +31,16 @@ export class LocationsController {
   @ApiOperation({ summary: 'Add gate to location' })
   addGate(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
     return this.locations.createGate(id, user.orgId, body);
+  }
+
+  @Post('gates/:gateId/officers/:userId')
+  assignOfficer(@Param('gateId') gateId: string, @Param('userId') userId: string, @CurrentUser() user: any) {
+    return this.locations.assignOfficer(gateId, user.orgId, userId);
+  }
+
+  @Patch('gates/:gateId/order')
+  reorderGate(@Param('gateId') gateId: string, @Body('sequence') sequence: number, @CurrentUser() user: any) {
+    return this.locations.reorderGate(gateId, user.orgId, Number(sequence));
   }
 
   @Get('gates/all')

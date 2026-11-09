@@ -8,6 +8,9 @@ datasource db {
 }
 
 enum Role {
+  SUPER_ADMIN
+  GLOBAL_ADMIN
+  GLOBAL_GATE
   ADMIN
   STAFF
   GATE
@@ -99,6 +102,9 @@ model Gate {
   locationId String
   location   Location @relation(fields: [locationId], references: [id])
   isActive   Boolean  @default(true)
+  sequence   Int      @default(0)
+  assignments GateOfficerAssignment[]
+  visits     GateVisit[]
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -124,6 +130,9 @@ model User {
   updatedAt      DateTime     @updatedAt
   auditLogs      AuditLog[]
   pushDevices    PushDevice[]
+  gateAssignments GateOfficerAssignment[]
+  gateVisits      GateVisit[]
+  createdParticulars GateParticular[]
 }
 
 model Invite {
@@ -175,6 +184,7 @@ model Visitor {
   idNumber    String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+  gateVisits  GateVisit[]
 }
 
 model BlacklistEntry {
@@ -254,3 +264,50 @@ model ProfileEditRequest {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 }
+
+
+/// Officer-to-checkpoint assignments. Global gate officers may be assigned across agencies.
+model GateOfficerAssignment {
+  id        String   @id @default(uuid())
+  gateId    String
+  userId    String
+  createdAt DateTime @default(now())
+  gate      Gate     @relation(fields: [gateId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([gateId, userId])
+  @@index([userId])
+}
+
+/// Immutable checkpoint event; a later denial never overwrites an earlier pass.
+model GateVisit {
+  id          String   @id @default(uuid())
+  visitorId   String
+  gateId      String
+  officerId   String
+  decision    String
+  notes       String?
+  occurredAt  DateTime @default(now())
+  visitor     Visitor  @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  gate        Gate     @relation(fields: [gateId], references: [id], onDelete: Restrict)
+  officer     User     @relation(fields: [officerId], references: [id], onDelete: Restrict)
+  particulars GateParticular[]
+  @@index([visitorId, occurredAt])
+  @@index([gateId, occurredAt])
+}
+
+model GateParticular {
+  id          String   @id @default(uuid())
+  gateVisitId String
+  kind        String   // WITHHELD or ALLOWED
+  description String
+  quantity    Int      @default(1)
+  imagePath   String?
+  returnedAt  DateTime?
+  returnedById String?
+  createdById String
+  createdAt   DateTime @default(now())
+  gateVisit   GateVisit @relation(fields: [gateVisitId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  @@index([gateVisitId])
+}
+

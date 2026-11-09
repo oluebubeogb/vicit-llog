@@ -51,7 +51,7 @@ async function main() {
     update: {
       passwordHash,
       fullName: adminName,
-      role: Role.ADMIN,
+      role: Role.SUPER_ADMIN,
       isActive: true,
       mustChangePassword: false,
       organisationId: org.id,
@@ -61,7 +61,7 @@ async function main() {
       email: adminEmail,
       passwordHash,
       fullName: adminName,
-      role: Role.ADMIN,
+      role: Role.SUPER_ADMIN,
       portfolio: 'Administration',
       phone: adminPhone,
       organisationId: org.id,

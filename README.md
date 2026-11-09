@@ -140,3 +140,16 @@ Notes: push needs HTTPS. If any frontend var is missing the app silently skips p
 backend service account is missing/invalid it logs a warning and in-app alerts still work.
 On iPhone/iPad, web push only works after the user adds Vicit to the Home Screen (iOS 16.4+).
 `GET /notifications/push-status` tells you whether the backend can send.
+
+
+## Multi-agency platform upgrade
+
+This build adds a multi-agency administration layer and ordered gate checkpoints. The environment-configured `ADMIN_EMAIL` account is bootstrapped as the **Super Admin** (the original environment organisation remains available as an agency/workspace for existing records). If you were already signed in before deploying, sign out and back in so the updated role is loaded. Keep `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ORGANIZATION`, and `ORGANIZATION_CODE` configured in Coolify; the seed synchronizes the Super Admin credentials from those values.
+
+After deployment, sign in with the Super Admin account and open **Platform** from the bottom navigation. From there you can create agencies and their first Agency Admin, appoint delegated Global Admins with explicit permissions, appoint Global Gate Officers, create agency Staff/Gate/Agency Admin accounts, and assign global gate officers to checkpoints across agencies. Agency Admins continue to use the existing Vicit workspace and can manage their own users, locations, gates, and agency data.
+
+Run the new Prisma migration during deployment (`prisma migrate deploy` is already part of the backend entrypoint). Existing gates receive a stable initial sequence based on their creation time. Configure each agency's ordered checkpoints under **Locations & gates** and assign its gate officers. A gate officer must be assigned to a checkpoint before recording a checkpoint decision.
+
+Checkpoint events are append-only records. A visitor must pass every earlier active checkpoint in the same destination location before a later checkpoint can pass them. A denial at a later checkpoint does not erase earlier passed events. Each checkpoint can record withheld and allowed particulars; withheld items are visually prioritized in the gate inspection UI. Optional evidence images are stored under `PHOTO_STORAGE_PATH/particulars`; they therefore use the existing persistent photo volume. Agency logos use `PHOTO_STORAGE_PATH/logos`.
+
+**Deployment note:** this upgrade extends the existing database. Back up PostgreSQL and the current uploads volume before deploying the migration. Agency logos can be uploaded (or supplied as an HTTPS logo URL).

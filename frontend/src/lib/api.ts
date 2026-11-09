@@ -217,6 +217,19 @@ export const api = {
     const q = new URLSearchParams(params as any).toString();
     return request(`/blacklist/check?${q}`);
   },
+  platformAgencies: () => request('/platform/agencies'),
+  platformPeople: () => request('/platform/people'),
+  platformAudit: () => request('/platform/audit'),
+  createAgency: (data: any) => request('/platform/agencies', { method: 'POST', body: JSON.stringify(data) }),
+  uploadAgencyLogo: async (agencyId: string, file: File) => { const form = new FormData(); form.append('logo', file); return request(`/platform/agencies/${agencyId}/logo`, { method: 'POST', body: form }); },
+  createAgencyUser: (agencyId: string, data: any) => request(`/platform/agencies/${agencyId}/users`, { method: 'POST', body: JSON.stringify(data) }),
+  platformAdministrators: () => request('/platform/administrators'),
+  platformGates: () => request('/platform/gates'),
+  assignGlobalGate: (gateId: string, userId: string) => request(`/platform/gates/${gateId}/global-officers/${userId}`, { method: 'POST' }),
+  createPlatformAdministrator: (data: any) => request('/platform/administrators', { method: 'POST', body: JSON.stringify(data) }),
+  platformGlobalGateOfficers: () => request('/platform/global-gate-officers'),
+  createGlobalGateOfficer: (data: any) => request('/platform/global-gate-officers', { method: 'POST', body: JSON.stringify(data) }),
+  setPlatformUserStatus: (id: string, isActive: boolean) => request(`/platform/administrators/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) }),
   locations: () => request('/locations'),
   createLocation: (data: any) =>
     request('/locations', { method: 'POST', body: JSON.stringify(data) }),
@@ -226,6 +239,13 @@ export const api = {
       body: JSON.stringify(data),
     }),
   gates: () => request('/locations/gates/all'),
+  assignGateOfficer: (gateId: string, userId: string) => request(`/locations/gates/${gateId}/officers/${userId}`, { method: 'POST' }),
+  reorderGate: (gateId: string, sequence: number) => request(`/locations/gates/${gateId}/order`, { method: 'PATCH', body: JSON.stringify({ sequence }) }),
+  checkpoints: () => request('/gate/checkpoints'),
+  uploadParticularImage: async (file: File) => { const form = new FormData(); form.append('image', file); return request('/gate/particular-image', { method: 'POST', body: form }); },
+  checkpointHistory: (visitorId: string) => request(`/gate/history/${visitorId}`),
+  returnParticular: (id: string) => request(`/gate/particulars/${id}/return`, { method: 'POST' }),
+  recordCheckpoint: (data: any) => request('/gate/checkpoint', { method: 'POST', body: JSON.stringify(data) }),
   exportCsv: (from?: string, to?: string, columns?: string[]) => {
     const q = new URLSearchParams();
     if (from) q.set('from', from);

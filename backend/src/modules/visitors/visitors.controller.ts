@@ -13,6 +13,7 @@ import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { VisitorsService } from './visitors.service';
 import { Response } from 'express';
 import * as fs from 'fs';
+import * as path from 'path';
 
 @ApiTags('Visitors')
 @Controller('visitors')
@@ -66,6 +67,15 @@ export class VisitorsController {
     const disposition = (res.req as any)?.query?.download ? 'attachment' : 'inline';
     res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
     res.end(png);
+  }
+
+  @Get('particulars/:filename')
+  @ApiOperation({ summary: 'Serve an inspection particulars evidence image' })
+  getParticularImage(@Param('filename') filename: string, @Res() res: Response) {
+    if (!/^[a-f0-9-]+\.(jpg|png|webp)$/i.test(filename)) throw new BadRequestException('Invalid image name');
+    const filepath = path.join(process.env.PHOTO_STORAGE_PATH || '/data/photos', 'particulars', filename);
+    if (!fs.existsSync(filepath)) throw new BadRequestException('Image not found');
+    return res.sendFile(filepath);
   }
 
   @Get('photo/:filename')
