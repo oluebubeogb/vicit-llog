@@ -24,8 +24,14 @@ export class NotificationsController {
     return this.notificationsService.markAllRead(user.id);
   }
 
+  @Get('push-config')
+  @ApiOperation({ summary: 'Web Push (VAPID) public key for this browser' })
+  pushConfig() {
+    return this.notificationsService.pushStatus();
+  }
+
   @Get('push-status')
-  @ApiOperation({ summary: 'Whether the server can send Firebase push (ENABLE_PUSH + service account)' })
+  @ApiOperation({ summary: 'Whether the server can send Web Push' })
   pushStatus() {
     return this.notificationsService.pushStatus();
   }

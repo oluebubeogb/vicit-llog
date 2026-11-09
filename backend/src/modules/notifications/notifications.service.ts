@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { sendSms } from './providers/sms.provider';
 import { sendWhatsApp } from './providers/whatsapp.provider';
-import { isPushReady, pushEnabledFlag, sendPush } from './providers/push.provider';
+import { isPushReady, pushEnabledFlag, sendPush, vapidPublicKey } from './providers/push.provider';
 
 @Injectable()
 export class NotificationsService {
@@ -21,6 +21,7 @@ export class NotificationsService {
     meta?: any;
     channels?: Array<'in_app' | 'sms' | 'whatsapp'>;
     phone?: string;
+    link?: string;
   }) {
     const channels = data.channels?.length ? data.channels : ['in_app'];
     const primaryChannel = channels.includes('in_app') ? 'in_app' : channels[0];
@@ -62,6 +63,9 @@ export class NotificationsService {
           title: data.title,
           body: data.body,
           notificationId: notification.id,
+          link: data.link || data.meta?.url,
+          type: data.meta?.type,
+          callId: data.meta?.callId,
         });
       } catch (e: any) {
         delivery.push = { ok: false, error: e?.message || String(e) };
@@ -79,20 +83,25 @@ export class NotificationsService {
     return notification;
   }
 
-  /** Send an FCM push to every registered device of a user; prunes dead tokens. */
-  private async pushToUser(userId: string, msg: { title: string; body: string; notificationId: string }) {
+  /** Send a Web Push to every registered browser of a user; prunes dead subscriptions. */
+  private async pushToUser(userId: string, msg: { title: string; body: string; notificationId: string; link?: string; type?: string; callId?: string }) {
     const devices = await (this.prisma as any).pushDevice.findMany({
       where: { userId },
       select: { token: true },
     });
     const tokens: string[] = devices.map((d: any) => d.token);
     if (!tokens.length) return { ok: false, sent: 0, devices: 0, error: 'No registered devices' };
-    const url = '/notifications';
+    const url = msg.link || '/notifications';
     const res = await sendPush(tokens, {
       title: msg.title,
       body: msg.body,
       link: url,
-      data: { url, notificationId: msg.notificationId },
+      data: {
+        url,
+        notificationId: msg.notificationId,
+        ...(msg.type ? { type: String(msg.type) } : {}),
+        ...(msg.callId ? { callId: String(msg.callId), tag: `ring-${msg.callId}` } : {}),
+      },
     });
     if (res.invalidTokens.length) {
       await (this.prisma as any).pushDevice
@@ -129,7 +138,8 @@ export class NotificationsService {
   }
 
   pushStatus() {
-    return { enabled: isPushReady() };
+    const enabled = isPushReady();
+    return { enabled, publicKey: enabled ? vapidPublicKey() : '', transport: 'web-push' };
   }
 
   /**
@@ -227,7 +237,7 @@ export class NotificationsService {
       officerIds.size
         ? this.prisma.user.findMany({
             where: { id: { in: [...officerIds] } },
-            select: { id: true, fullName: true, role: true },
+            select: { id: true, fullName: true, role: true, phone: true },
           })
         : Promise.resolve([] as any[]),
       gateIds.size

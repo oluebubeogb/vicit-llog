@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res, UseGuards, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, Res, UseGuards, ForbiddenException } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
@@ -34,6 +34,9 @@ function parseDrill(q: Record<string, any>): DrillFilter {
     locationId: str(q.locationId, ID),
     gateId: str(q.gateId, ID),
     hostId: str(q.hostId, ID),
+    officerId: str(q.officerId, ID),
+    organisationId: str(q.organisationId, /^[0-9a-f-]{36}$/i),
+    item: typeof q.item === 'string' ? q.item.slice(0, 200) : undefined,
     day: str(q.day, /^\d{4}-\d{2}-\d{2}$/),
     hour: int(q.hour, 0, 23),
     weekday: int(q.weekday, 0, 6),
@@ -62,21 +65,29 @@ export class AnalyticsController {
     return this.analytics.platformDashboard(d, from, to);
   }
 
+  private orgForDrill(user: any, f: DrillFilter) {
+    if (user.role === Role.ADMIN) return user.orgId;
+    const platform = user.role === Role.SUPER_ADMIN || (user.role === Role.GLOBAL_ADMIN && (user.permissions || []).includes('visits.view'));
+    if (!platform) throw new ForbiddenException();
+    if (!f.organisationId) throw new BadRequestException('Choose an agency to drill into');
+    return f.organisationId;
+  }
+
   @Get('drill')
   @RateLimit(60, 60)
-  @ApiOperation({ summary: 'Drill-down: newest 100 records behind any analytics number (+ total)' })
+  @ApiOperation({ summary: 'Drill-down: newest 100 records behind any analytics number (+ total and breakdowns)' })
   drillList(@CurrentUser() user: any, @Query() q: Record<string, any>) {
-    if (user.role !== Role.ADMIN) throw new ForbiddenException();
-    return this.drill.list(user.orgId, parseDrill(q));
+    const f = parseDrill(q);
+    return this.drill.list(this.orgForDrill(user, f), f);
   }
 
   @Get('drill/export')
   @RateLimit(6, 60)
   @ApiOperation({ summary: `CSV export of a drill-down (newest first, capped at ${EXPORT_CAP} rows)` })
   async drillExport(@CurrentUser() user: any, @Query() q: Record<string, any>, @Res() res: Response) {
-    if (user.role !== Role.ADMIN) throw new ForbiddenException();
+    const f = parseDrill(q);
     const name = typeof q.name === 'string' ? `vicit-${q.name}`.slice(0, 60) : 'vicit-export';
-    await this.drill.exportCsv(user.orgId, parseDrill(q), res, name);
+    await this.drill.exportCsv(this.orgForDrill(user, f), f, res, name);
   }
 
   @Get('dashboard')
@@ -97,7 +108,7 @@ export class AnalyticsController {
   @RateLimit(60, 60)
   @ApiOperation({ summary: 'Drill-down (legacy): visitors matching a metric/filter' })
   async visitors(@CurrentUser() user: any, @Query() q: Record<string, any>) {
-    if (user.role !== Role.ADMIN) throw new ForbiddenException();
+    if (user.role !== Role.ADMIN && user.role !== Role.SUPER_ADMIN) throw new ForbiddenException();
     const f = parseDrill(q);
     if (f.metric && !['total', 'arrived', 'exited', 'denied', 'activeNow'].includes(f.metric)) f.metric = 'total';
     return (await this.drill.list(user.orgId, f)).rows;

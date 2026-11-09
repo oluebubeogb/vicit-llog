@@ -31,6 +31,10 @@ export type DrillFilter = {
   locationId?: string;
   gateId?: string;
   hostId?: string;
+  officerId?: string;
+  organisationId?: string;
+  /** Withheld item description, or "*" for any withheld item. */
+  item?: string;
   day?: string; // YYYY-MM-DD within the range (series point)
   hour?: number; // 0–23 (peak hours, heatmap)
   weekday?: number; // 0–6, Sunday = 0 (heatmap)
@@ -120,6 +124,26 @@ export class AnalyticsDrillService {
     if (f.hostId) where.invite.hostId = f.hostId;
     if (f.locationId) where.invite.locationId = f.locationId === 'none' ? null : f.locationId;
     if (f.gateId) where.gateId = f.gateId === 'none' ? null : f.gateId;
+    if (f.officerId && f.officerId !== 'none') {
+      where.AND = [
+        ...(where.AND || []),
+        { OR: [{ entryById: f.officerId }, { exitById: f.officerId }, { gateVisits: { some: { officerId: f.officerId } } }] },
+      ];
+    }
+    if (f.item) {
+      where.AND = [
+        ...(where.AND || []),
+        {
+          gateVisits: {
+            some: {
+              particulars: {
+                some: f.item === '*' ? { kind: 'WITHHELD' } : { kind: 'WITHHELD', description: { equals: f.item, mode: 'insensitive' } },
+              },
+            },
+          },
+        },
+      ];
+    }
     if (f.entryMode === 'PEDESTRIAN') {
       // the dashboard counts a missing mode as "On foot"
       where.OR = [{ entryMode: 'PEDESTRIAN' }, { entryMode: null }];
@@ -249,7 +273,7 @@ export class AnalyticsDrillService {
           take: DRILL_PAGE_LIMIT,
         }),
       ]);
-      return { entity, total, limit: DRILL_PAGE_LIMIT, exportCap: EXPORT_CAP, rows };
+      return { entity, total, limit: DRILL_PAGE_LIMIT, exportCap: EXPORT_CAP, rows, facets: null };
     }
 
     const { where, field } = this.visitorWhere(orgId, f);
@@ -257,12 +281,13 @@ export class AnalyticsDrillService {
     if (this.needsScan(f)) {
       const ids = await this.scanIds(orgId, f, where, field);
       const page = ids.slice(0, DRILL_PAGE_LIMIT);
-      const rows = await this.prisma.visitor.findMany({ where: { id: { in: page } }, include: this.visitorInclude });
+      const rows = page.length ? await this.prisma.visitor.findMany({ where: { id: { in: page } }, include: this.visitorInclude }) : [];
       const order = new Map(page.map((id, i) => [id, i]));
       rows.sort((a, b) => order.get(a.id)! - order.get(b.id)!);
-      return { entity, total: ids.length, limit: DRILL_PAGE_LIMIT, exportCap: EXPORT_CAP, rows: this.decorate(rows, L) };
+      const [decorated, facets] = await Promise.all([this.attachItems(this.decorate(rows, L)), this.facets(orgId, { id: { in: ids.slice(0, 5000) } })]);
+      return { entity, total: ids.length, limit: DRILL_PAGE_LIMIT, exportCap: EXPORT_CAP, rows: decorated, facets };
     }
-    const [total, rows] = await Promise.all([
+    const [total, rows, facets] = await Promise.all([
       this.prisma.visitor.count({ where }),
       this.prisma.visitor.findMany({
         where,
@@ -270,8 +295,89 @@ export class AnalyticsDrillService {
         orderBy: [{ [field]: 'desc' }, { createdAt: 'desc' }],
         take: DRILL_PAGE_LIMIT,
       }),
+      this.facets(orgId, where),
     ]);
-    return { entity, total, limit: DRILL_PAGE_LIMIT, exportCap: EXPORT_CAP, rows: this.decorate(rows, L) };
+    return { entity, total, limit: DRILL_PAGE_LIMIT, exportCap: EXPORT_CAP, rows: await this.attachItems(this.decorate(rows, L)), facets };
+  }
+
+  /** Breakdowns for the current filter: location → gate → officer → host, plus status, stay, peak hour and withheld items. */
+  private async facets(orgId: string, where: any) {
+    const [rows, parts, L] = await Promise.all([
+      this.prisma.visitor.findMany({
+        where,
+        select: {
+          status: true,
+          gateId: true,
+          entryById: true,
+          enteredAt: true,
+          exitedAt: true,
+          invite: { select: { locationId: true, host: { select: { id: true, fullName: true } } } },
+        },
+        take: 5000,
+      }),
+      this.prisma.gateParticular.findMany({
+        where: { kind: 'WITHHELD', gateVisit: { visitor: where } },
+        select: { description: true },
+        take: 3000,
+      }),
+      this.lookups(orgId),
+    ]);
+    const tally = (pairs: Array<[string, string]>) => {
+      const m = new Map<string, { id: string; label: string; count: number }>();
+      for (const [id, label] of pairs) {
+        const cur = m.get(id) || { id, label, count: 0 };
+        cur.count++;
+        m.set(id, cur);
+      }
+      return [...m.values()].sort((a, b) => b.count - a.count).slice(0, 12);
+    };
+    const durations = [
+      { id: 0, label: '< 30m', count: 0 },
+      { id: 1, label: '30–60m', count: 0 },
+      { id: 2, label: '1–2h', count: 0 },
+      { id: 3, label: '2–4h', count: 0 },
+      { id: 4, label: '4h+', count: 0 },
+    ];
+    const hours = Array.from({ length: 24 }, (_, hour) => ({ id: hour, label: `${String(hour).padStart(2, '0')}:00`, count: 0 }));
+    for (const row of rows) {
+      if (row.enteredAt && row.exitedAt) {
+        const mins = (+row.exitedAt - +row.enteredAt) / 60000;
+        const idx = mins < 30 ? 0 : mins < 60 ? 1 : mins < 120 ? 2 : mins < 240 ? 3 : 4;
+        if (mins >= 0) durations[idx].count++;
+      }
+      if (row.enteredAt) hours[new Date(row.enteredAt).getHours()].count++;
+    }
+    const withheldMap = new Map<string, number>();
+    for (const part of parts) {
+      const key = (part.description || 'Item').trim();
+      withheldMap.set(key, (withheldMap.get(key) || 0) + 1);
+    }
+    return {
+      locations: tally(rows.map((r) => [r.invite?.locationId || 'none', r.invite?.locationId ? L.loc.get(r.invite.locationId) || 'Location' : 'No location'] as [string, string])),
+      gates: tally(rows.map((r) => [r.gateId || 'none', r.gateId ? L.gate.get(r.gateId) || 'Gate' : 'No gate'] as [string, string])),
+      officers: tally(rows.filter((r) => r.entryById).map((r) => [r.entryById as string, L.user.get(r.entryById as string) || 'Officer'] as [string, string])),
+      hosts: tally(rows.filter((r) => r.invite?.host).map((r) => [r.invite!.host!.id, r.invite!.host!.fullName] as [string, string])),
+      statuses: tally(rows.map((r) => [r.status, STATUS_LABEL[r.status] || r.status] as [string, string])),
+      durations: durations.filter((d) => d.count > 0),
+      hours: hours.filter((h) => h.count > 0).sort((a, b) => b.count - a.count).slice(0, 8),
+      withheld: [...withheldMap.entries()].map(([label, count]) => ({ id: label, label, count })).sort((a, b) => b.count - a.count).slice(0, 12),
+    };
+  }
+
+  private async attachItems(rows: any[]) {
+    if (!rows.length) return rows;
+    const parts = await this.prisma.gateParticular.findMany({
+      where: { gateVisit: { visitorId: { in: rows.map((r) => r.id) } } },
+      select: { kind: true, description: true, quantity: true, returnedAt: true, gateVisit: { select: { visitorId: true, gate: { select: { name: true } } } } },
+    });
+    const byVisitor = new Map<string, any[]>();
+    for (const part of parts) {
+      const id = part.gateVisit.visitorId;
+      const list = byVisitor.get(id) || [];
+      list.push({ kind: part.kind, description: part.description, quantity: part.quantity, returnedAt: part.returnedAt, gate: part.gateVisit.gate?.name || null });
+      byVisitor.set(id, list);
+    }
+    return rows.map((row) => ({ ...row, particulars: byVisitor.get(row.id) || [] }));
   }
 
   /**

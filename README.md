@@ -37,7 +37,7 @@ Default admin: `admin@vicit.local` / `Admin@12345`
 * Visitor history + blacklisting
 * Multi-gate / multi-location support
 * White-labelling (logo, colours, org branding)
-* Richer notifications (in-app + Firebase web push)
+* Richer notifications (in-app + Web Push)
 * Printable visitor passes
 * Exportable compliance reports (CSV)
 * Photo retention / cleanup policies
@@ -111,35 +111,35 @@ vicit-llog/
   Avatar, Sparkline, Collapse, PageHeader, Bits). Explanatory copy is shown in tooltips; errors and
   essential information are always shown inline. Animations respect `prefers-reduced-motion`.
 
-## Push notifications (Firebase Cloud Messaging)
+## Push notifications (Web Push / VAPID)
 
-Every in-app notification (Alerts) is also sent as a push to each browser / installed PWA the
-user has allowed. Keys come from env only, so you set them in the **Coolify UI** (Environment
-Variables) and redeploy; nothing is hardcoded.
+Every in-app notification, including a gate/host ring, is also sent with the Web Push protocol
+to each browser or installed PWA the user has allowed. This does not use Firebase.
 
-**Frontend service** (public web config, read at runtime by `/api/firebase-config` and `/sw.js`):
+Generate a key pair once and keep it:
 
-| Variable | Where in Firebase Console |
-|-|-|
-| `FIREBASE_API_KEY` | Project settings → General → Your apps → Web app → `apiKey` |
-| `FIREBASE_AUTH_DOMAIN` | same → `authDomain` (defaults to `<projectId>.firebaseapp.com`) |
-| `FIREBASE_PROJECT_ID` | same → `projectId` |
-| `FIREBASE_STORAGE_BUCKET` | same → `storageBucket` (optional) |
-| `FIREBASE_MESSAGING_SENDER_ID` | same → `messagingSenderId` |
-| `FIREBASE_APP_ID` | same → `appId` |
-| `FIREBASE_VAPID_KEY` | Project settings → Cloud Messaging → Web Push certificates → public key |
+```bash
+npx web-push generate-vapid-keys
+```
 
-**Backend service:**
+| Variable | Where | Notes |
+|-|-|-|
+| `ENABLE_PUSH` | Backend | `true` to send. `false` turns delivery off. |
+| `VAPID_PUBLIC_KEY` | Backend | Public key from the command above. The browser reads it from `GET /notifications/push-config`. |
+| `VAPID_PRIVATE_KEY` | Backend | **Secret.** Never expose it to the frontend. |
+| `VAPID_SUBJECT` | Backend | `mailto:you@yourorg.com` or an `https://` contact URL. |
 
-| Variable | Value |
-|-|-|
-| `ENABLE_PUSH` | `true` |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Project settings → Service accounts → *Generate new private key*; paste the whole JSON on one line (base64 of it also works). **Secret** — mark it as such in Coolify. |
+If the keys are empty and push is not explicitly disabled, the API creates an ephemeral pair for
+that process. Subscriptions from those keys stop working when the process restarts, so production
+must set both keys.
 
-Notes: push needs HTTPS. If any frontend var is missing the app silently skips push; if the
-backend service account is missing/invalid it logs a warning and in-app alerts still work.
-On iPhone/iPad, web push only works after the user adds Vicit to the Home Screen (iOS 16.4+).
-`GET /notifications/push-status` tells you whether the backend can send.
+Push needs a secure context (HTTPS, or localhost). Desktop Chrome, Edge, and Firefox deliver
+pushes while the PWA is closed. Safari on macOS does too, once the user allows notifications.
+On iPhone and iPad, Web Push works only after the user installs Vicit to the Home Screen
+(iOS/iPadOS 16.4 or newer) and the site is served over HTTPS. A ring notification opens
+`/ring?call=<id>`, which is the answer screen, with a `tel:` fallback when a phone number is on file.
+
+`GET /notifications/push-status` reports whether the backend can send.
 
 
 ## Multi-agency platform upgrade

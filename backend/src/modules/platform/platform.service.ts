@@ -58,6 +58,40 @@ export class PlatformService {
     return { rows, total, page: Math.max(1, page), pageSize: take, hasMore: Math.max(1, page) * take < total };
   }
 
+  async platformInvite(actor: any, id: string) {
+    this.assertPermission(actor, 'visits.view');
+    const invite = await this.prisma.invite.findUnique({
+      where: { id },
+      include: {
+        organisation: { select: { id: true, name: true, code: true, logoUrl: true } },
+        host: { select: { id: true, fullName: true, email: true, phone: true, portfolio: true, role: true } },
+        visitors: {
+          include: {
+            gateVisits: {
+              include: {
+                gate: { select: { id: true, name: true, location: { select: { name: true } } } },
+                officer: { select: { id: true, fullName: true, role: true } },
+                particulars: true,
+              },
+              orderBy: { occurredAt: 'asc' },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+    if (!invite) throw new NotFoundException('Invitation not found');
+    const location = invite.locationId
+      ? await this.prisma.location.findUnique({ where: { id: invite.locationId }, select: { id: true, name: true, address: true } })
+      : null;
+    const { token: _token, passphrase: _passphrase, ...rest } = invite;
+    return {
+      ...rest,
+      location,
+      visitors: rest.visitors.map(({ qrCodeData: _qr, ...visitor }) => visitor),
+    };
+  }
+
   async platformAudit(actor: any, page = 1, pageSize = 40) {
     this.assertPermission(actor, 'audit.view');
     const take = Math.min(80, Math.max(1, pageSize));

@@ -197,7 +197,7 @@ export class InvitesService {
     return this.prisma.invite.findMany({
       where: { hostId },
       include: {
-        visitors: true,
+        visitors: { include: { gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true } } }, orderBy: { occurredAt: 'asc' } } } },
         host: { select: { id: true, fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -277,7 +277,7 @@ export class InvitesService {
     const invites = ids.length
       ? await this.prisma.invite.findMany({
           where: { id: { in: ids } },
-          include: { visitors: true, host: { select: { id: true, fullName: true, email: true } } },
+          include: { visitors: { include: { gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true } } }, orderBy: { occurredAt: 'asc' } } } }, host: { select: { id: true, fullName: true, email: true } } },
         })
       : [];
     const byId = new Map(invites.map((i) => [i.id, i]));
@@ -296,7 +296,7 @@ export class InvitesService {
     return this.prisma.invite.findMany({
       where: { organisationId: orgId },
       include: {
-        visitors: true,
+        visitors: { include: { gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true } } }, orderBy: { occurredAt: 'asc' } } } },
         host: { select: { id: true, fullName: true, email: true } },
       },
       orderBy: { createdAt: 'desc' },

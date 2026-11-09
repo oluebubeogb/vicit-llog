@@ -31,7 +31,7 @@ export class GateService {
 
     const include = {
       visitors: { include: { gateVisits: { include: { gate: { select: { name: true, sequence: true } }, officer: { select: { fullName: true } }, particulars: true }, orderBy: { occurredAt: 'asc' } } } },
-      host: { select: { id: true, fullName: true, email: true } },
+      host: { select: { id: true, fullName: true, email: true, phone: true } },
       organisation: { select: { id: true, name: true } },
     } as const;
 

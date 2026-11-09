@@ -15,6 +15,7 @@ import { HealthModule } from './modules/health/health.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { MailModule } from './modules/mail/mail.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { RingModule } from './modules/rings/ring.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { PlatformModule } from './modules/platform/platform.module';
     BrandingModule,
     HealthModule,
     PlatformModule,
+    RingModule,
   ],
 })
 export class AppModule {}

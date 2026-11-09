@@ -20,6 +20,7 @@ export class PlatformController {
   @Post('people/bulk') bulkPeople(@Body('rows') rows: any[], @CurrentUser() user: any) { return this.service.bulkCreateAgencyPeople(user, rows || []); }
   @Get('people') people(@CurrentUser() user: any, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.service.people(user, Number(page) || 1, Number(pageSize) || 50); }
   @Get('invites') invites(@CurrentUser() user: any, @Query('page') page?: string, @Query('pageSize') pageSize?: string, @Query('q') q?: string) { return this.service.platformInvites(user, Number(page) || 1, Number(pageSize) || 30, q || ''); }
+  @Get('invites/:id') invite(@CurrentUser() user: any, @Param('id') id: string) { return this.service.platformInvite(user, id); }
   @Get('audit') audit(@CurrentUser() user: any, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.service.platformAudit(user, Number(page) || 1, Number(pageSize) || 40); }
   @Get('agencies') agencies(@CurrentUser() user: any) { return this.service.agencies(user); }
   @Patch('agencies/:agencyId') updateAgency(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updateAgency(user, agencyId, body); }

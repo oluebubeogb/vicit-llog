@@ -2,9 +2,17 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { requestContext } from './common/request-context';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.use((req: any, _res: any, next: () => void) => {
+    const forwarded = req.headers?.['x-forwarded-for'];
+    const ip = (Array.isArray(forwarded) ? forwarded[0] : String(forwarded || '').split(',')[0]) || req.ip || req.socket?.remoteAddress || '';
+    const userAgent = String(req.headers?.['user-agent'] || '').slice(0, 512);
+    requestContext.run({ ip: String(ip).trim().slice(0, 64), userAgent }, () => next());
+  });
 
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') || true,
