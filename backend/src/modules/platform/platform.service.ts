@@ -113,16 +113,17 @@ export class PlatformService {
     if (!fullName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !['STAFF', 'GATE', 'ADMIN'].includes(role)) throw new BadRequestException('Provide a name, valid email and STAFF, GATE or ADMIN role');
     if (role === 'ADMIN') this.assertPermission(actor, 'agency_admins.create');
     if (await this.prisma.user.findUnique({ where: { email } })) throw new ConflictException('Email already registered');
-    const gateIds = Array.isArray(input.gateIds) ? input.gateIds.map(String) : [];
+    const gateIds: string[] = Array.isArray(input.gateIds) ? (input.gateIds as unknown[]).map((id): string => String(id)) : [];
+    const uniqueGateIds: string[] = Array.from(new Set<string>(gateIds));
     if (role === 'GATE' && gateIds.length) {
       const count = await this.prisma.gate.count({ where: { id: { in: gateIds }, location: { organisationId: agencyId } } });
-      if (count !== [...new Set(gateIds)].length) throw new BadRequestException('One or more selected gates do not belong to this agency');
+      if (count !== uniqueGateIds.length) throw new BadRequestException('One or more selected gates do not belong to this agency');
     }
     const initialPassword = generateNigerianPassword();
     const passwordHash = await bcrypt.hash(initialPassword, 12);
     const user = await this.prisma.$transaction(async tx => {
       const created = await tx.user.create({ data: { fullName, email, phone: input.phone || null, role: role as Role, portfolio: input.portfolio || null, passwordHash, organisationId: agencyId, mustChangePassword: true } });
-      if (role === 'GATE' && gateIds.length) await tx.gateOfficerAssignment.createMany({ data: [...new Set(gateIds)].map(gateId => ({ gateId, userId: created.id })) });
+      if (role === 'GATE' && gateIds.length) await tx.gateOfficerAssignment.createMany({ data: uniqueGateIds.map((gateId: string) => ({ gateId, userId: created.id })) });
       return created;
     });
     const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword);
@@ -173,7 +174,7 @@ export class PlatformService {
     if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException();
     if (userId === actor.id) throw new BadRequestException('You cannot suspend your own account');
     const target = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!target || ![Role.GLOBAL_ADMIN, Role.GLOBAL_GATE].includes(target.role)) throw new NotFoundException('Platform user not found');
+    if (!target || (target.role !== Role.GLOBAL_ADMIN && target.role !== Role.GLOBAL_GATE)) throw new NotFoundException('Platform user not found');
     const updated = await this.prisma.user.update({ where: { id: userId }, data: { isActive }, select: userSelect });
     await this.audit.log({ action: isActive ? 'PLATFORM_USER_ACTIVATED' : 'PLATFORM_USER_SUSPENDED', entity: 'User', entityId: userId, userId: actor.id });
     return updated;
