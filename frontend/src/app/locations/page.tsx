@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, getUser } from '@/lib/api';
-import { Building2, DoorOpen, MapPin, Plus, ChevronUp, ChevronDown, UserPlus } from 'lucide-react';
+import { Building2, DoorOpen, MapPin, Plus, Minus, ChevronUp, ChevronDown } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Collapse from '@/components/ui/Collapse';
 import { Empty, SkeletonList } from '@/components/ui/Bits';
@@ -109,7 +109,39 @@ export default function LocationsPage() {
                       <option value="">Assign gate officer…</option>
                       {officers.map((o: any) => <option key={o.id} value={o.id}>{o.fullName}</option>)}
                     </select>
-                    <span className="w-full pl-6 text-[11px] text-slate-500">{(g.assignments || []).map((a: any) => a.user?.fullName).filter(Boolean).join(', ') || 'No officers assigned'}</span>
+                    <div className="w-full space-y-1.5 pl-6">
+                      <p className="text-[11px] font-semibold tracking-wide text-slate-600">Gate Officers currently assigned</p>
+                      {(g.assignments || []).length === 0 ? (
+                        <p className="text-[11px] text-slate-400">No officers assigned</p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {(g.assignments || []).map((a: any) => (
+                            <li key={a.user?.id || a.id} className="flex items-center gap-2 text-sm text-slate-700">
+                              <span className="min-w-0 flex-1 font-medium">{a.user?.fullName || 'Unknown officer'}</span>
+                              <button
+                                type="button"
+                                title={`Remove ${a.user?.fullName || 'officer'} from this gate`}
+                                aria-label={`Remove ${a.user?.fullName || 'officer'} from this gate`}
+                                disabled={!a.user?.id || (!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId)}
+                                onClick={async () => {
+                                  if (!a.user?.id) return;
+                                  if (!window.confirm(`Remove ${a.user.fullName} from ${g.name}?`)) return;
+                                  try {
+                                    await api.unassignGateOfficer(g.id, a.user.id);
+                                    await load(true);
+                                  } catch (err: any) {
+                                    window.alert(err.message || 'Could not remove officer');
+                                  }
+                                }}
+                                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Minus size={12} strokeWidth={3} />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                     <button type="button" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} title="Shared checkpoint settings are managed by the owning agency" className="ml-6 text-[11px] font-semibold text-brand-700 underline disabled:opacity-40" onClick={()=>{setGateSettingsOpen(gateSettingsOpen===g.id?null:g.id);setGateSettings({admissionsEnabled:g.admissionsEnabled??true,particularsCheckEnabled:g.particularsCheckEnabled??true,dailyAdmissionLimit:g.dailyAdmissionLimit??''})}}>Gate settings</button>
                     {gateSettingsOpen===g.id&&<form className="grid w-full gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2" onSubmit={async e=>{e.preventDefault();try{await api.updateGateSettings(g.id,{...gateSettings,dailyAdmissionLimit:gateSettings.dailyAdmissionLimit||null});setGateSettingsOpen(null);load(true)}catch(err:any){window.alert(err.message)}}}>
                       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.admissionsEnabled} onChange={e=>setGateSettings({...gateSettings,admissionsEnabled:e.target.checked})}/> Admissions enabled</label>

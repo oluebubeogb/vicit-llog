@@ -254,6 +254,7 @@ export const api = {
     }),
   gates: () => request('/locations/gates/all'),
   assignGateOfficer: (gateId: string, userId: string) => request(`/locations/gates/${gateId}/officers/${userId}`, { method: 'POST' }),
+  unassignGateOfficer: (gateId: string, userId: string) => request(`/locations/gates/${gateId}/officers/${userId}`, { method: 'DELETE' }),
   reorderGate: (gateId: string, sequence: number) => request(`/locations/gates/${gateId}/order`, { method: 'PATCH', body: JSON.stringify({ sequence }) }),
   checkpoints: () => request('/gate/checkpoints'),
   uploadParticularImage: async (file: File) => { const form = new FormData(); form.append('image', file); return request('/gate/particular-image', { method: 'POST', body: form }); },

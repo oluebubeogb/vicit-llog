@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
-    "test:qr": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\",\"jsx\":\"react\"}' ts-node scripts/qr-roundtrip.test.ts"
+    "test:qr": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\",\"jsx\":\"react\"}' ts-node scripts/qr-roundtrip.test.ts",
+    "clear:locations": "ts-node --transpile-only scripts/clear-locations-and-gates.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",
@@ -50,5 +51,11 @@
     "@zxing/library": "^0.21.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
+  },
+  "allowScripts": {
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "prisma@5.22.0": true,
+    "bcrypt@5.1.1": true
   }
 }

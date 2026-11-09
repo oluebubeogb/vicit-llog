@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { LocationsService } from './locations.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -42,6 +42,12 @@ export class LocationsController {
   @Post('gates/:gateId/officers/:userId')
   assignOfficer(@Param('gateId') gateId: string, @Param('userId') userId: string, @CurrentUser() user: any) {
     return this.locations.assignOfficer(gateId, user.orgId, userId);
+  }
+
+  @Delete('gates/:gateId/officers/:userId')
+  @ApiOperation({ summary: 'Unassign gate officer from checkpoint' })
+  unassignOfficer(@Param('gateId') gateId: string, @Param('userId') userId: string, @CurrentUser() user: any) {
+    return this.locations.unassignOfficer(gateId, user.orgId, userId);
   }
 
   @Patch('gates/:gateId/order')

@@ -57,6 +57,19 @@ export class LocationsService {
     return this.prisma.gateOfficerAssignment.upsert({ where: { gateId_userId: { gateId, userId } }, update: {}, create: { gateId, userId } });
   }
 
+  async unassignOfficer(gateId: string, orgId: string, userId: string) {
+    const gate = await this.prisma.gate.findFirst({
+      where: { id: gateId, location: { OR: [{ organisationId: orgId }, { isShared: true }] } },
+      include: { location: { select: { organisationId: true } } },
+    });
+    if (!gate) throw new NotFoundException('Gate not found');
+    if (gate.location.organisationId !== orgId) throw new ForbiddenException('Shared location gates are managed by the owning agency');
+    const assignment = await this.prisma.gateOfficerAssignment.findUnique({ where: { gateId_userId: { gateId, userId } } });
+    if (!assignment) throw new NotFoundException('Officer is not assigned to this gate');
+    await this.prisma.gateOfficerAssignment.delete({ where: { id: assignment.id } });
+    return { ok: true };
+  }
+
   async reorderGate(gateId: string, orgId: string, sequence: number) {
     if (!Number.isInteger(sequence) || sequence < 0) throw new ConflictException('Gate order must be zero or greater');
     const gate = await this.prisma.gate.findFirst({ where: { id: gateId, location: { OR: [{ organisationId: orgId }, { isShared: true }] } }, include: { location: { select: { organisationId: true } } } });
