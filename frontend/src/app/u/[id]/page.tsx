@@ -42,7 +42,7 @@ export default function PublicUserPage() {
     if (!id) return;
     const u = getUser();
     setViewer(u);
-    if (!u || (u.role !== 'ADMIN' && u.role !== 'GATE')) {
+    if (!u || !['ADMIN', 'GATE', 'SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(u.role)) {
       setAllowed(false);
       setLoading(false);
       return;
@@ -71,7 +71,7 @@ export default function PublicUserPage() {
 
   const avatar = profile.avatarPath ? `${API}/users/avatar/${profile.avatarPath}` : null;
 
-  const showGateTabs = viewer?.role === 'ADMIN' && profile.subjectIsGate && profile.gateActivity;
+  const showGateTabs = ['ADMIN', 'SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(viewer?.role) && profile.subjectIsGate && profile.gateActivity;
 
   const tabs: { id: Tab; label: string; count: number }[] = showGateTabs
     ? [

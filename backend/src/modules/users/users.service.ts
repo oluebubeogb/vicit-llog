@@ -425,7 +425,7 @@ export class UsersService {
     if (!user) throw new NotFoundException('Profile not found');
 
     // Scope to same organisation when viewer is known
-    if (viewer?.orgId && user.organisationId !== viewer.orgId) {
+    if (viewer?.orgId && !['SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(viewer.role) && user.organisationId !== viewer.orgId) {
       throw new NotFoundException('Profile not found');
     }
 
@@ -461,7 +461,7 @@ export class UsersService {
     };
 
     // Admin-only: gate officer activity (entries / declines / exits they recorded)
-    if (viewer?.role === 'ADMIN' && user.role === Role.GATE) {
+    if (['ADMIN', 'SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(viewer?.role || '') && user.role === Role.GATE) {
       const [entries, declines, exits] = await Promise.all([
         this.prisma.visitor.findMany({
           where: {

@@ -28,6 +28,19 @@ export class PlatformService {
     return this.prisma.user.findMany({ select: { ...userSelect, organisation: { select: { id: true, name: true, code: true } } }, orderBy: [{ organisationId: 'asc' }, { createdAt: 'desc' }] });
   }
 
+  async platformInvites(actor: any) {
+    this.assertPermission(actor, 'visits.view');
+    return this.prisma.invite.findMany({
+      include: {
+        organisation: { select: { id: true, name: true, code: true } },
+        host: { select: { id: true, fullName: true, email: true } },
+        visitors: { select: { id: true, fullName: true, status: true, enteredAt: true, exitedAt: true, deniedAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    });
+  }
+
   async platformAudit(actor: any) {
     this.assertPermission(actor, 'audit.view');
     return this.audit.findAll(200);
@@ -35,10 +48,18 @@ export class PlatformService {
 
   async agencies(actor: any) {
     this.assertPermission(actor, 'agencies.view');
-    return this.prisma.organisation.findMany({
+    const organisations = await this.prisma.organisation.findMany({
       include: { _count: { select: { users: true, invites: true, locations: true } }, users: { where: { role: { in: [Role.ADMIN, Role.STAFF, Role.GATE] } }, select: { id: true, fullName: true, email: true, phone: true, role: true, isActive: true }, orderBy: [{ role: 'asc' }, { fullName: 'asc' }] } },
       orderBy: { createdAt: 'desc' },
     });
+    return Promise.all(organisations.map(async (org) => {
+      const [visitors, gates, activeVisitors] = await Promise.all([
+        this.prisma.visitor.count({ where: { invite: { organisationId: org.id } } }),
+        this.prisma.gate.count({ where: { location: { organisationId: org.id } } }),
+        this.prisma.visitor.count({ where: { invite: { organisationId: org.id }, status: 'ARRIVED' } }),
+      ]);
+      return { ...org, _count: { ...org._count, visitors, gates, activeVisitors } };
+    }));
   }
 
   async createAgency(actor: any, input: any) {
@@ -180,6 +201,28 @@ export class PlatformService {
     const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword, undefined, agencyId);
     await this.audit.log({ action: 'AGENCY_USER_CREATED', entity: 'User', entityId: user.id, userId: actor.id, details: { role, agencyId, assignedGateIds: gateIds } });
     return { user: { id: user.id, email, fullName, role: user.role, organisationId: agencyId, mustChangePassword: true }, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
+  }
+
+  async bulkCreateAgencyPeople(actor: any, rows: any[]) {
+    this.assertPermission(actor, 'people.create');
+    if (!Array.isArray(rows) || rows.length > 500) throw new BadRequestException('Upload between 1 and 500 rows');
+    const agencies = await this.prisma.organisation.findMany({ select: { id: true, name: true, code: true } });
+    const byCode = new Map<string, typeof agencies[number]>(agencies.map(a => [a.code.toLowerCase(), a] as const));
+    const byName = new Map<string, typeof agencies[number]>(agencies.map(a => [a.name.toLowerCase(), a] as const));
+    const results: any[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || {};
+      const key = String(row.agencyCode || row.agency || row.agencyName || '').trim().toLowerCase();
+      const agency = byCode.get(key) || byName.get(key);
+      if (!agency) { results.push({ row: i + 2, error: 'Agency code/name not found' }); continue; }
+      try {
+        const created = await this.createAgencyUser(actor, agency.id, row);
+        results.push({ row: i + 2, agency: agency.name, email: created.user.email, success: true, emailSent: created.emailSent });
+      } catch (error: any) {
+        results.push({ row: i + 2, agency: agency.name, email: row.email, error: error?.message || 'Unable to create user' });
+      }
+    }
+    return { total: rows.length, createdCount: results.filter(r => r.success).length, errorCount: results.filter(r => !r.success).length, results };
   }
 
   async gates(actor: any) {

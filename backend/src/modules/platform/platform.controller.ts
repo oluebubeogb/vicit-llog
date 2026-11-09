@@ -17,7 +17,9 @@ import { PlatformService } from './platform.service';
 @Controller('platform')
 export class PlatformController {
   constructor(private service: PlatformService) {}
+  @Post('people/bulk') bulkPeople(@Body('rows') rows: any[], @CurrentUser() user: any) { return this.service.bulkCreateAgencyPeople(user, rows || []); }
   @Get('people') people(@CurrentUser() user: any) { return this.service.people(user); }
+  @Get('invites') invites(@CurrentUser() user: any) { return this.service.platformInvites(user); }
   @Get('audit') audit(@CurrentUser() user: any) { return this.service.platformAudit(user); }
   @Get('agencies') agencies(@CurrentUser() user: any) { return this.service.agencies(user); }
   @Patch('agencies/:agencyId') updateAgency(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updateAgency(user, agencyId, body); }

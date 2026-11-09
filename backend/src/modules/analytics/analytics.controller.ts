@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards, ForbiddenException } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
@@ -45,7 +45,7 @@ function parseDrill(q: Record<string, any>): DrillFilter {
 @ApiTags('Analytics')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, RateLimitGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
 @Controller('analytics')
 export class AnalyticsController {
   constructor(
@@ -53,10 +53,20 @@ export class AnalyticsController {
     private drill: AnalyticsDrillService,
   ) {}
 
+  @Get('platform')
+  @ApiOperation({ summary: 'Cross-agency analytics grouped by agency for platform oversight' })
+  async platformDashboard(@CurrentUser() user: any, @Query('days') days?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    if (user.role === Role.GLOBAL_ADMIN && !(user.permissions || []).includes('visits.view')) throw new ForbiddenException('Cross-agency visitor access is not enabled for your account');
+    if (user.role !== Role.SUPER_ADMIN && user.role !== Role.GLOBAL_ADMIN) throw new ForbiddenException();
+    const d = Math.min(366, Math.max(1, days ? parseInt(days, 10) || 30 : 30));
+    return this.analytics.platformDashboard(d, from, to);
+  }
+
   @Get('drill')
   @RateLimit(60, 60)
   @ApiOperation({ summary: 'Drill-down: newest 100 records behind any analytics number (+ total)' })
   drillList(@CurrentUser() user: any, @Query() q: Record<string, any>) {
+    if (user.role !== Role.ADMIN) throw new ForbiddenException();
     return this.drill.list(user.orgId, parseDrill(q));
   }
 
@@ -64,6 +74,7 @@ export class AnalyticsController {
   @RateLimit(6, 60)
   @ApiOperation({ summary: `CSV export of a drill-down (newest first, capped at ${EXPORT_CAP} rows)` })
   async drillExport(@CurrentUser() user: any, @Query() q: Record<string, any>, @Res() res: Response) {
+    if (user.role !== Role.ADMIN) throw new ForbiddenException();
     const name = typeof q.name === 'string' ? `vicit-${q.name}`.slice(0, 60) : 'vicit-export';
     await this.drill.exportCsv(user.orgId, parseDrill(q), res, name);
   }
@@ -76,6 +87,7 @@ export class AnalyticsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
+    if (user.role !== Role.ADMIN) throw new ForbiddenException();
     const d = Math.min(366, Math.max(1, days ? parseInt(days, 10) || 30 : 30));
     return this.analytics.dashboard(user.orgId, d, from, to);
   }
@@ -85,6 +97,7 @@ export class AnalyticsController {
   @RateLimit(60, 60)
   @ApiOperation({ summary: 'Drill-down (legacy): visitors matching a metric/filter' })
   async visitors(@CurrentUser() user: any, @Query() q: Record<string, any>) {
+    if (user.role !== Role.ADMIN) throw new ForbiddenException();
     const f = parseDrill(q);
     if (f.metric && !['total', 'arrived', 'exited', 'denied', 'activeNow'].includes(f.metric)) f.metric = 'total';
     return (await this.drill.list(user.orgId, f)).rows;

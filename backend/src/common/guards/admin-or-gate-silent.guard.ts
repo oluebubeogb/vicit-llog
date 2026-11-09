@@ -6,7 +6,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 
 /**
- * Requires a signed-in ADMIN or GATE user.
+ * Requires a signed-in agency administrator/gate officer or platform oversight/gate user.
  * Any other case (anonymous, staff, bad token) returns a generic 404
  * so probes cannot distinguish existence or authorization.
  */
@@ -17,7 +17,7 @@ export class AdminOrGateSilentGuard extends AuthGuard('jwt') {
   }
 
   handleRequest(err: any, user: any) {
-    if (err || !user || (user.role !== 'ADMIN' && user.role !== 'GATE')) {
+    if (err || !user || (!['ADMIN', 'GATE', 'SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(user.role))) {
       throw new NotFoundException('Not found');
     }
     return user;

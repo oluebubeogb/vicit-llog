@@ -10,6 +10,23 @@ export class AnalyticsService {
    * period of equal length for comparison. Aggregation is done in memory from one
    * visitor query so it works on any Postgres without extra indexes.
    */
+  async platformDashboard(days = 30, fromIso?: string, toIso?: string) {
+    const organisations = await this.prisma.organisation.findMany({
+      select: { id: true, name: true, code: true, logoUrl: true },
+      orderBy: { name: 'asc' },
+    });
+    const agencies = await Promise.all(organisations.map(async (agency) => ({
+      agency,
+      analytics: await this.dashboard(agency.id, days, fromIso, toIso),
+    })));
+    const totals = agencies.reduce((acc: any, item: any) => {
+      const k = item.analytics?.kpis || {};
+      for (const key of ['totalVisits', 'arrived', 'exited', 'denied', 'invitesCreated']) acc[key] = (acc[key] || 0) + (k[key] || 0);
+      return acc;
+    }, { totalVisits: 0, arrived: 0, exited: 0, denied: 0, invitesCreated: 0 });
+    return { totals, agencies };
+  }
+
   async dashboard(orgId: string, days = 30, fromIso?: string, toIso?: string) {
     const to = toIso ? endOfDay(new Date(toIso)) : new Date();
     let from: Date;
