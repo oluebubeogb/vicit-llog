@@ -5,6 +5,7 @@ import BrandProvider from '@/components/BrandProvider';
 import SplashScreen from '@/components/SplashScreen';
 import BackgroundArt from '@/components/BackgroundArt';
 import PushRegister from '@/components/PushRegister';
+import RingOverlay from '@/components/RingOverlay';
 import AgencyIdentity from '@/components/AgencyIdentity';
 import { BRAND_BOOT_SCRIPT } from '@/lib/brand';
 
@@ -66,6 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-capable" content="yes" />
         {/* Apply cached brand colours before first paint (no colour flash) */}
         <script dangerouslySetInnerHTML={{ __html: BRAND_BOOT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: `try{if(localStorage.getItem('vicit_token'))document.documentElement.dataset.auth='1'}catch(e){}` }} />
       </head>
       <body className="min-h-screen">
         <BrandProvider>
@@ -77,6 +79,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </main>
           <BottomNav />
           <PushRegister />
+          <RingOverlay />
         </BrandProvider>
         <script
           dangerouslySetInnerHTML={{

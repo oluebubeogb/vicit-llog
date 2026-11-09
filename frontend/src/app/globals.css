@@ -383,6 +383,8 @@ body {
 }
 .recharts-cartesian-axis-tick text { fill: #94a3b8; font-size: 11px; }
 
+html[data-auth='1'] .auth-reserve { display: flex; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;

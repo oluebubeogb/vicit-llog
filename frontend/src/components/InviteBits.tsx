@@ -156,6 +156,42 @@ export function VisitorCard({ v }: { v: any }) {
   );
 }
 
+function ItemsSummary({ visitors }: { visitors: any[] }) {
+  const items = visitors.flatMap((v) =>
+    (v.gateVisits || []).flatMap((event: any) =>
+      (event.particulars || []).map((item: any) => ({
+        ...item,
+        guest: v.fullName,
+        gate: event.gate?.name,
+      })),
+    ),
+  );
+  const withheld = items.filter((item) => item.kind === 'WITHHELD');
+  const allowed = items.filter((item) => item.kind === 'ALLOWED');
+  if (!withheld.length && !allowed.length) return null;
+  const box = (label: string, rows: any[], tone: string) => (
+    <div>
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</p>
+      <ul className={`space-y-1 rounded-xl border px-3 py-2 text-sm ${tone}`}>
+        {rows.map((item) => (
+          <li key={item.id}>
+            {item.description}
+            {item.quantity > 1 ? ` ×${item.quantity}` : ''}
+            <span className="text-xs opacity-70">{[item.guest, item.gate].filter(Boolean).length ? ` · ${[item.guest, item.gate].filter(Boolean).join(' · ')}` : ''}</span>
+            {item.returnedAt ? <span className="ml-1 text-xs font-semibold text-emerald-700">Returned</span> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+  return (
+    <div className="space-y-2">
+      {withheld.length > 0 && box('Withheld', withheld, 'border-rose-100 bg-rose-50 text-rose-900')}
+      {allowed.length > 0 && box('Allowed', allowed, 'border-emerald-100 bg-emerald-50 text-emerald-900')}
+    </div>
+  );
+}
+
 /** Body of the invite detail sheet. */
 export function InviteDetail({ inv, children }: { inv: any; children?: ReactNode }) {
   const st = inviteStatus(inv);
@@ -230,6 +266,7 @@ export function InviteDetail({ inv, children }: { inv: any; children?: ReactNode
         </Field>
       </Fields>
 
+      <ItemsSummary visitors={visitors} />
       <div>
         <p className="eyebrow mb-2 flex items-center gap-1.5">
           <Users size={12} /> Guests

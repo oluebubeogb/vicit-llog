@@ -23,7 +23,8 @@ export default function AgencyIdentity() {
     };
   }, [pathname]);
 
-  if (!authenticated || !ready || pathname === '/' || pathname === '/login' || pathname?.startsWith('/visitor/') || pathname?.startsWith('/u/')) return null;
+  if (pathname === '/' || pathname === '/login' || pathname?.startsWith('/visitor/') || pathname?.startsWith('/u/') || pathname === '/change-password') return null;
+  if (!authenticated || !ready) return <div className="auth-reserve mx-4 mb-1 mt-3 hidden min-h-11" aria-hidden />;
 
   return (
     <div className="mx-4 mb-1 mt-3 flex min-h-11 items-center gap-2.5 rounded-2xl border border-white/70 bg-white/65 px-3 py-2 shadow-[0_5px_18px_-14px_rgb(15_23_42/0.35)] backdrop-blur-md">

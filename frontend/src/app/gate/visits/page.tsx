@@ -128,7 +128,7 @@ export default function GateVisitsPage() {
       ) : sortedVisits.length === 0 ? (
         <Empty icon={<Users size={24} />} title="No visits found" hint="Registered visitors will appear here as they come in." />
       ) : (
-        <ul className="rows stagger">
+        <ul className="rows">
           {sortedVisits.map((v) => (
             <li key={v.visitorId}>
               <button type="button" onClick={() => open(v)} className="row-link group">

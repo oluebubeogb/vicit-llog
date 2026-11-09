@@ -35,8 +35,9 @@ export default function PushRegister() {
     // Let the page settle before the (one-time) browser permission prompt.
     const t = setTimeout(() => {
       setupPush((p) => {
-        setToast(p);
         window.dispatchEvent(new Event('vicit:notification'));
+        if (p.callId || (p.url || '').includes('/ring')) return;
+        setToast(p);
         clearTimeout(timer.current);
         timer.current = setTimeout(() => setToast(null), 6000);
       })

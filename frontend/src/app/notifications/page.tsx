@@ -37,6 +37,7 @@ type Tone = 'brand' | 'emerald' | 'amber' | 'rose' | 'violet';
 const TYPE: Record<string, { label: string; icon: ReactNode; tone: Tone }> = {
   ARRIVAL: { label: 'Visitor arrival', icon: <LogIn size={18} />, tone: 'emerald' },
   HOST_ARRIVAL_CONFIRMATION: { label: 'Host availability required', icon: <BellRing size={18} />, tone: 'amber' },
+  RING: { label: 'Ring', icon: <BellRing size={18} />, tone: 'amber' },
   EXIT: { label: 'Visitor exit', icon: <LogOut size={18} />, tone: 'brand' },
   ENTRY_DENIED: { label: 'Entry declined', icon: <Ban size={18} />, tone: 'rose' },
   PHOTO_CAPTURED: { label: 'Visitor registered', icon: <Camera size={18} />, tone: 'violet' },
@@ -121,6 +122,10 @@ function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
             <div className="flex gap-2"><select aria-label="Wait duration" className="input min-w-0 flex-1" value={waitMinutes} onChange={e=>setWaitMinutes(Number(e.target.value))}>{[5,10,15,20,30,45,60].map(n=><option key={n} value={n}>{n} minutes</option>)}</select><button disabled={responseBusy} onClick={async()=>{setResponseBusy(true);try{setResponse(await api.hostArrivalResponse(v.id,false,waitMinutes));}catch(e:any){alert(e.message||'Could not send response')}finally{setResponseBusy(false)}}} className="btn-quiet !border-amber-200 !bg-white">Ask guest to wait</button></div>
           </div>}
           {v.hostAvailabilityStatus === 'WAITING' && v.hostWaitUntil && <p className="mt-2 text-[11px] text-slate-500">Your previous wait request ends {new Date(v.hostWaitUntil).toLocaleTimeString()}.</p>}
+          <div className="mt-2 flex gap-2">
+            <button type="button" className="btn-primary flex-1 !py-2 text-xs" onClick={async () => { try { const call = await api.startRing(v.id, 'HOST_TO_GATE'); window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call })); } catch (e: any) { alert(e.message || 'Could not ring the gate'); } }}><BellRing size={14}/> Ring gate</button>
+            {v.entryBy?.phone && <a href={`tel:${v.entryBy.phone}`} className="btn-quiet !py-2 text-xs"><Phone size={14}/> Call</a>}
+          </div>
         </div>
       )}
 

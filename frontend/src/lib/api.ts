@@ -150,7 +150,8 @@ export const api = {
     }),
   unregisterPushToken: (token: string) =>
     request('/notifications/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
-  pushStatus: (): Promise<{ enabled: boolean }> => request('/notifications/push-status'),
+  pushStatus: (): Promise<{ enabled: boolean; publicKey?: string; transport?: string }> => request('/notifications/push-status'),
+  pushConfig: (): Promise<{ enabled: boolean; publicKey?: string; transport?: string }> => request('/notifications/push-config'),
   users: () => request('/users'),
   createUser: (data: any) =>
     request('/users', { method: 'POST', body: JSON.stringify(data) }),
@@ -261,6 +262,14 @@ export const api = {
   recordCheckpoint: (data: any) => request('/gate/checkpoint', { method: 'POST', body: JSON.stringify(data) }),
   hostArrivalResponse: (visitorId: string, available: boolean, waitMinutes?: number) => request(`/gate/host-response/${visitorId}`, { method: 'PATCH', body: JSON.stringify({ available, waitMinutes }) }),
   requestHostAvailability: (visitorId: string) => request(`/gate/host-prompt/${visitorId}`, { method: 'POST' }),
+  startRing: (visitorId: string, direction: 'GATE_TO_HOST' | 'HOST_TO_GATE') =>
+    request('/rings', { method: 'POST', body: JSON.stringify({ visitorId, direction }) }),
+  ringAction: (id: string, action: 'accept' | 'decline' | 'busy' | 'cancel') =>
+    request(`/rings/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
+  ring: (id: string) => request(`/rings/${id}`),
+  activeRing: () => request('/rings/active'),
+  ringStreamUrl: () => `${API_URL}/rings/stream?token=${encodeURIComponent(getToken() || '')}`,
+  platformInvite: (id: string) => request(`/platform/invites/${id}`),
   exportCsv: (from?: string, to?: string, columns?: string[]) => {
     const q = new URLSearchParams();
     if (from) q.set('from', from);

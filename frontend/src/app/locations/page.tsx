@@ -20,10 +20,10 @@ export default function LocationsPage() {
   const [gateSettingsOpen, setGateSettingsOpen] = useState<string | null>(null);
   const [gateSettings, setGateSettings] = useState<any>({ admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
 
-  function load() {
-    setLoading(true);
+  function load(silent = false) {
+    if (!silent) setLoading(true);
     Promise.all([api.locations(), api.users(), api.locationSettings()])
-      .then(([locs, people, settings]) => { setLocations(locs); setOfficers((people || []).filter((p: any) => p.role === 'GATE')); setMaxGates(settings?.maxGates ?? 10); })
+      .then(([locs, people, settings]) => { setLocations(locs); setOfficers((people || []).filter((p: any) => p.role === 'GATE' || p.role === 'GLOBAL_GATE')); setMaxGates(settings?.maxGates ?? 10); })
       .finally(() => setLoading(false));
   }
 
@@ -81,7 +81,7 @@ export default function LocationsPage() {
       ) : locations.length === 0 ? (
         <Empty icon={<MapPin size={24} />} title="No locations yet" hint="Add your first site, then the gates where officers scan visitors." />
       ) : (
-        <ul className="stagger space-y-3">
+        <ul className="space-y-3">
           {locations.map((loc) => (
             <li key={loc.id} className="card card-art p-4">
               <div className="flex items-start gap-3">
@@ -103,15 +103,15 @@ export default function LocationsPage() {
                     <DoorOpen size={14} className="text-brand-500" />
                     <span className="min-w-0 flex-1 font-medium text-slate-700">{g.sequence + 1}. {g.name}</span>
                     <span className="font-mono text-[11px] text-slate-400">{g.code}</span>
-                    <button type="button" title="Move earlier" disabled={g.sequence === 0 || (!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId)} onClick={async () => { await api.reorderGate(g.id, Math.max(0, g.sequence - 1)); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronUp size={14}/></button>
-                    <button type="button" title="Move later" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} onClick={async () => { await api.reorderGate(g.id, g.sequence + 1); load(); }} className="rounded-lg p-1 text-slate-500 hover:bg-white"><ChevronDown size={14}/></button>
-                    <select aria-label={`Assign officer to ${g.name}`} className="input !w-full !py-1.5 text-xs sm:!w-auto" defaultValue="" onChange={async e => { if (e.target.value) { await api.assignGateOfficer(g.id, e.target.value); load(); e.target.value = ''; } }}>
+                    <button type="button" title="Move earlier" disabled={g.sequence === 0 || (!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId)} onClick={async () => { await api.reorderGate(g.id, Math.max(0, g.sequence - 1)); load(true); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronUp size={14}/></button>
+                    <button type="button" title="Move later" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} onClick={async () => { await api.reorderGate(g.id, g.sequence + 1); load(true); }} className="rounded-lg p-1 text-slate-500 hover:bg-white"><ChevronDown size={14}/></button>
+                    <select aria-label={`Assign officer to ${g.name}`} className="input !w-full !py-1.5 text-xs sm:!w-auto" value="" onChange={async e => { const userId = e.target.value; if (!userId) return; try { await api.assignGateOfficer(g.id, userId); await load(true); } catch (err: any) { window.alert(err.message || 'Could not assign that officer'); } }}>
                       <option value="">Assign gate officer…</option>
                       {officers.map((o: any) => <option key={o.id} value={o.id}>{o.fullName}</option>)}
                     </select>
                     <span className="w-full pl-6 text-[11px] text-slate-500">{(g.assignments || []).map((a: any) => a.user?.fullName).filter(Boolean).join(', ') || 'No officers assigned'}</span>
                     <button type="button" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} title="Shared checkpoint settings are managed by the owning agency" className="ml-6 text-[11px] font-semibold text-brand-700 underline disabled:opacity-40" onClick={()=>{setGateSettingsOpen(gateSettingsOpen===g.id?null:g.id);setGateSettings({admissionsEnabled:g.admissionsEnabled??true,particularsCheckEnabled:g.particularsCheckEnabled??true,dailyAdmissionLimit:g.dailyAdmissionLimit??''})}}>Gate settings</button>
-                    {gateSettingsOpen===g.id&&<form className="grid w-full gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2" onSubmit={async e=>{e.preventDefault();try{await api.updateGateSettings(g.id,{...gateSettings,dailyAdmissionLimit:gateSettings.dailyAdmissionLimit||null});setGateSettingsOpen(null);load()}catch(err:any){window.alert(err.message)}}}>
+                    {gateSettingsOpen===g.id&&<form className="grid w-full gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2" onSubmit={async e=>{e.preventDefault();try{await api.updateGateSettings(g.id,{...gateSettings,dailyAdmissionLimit:gateSettings.dailyAdmissionLimit||null});setGateSettingsOpen(null);load(true)}catch(err:any){window.alert(err.message)}}}>
                       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.admissionsEnabled} onChange={e=>setGateSettings({...gateSettings,admissionsEnabled:e.target.checked})}/> Admissions enabled</label>
                       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.particularsCheckEnabled} onChange={e=>setGateSettings({...gateSettings,particularsCheckEnabled:e.target.checked})}/> Require particulars check</label>
                       <input type="number" min="1" className="input !py-2 text-xs sm:col-span-2" placeholder="Daily admission limit (blank = unlimited)" value={gateSettings.dailyAdmissionLimit} onChange={e=>setGateSettings({...gateSettings,dailyAdmissionLimit:e.target.value})}/>

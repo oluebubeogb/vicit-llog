@@ -148,7 +148,7 @@ export default function VisitorsPage() {
         </p>
       )}
 
-      {loading || pending ? (
+      {(loading && !invites.length) || (pending && !list.length && !invites.length) ? (
         <SkeletonList rows={6} />
       ) : list.length === 0 ? (
         <Empty

@@ -5,29 +5,6 @@ import { api, getToken, getUser } from '@/lib/api';
 export const PUSH_TOKEN_KEY = 'vicit_push_token';
 const PUSH_OWNER_KEY = 'vicit_push_owner';
 
-export type FirebaseClientConfig = {
-  configured: boolean;
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
-  vapidKey: string;
-};
-
-let cfgPromise: Promise<FirebaseClientConfig | null> | null = null;
-
-export function loadFirebaseConfig() {
-  if (!cfgPromise) {
-    cfgPromise = fetch('/api/firebase-config', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((c) => (c && c.configured ? (c as FirebaseClientConfig) : null))
-      .catch(() => null);
-  }
-  return cfgPromise;
-}
-
 export function pushSupported() {
   return (
     typeof window !== 'undefined' &&
@@ -38,6 +15,15 @@ export function pushSupported() {
   );
 }
 
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
 async function swRegistration() {
   const existing = await navigator.serviceWorker.getRegistration('/');
   if (existing) return navigator.serviceWorker.ready;
@@ -46,14 +32,14 @@ async function swRegistration() {
 }
 
 /**
- * Register this browser for FCM push and send the token to the API.
- * Prompts only when permission is still "default"; never nags after a denial.
- * Returns an unsubscribe for foreground messages, or null.
+ * Subscribe this browser to standard Web Push (VAPID) and store the subscription.
+ * Prompts only while permission is "default". Returns nothing to unsubscribe from
+ * a Firebase listener — foreground pushes arrive as service-worker messages.
  */
-export async function setupPush(onForeground?: (p: { title: string; body: string; url: string }) => void) {
+export async function setupPush(onForeground?: (p: { title: string; body: string; url: string; callId?: string; type?: string }) => void) {
   if (!getToken() || !pushSupported()) return null;
-  const cfg = await loadFirebaseConfig();
-  if (!cfg) return null;
+  const cfg = await api.pushConfig().catch(() => null);
+  if (!cfg?.enabled || !cfg.publicKey) return null;
 
   if (Notification.permission === 'default') {
     try {
@@ -64,30 +50,15 @@ export async function setupPush(onForeground?: (p: { title: string; body: string
   }
   if (Notification.permission !== 'granted') return null;
 
-  const [{ initializeApp, getApps }, messagingMod] = await Promise.all([
-    import('firebase/app'),
-    import('firebase/messaging'),
-  ]);
-  if (!(await messagingMod.isSupported().catch(() => false))) return null;
-
-  const app =
-    getApps().find((a) => a.name === 'vicit') ||
-    initializeApp(
-      {
-        apiKey: cfg.apiKey,
-        authDomain: cfg.authDomain,
-        projectId: cfg.projectId,
-        storageBucket: cfg.storageBucket || undefined,
-        messagingSenderId: cfg.messagingSenderId,
-        appId: cfg.appId,
-      },
-      'vicit',
-    );
-  const messaging = messagingMod.getMessaging(app);
   const reg = await swRegistration();
-  const token = await messagingMod.getToken(messaging, { vapidKey: cfg.vapidKey, serviceWorkerRegistration: reg });
-  if (!token) return null;
-
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(cfg.publicKey),
+    });
+  }
+  const token = JSON.stringify(sub.toJSON());
   const owner = getUser()?.id || '';
   if (localStorage.getItem(PUSH_TOKEN_KEY) !== token || localStorage.getItem(PUSH_OWNER_KEY) !== owner) {
     await api.registerPushToken(token, 'web', navigator.userAgent);
@@ -95,12 +66,17 @@ export async function setupPush(onForeground?: (p: { title: string; body: string
     localStorage.setItem(PUSH_OWNER_KEY, owner);
   }
 
-  return messagingMod.onMessage(messaging, (payload) => {
-    const d: Record<string, string> = (payload.data as any) || {};
+  const onMessage = (ev: MessageEvent) => {
+    const d = ev.data || {};
+    if (d.type !== 'PUSH') return;
     onForeground?.({
-      title: payload.notification?.title || d.title || 'New alert',
-      body: payload.notification?.body || d.body || '',
+      title: d.title || 'Vicit',
+      body: d.body || '',
       url: d.url || '/notifications',
+      callId: d.callId || '',
+      type: d.kind || d.pushType || '',
     });
-  });
+  };
+  navigator.serviceWorker.addEventListener('message', onMessage);
+  return () => navigator.serviceWorker.removeEventListener('message', onMessage);
 }

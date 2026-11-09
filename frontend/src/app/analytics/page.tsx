@@ -51,11 +51,12 @@ import { VisitorCard } from '@/components/InviteBits';
 import { useBrand } from '@/components/BrandProvider';
 import { scale } from '@/lib/brand';
 import { fmtDate, fmtDuration, MODE_LABEL, photoUrl, relTime, titleCase } from '@/lib/format';
+import { DrillFacets } from '@/components/DrillFacets';
 
 type DrillParams = Record<string, string | number | undefined>;
 /** A drill-down: the records behind one number. `alts` lets the panel switch metric (e.g. a day's entries vs exits). */
 type DrillT = { title: string; params: DrillParams; alts?: { label: string; params: DrillParams }[] };
-type DrillRes = { entity: 'visitors' | 'invites'; total: number; limit: number; exportCap: number; rows: any[] };
+type DrillRes = { entity: 'visitors' | 'invites'; total: number; limit: number; exportCap: number; rows: any[]; facets?: any };
 
 /** Make any count tappable: opens the records behind it. */
 function Num({ n, onClick, className = '', title }: { n: ReactNode; onClick: () => void; className?: string; title?: string }) {
@@ -780,6 +781,12 @@ export default function AnalyticsPage() {
               <Field label="Checked out">{detail.exitedAt && `${fmtDate(detail.exitedAt)}${detail.exitByName ? ` · ${detail.exitByName}` : ''}`}</Field>
               <Field label="Email">{detail.email}</Field>
               <Field label="Phone">{detail.phone}</Field>
+              {(detail.particulars || []).some((p: any) => p.kind === 'WITHHELD') && (
+                <Field label="Withheld">{(detail.particulars || []).filter((p: any) => p.kind === 'WITHHELD').map((p: any) => p.description).join(', ')}</Field>
+              )}
+              {(detail.particulars || []).some((p: any) => p.kind === 'ALLOWED') && (
+                <Field label="Allowed">{(detail.particulars || []).filter((p: any) => p.kind === 'ALLOWED').map((p: any) => p.description).join(', ')}</Field>
+              )}
             </Fields>
           </div>
         ) : (
@@ -829,7 +836,29 @@ export default function AnalyticsPage() {
               </p>
             )}
             {exportMsg && <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 ring-1 ring-slate-200">{exportMsg}</p>}
-            {listLoading ? (
+            {res?.facets && (
+              <DrillFacets
+                facets={res.facets}
+                onPick={(patch) => drill && openDrill({ ...drill, title: drill.title, params: { ...drill.params, ...patch } })}
+              />
+            )}
+            {drill && (
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(drill.params)
+                  .filter(([key, value]) => !['metric', 'days'].includes(key) && value !== undefined && value !== '')
+                  .map(([key, value]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600"
+                      onClick={() => openDrill({ ...drill, params: { ...drill.params, [key]: undefined } })}
+                    >
+                      {key} ×
+                    </button>
+                  ))}
+              </div>
+            )}
+            {listLoading && !list.length ? (
               <SkeletonList rows={5} />
             ) : list.length === 0 ? (
               <Empty icon={<Users size={22} />} title="No records" hint="Nothing matches this number in the selected period." />

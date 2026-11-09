@@ -12,6 +12,7 @@ import {
   X,
   Ban,
   BellRing,
+  Phone,
   ImagePlus,
   Flashlight,
   SwitchCamera,
@@ -27,6 +28,7 @@ import Avatar from '@/components/ui/Avatar';
 import Collapse from '@/components/ui/Collapse';
 import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
+import PhotoGallery, { GalleryImage } from '@/components/PhotoGallery';
 import { fmtDate, MODE_LABEL } from '@/lib/format';
 import {
   cameraSupport,
@@ -60,6 +62,10 @@ export default function GatePage() {
   const [evidenceCameraOpen, setEvidenceCameraOpen] = useState(false);
   const [evidenceCameraError, setEvidenceCameraError] = useState('');
   const [particularsChecked, setParticularsChecked] = useState(false);
+  const [showWithheld, setShowWithheld] = useState(false);
+  const [showAllowed, setShowAllowed] = useState(false);
+  const [gallery, setGallery] = useState<{ images: GalleryImage[]; index: number } | null>(null);
+  const [ringNote, setRingNote] = useState<Record<string, string>>({});
 
   const [photoDecoding, setPhotoDecoding] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
@@ -121,38 +127,63 @@ export default function GatePage() {
     if (next && !relevant.some((g: any) => g.id === activeGateId && !passed.has(g.id))) setActiveGateId(next.id);
   }, [result, checkpoints, activeGateId]);
 
-  async function lookup(raw?: string) {
-    const value = normalizeScannedCode(raw ?? code);
+  const codeRef = useRef(code);
+  const resultRef = useRef(result);
+  codeRef.current = code;
+  resultRef.current = result;
+
+  async function lookup(raw?: string, opts?: { silent?: boolean }) {
+    const value = normalizeScannedCode(raw ?? codeRef.current);
     if (!value) return;
-    setLoading(true);
-    setError('');
-    setResult(null);
+    if (!opts?.silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const data = await api.gateLookup(value);
-      setResult(data);
+      setResult((prev: any) => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
       if (data?.expectedMode) setEntryMode(data.expectedMode);
-      const relevant = checkpoints.filter((g: any) => data?.locationId ? g.locationId === data.locationId : g.location?.organisationId === data?.organisationId);
-      const passed = new Set((data?.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
-      const next = relevant.sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
-      if (next) setActiveGateId(next.id);
+      if (!opts?.silent) {
+        const relevant = checkpoints.filter((g: any) => data?.locationId ? g.locationId === data.locationId : g.location?.organisationId === data?.organisationId);
+        const passed = new Set((data?.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
+        const next = [...relevant].sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
+        if (next) setActiveGateId(next.id);
+      }
     } catch (err: any) {
-      setError(err.message || 'Not found');
+      if (!opts?.silent) {
+        setResult(null);
+        setError(err.message || 'Not found');
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!result?.visitors?.some((v:any)=>v.status==='ARRIVED')) return;
+    const onRing = (ev: Event) => {
+      const call = (ev as CustomEvent).detail;
+      const id = call?.visitor?.id;
+      if (!id) return;
+      const label = call.status === 'RINGING' ? 'Ringing' : call.status === 'ACCEPTED' ? 'Answered' : call.status === 'DECLINED' ? 'Declined' : call.status === 'BUSY' ? 'Busy' : call.status === 'MISSED' ? 'No answer' : '';
+      setRingNote((m) => ({ ...m, [id]: label }));
+    };
+    window.addEventListener('vicit:ring', onRing);
+    return () => window.removeEventListener('vicit:ring', onRing);
+  }, []);
+
+  useEffect(() => {
     const timer = window.setInterval(async () => {
-      const current = normalizeScannedCode(code);
-      if (!current) return;
-      const waiting = (result.visitors || []).filter((v:any) => v.status === 'ARRIVED' && v.hostAvailabilityStatus === 'WAITING' && v.hostWaitUntil && new Date(v.hostWaitUntil).getTime() <= Date.now());
+      const current = resultRef.current;
+      if (!current?.visitors?.some((v: any) => v.status === 'ARRIVED')) return;
+      const codeNow = normalizeScannedCode(codeRef.current);
+      if (!codeNow) return;
+      const waiting = (current.visitors || []).filter((v: any) => v.status === 'ARRIVED' && v.hostAvailabilityStatus === 'WAITING' && v.hostWaitUntil && new Date(v.hostWaitUntil).getTime() <= Date.now());
       for (const visitor of waiting) { try { await api.requestHostAvailability(visitor.id); } catch { /* server cooldown prevents duplicate prompts */ } }
-      await lookup(current).catch(()=>{});
+      await lookup(codeNow, { silent: true }).catch(() => {});
     }, 15000);
     return () => window.clearInterval(timer);
-  }, [result, code]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function doCheckpoint(visitorId: string, decision: 'PASSED' | 'DENIED') {
     if (!activeGateId) { setError('Choose the checkpoint first.'); return; }
@@ -566,7 +597,7 @@ export default function GatePage() {
       {error && <Notice tone="error">{error}</Notice>}
 
       {result && (
-        <div className="stagger space-y-3">
+        <div className="space-y-3">
           <div className="card card-art p-4">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 text-brand-600">
@@ -635,18 +666,32 @@ export default function GatePage() {
                 {v.gateVisits.map((event: any) => <div key={event.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                   <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-700">{event.gate?.name || 'Checkpoint'}</b><span className={`text-[10px] font-bold ${event.decision==='DENIED'?'text-rose-700':'text-emerald-700'}`}>{event.decision}</span></div>{event.particularsChecked&&<p className="mt-1 text-[10px] font-medium text-emerald-700">Particulars check confirmed</p>}
                   <p className="mt-0.5 text-[10px] text-slate-400">{event.officer?.fullName || 'Officer'} · {fmtDate(event.occurredAt)}</p>
-                  {(event.particulars || []).filter((x:any)=>x.kind==='WITHHELD').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-rose-50 px-2.5 py-2 text-xs text-rose-800"><b>WITHHELD</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>} {x.returnedAt?<span className="ml-2 font-semibold text-emerald-700">Returned</span>:<button type="button" onClick={()=>markParticularReturned(x.id)} disabled={!!actionLoading} className="ml-2 font-semibold underline">Mark returned</button>}</div>)}
-                  {(event.particulars || []).filter((x:any)=>x.kind==='ALLOWED').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-2 text-xs text-emerald-800"><b>ALLOWED</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>}</div>)}
-                  {(event.evidencePhotos || []).length > 0 && <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{event.evidencePhotos.map((path: string, i: number) => <a key={`${path}-${i}`} href={particularPhoto(path)} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-slate-200"><img src={particularPhoto(path)} alt={`Checkpoint evidence ${i + 1}`} className="aspect-square w-full object-cover"/></a>)}</div>}
+                  {(() => {
+                    const shots: GalleryImage[] = [
+                      ...(event.evidencePhotos || []).map((path: string, i: number) => ({ src: particularPhoto(path), alt: `Evidence ${i + 1}` })),
+                      ...(event.particulars || []).filter((x: any) => x.imagePath).map((x: any) => ({ src: particularPhoto(x.imagePath), alt: x.description })),
+                    ];
+                    const withheld = (event.particulars || []).filter((x: any) => x.kind === 'WITHHELD');
+                    const allowed = (event.particulars || []).filter((x: any) => x.kind === 'ALLOWED');
+                    return <>
+                      {withheld.length > 0 && <div className="mt-2 rounded-lg bg-rose-50 px-2.5 py-2 text-xs text-rose-800"><b className="uppercase tracking-wide">Withheld</b><ul className="mt-1 space-y-1">{withheld.map((x: any) => <li key={x.id}>{x.description}{x.quantity > 1 ? ` ×${x.quantity}` : ''} {x.imagePath && <button type="button" className="font-semibold underline" onClick={() => setGallery({ images: shots, index: Math.max(0, shots.findIndex((s) => s.src === particularPhoto(x.imagePath))) })}>Photo</button>} {x.returnedAt ? <span className="font-semibold text-emerald-700">Returned</span> : <button type="button" onClick={() => markParticularReturned(x.id)} disabled={!!actionLoading} className="font-semibold underline">Return</button>}</li>)}</ul></div>}
+                      {allowed.length > 0 && <div className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-2 text-xs text-emerald-800"><b className="uppercase tracking-wide">Allowed</b><ul className="mt-1 space-y-1">{allowed.map((x: any) => <li key={x.id}>{x.description}{x.quantity > 1 ? ` ×${x.quantity}` : ''} {x.imagePath && <button type="button" className="font-semibold underline" onClick={() => setGallery({ images: shots, index: Math.max(0, shots.findIndex((s) => s.src === particularPhoto(x.imagePath))) })}>Photo</button>}</li>)}</ul></div>}
+                      {shots.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{shots.map((shot, i) => <button type="button" key={`${shot.src}-${i}`} onClick={() => setGallery({ images: shots, index: i })} className="overflow-hidden rounded-lg border border-slate-200"><img src={shot.src} alt={shot.alt || 'Checkpoint photo'} className="aspect-square w-full object-cover"/></button>)}</div>}
+                    </>;
+                  })()}
                 </div>)}
               </div>}
 
               <div className="mt-4 space-y-2">
-                {v.status === 'ARRIVED' && ['GATE','GLOBAL_GATE'].includes(currentRole) && <div className={`rounded-2xl border p-3 ${v.hostAvailabilityStatus==='AVAILABLE'?'border-emerald-200 bg-emerald-50':v.hostAvailabilityStatus==='WAITING'?'border-amber-200 bg-amber-50':'border-slate-200 bg-slate-50'}`}>
-                  <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-800">Host availability</b><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${v.hostAvailabilityStatus==='AVAILABLE'?'bg-emerald-100 text-emerald-800':v.hostAvailabilityStatus==='WAITING'?'bg-amber-100 text-amber-800':'bg-slate-200 text-slate-700'}`}>{v.hostAvailabilityStatus==='AVAILABLE'?'Available':v.hostAvailabilityStatus==='WAITING'?'Asked guest to wait':'Awaiting response'}</span></div>
-                  {v.hostAvailabilityStatus==='WAITING' && v.hostWaitUntil && <p className="mt-1 text-xs text-amber-800">Host asked the visitor to wait until {new Date(v.hostWaitUntil).toLocaleTimeString()}.</p>}
-                  {v.hostAvailabilityStatus==='AVAILABLE' && <p className="mt-1 text-xs text-emerald-800">Host has confirmed availability to receive this visitor.</p>}
-                  <button type="button" onClick={async()=>{try{await api.requestHostAvailability(v.id);await lookup()}catch(e:any){setError(e.message||'Could not contact host')}}} className="btn-quiet mt-2 w-full !py-2 text-xs"><BellRing size={14}/> Ask host to confirm again</button>
+                {v.status === 'ARRIVED' && ['GATE','GLOBAL_GATE','SUPER_ADMIN'].includes(currentRole) && <div className={`rounded-2xl border p-3 ${v.hostAvailabilityStatus==='AVAILABLE'?'border-emerald-200 bg-emerald-50':v.hostAvailabilityStatus==='WAITING'?'border-amber-200 bg-amber-50':'border-slate-200 bg-slate-50'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <b className="text-xs text-slate-800">Host</b>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${v.hostAvailabilityStatus==='AVAILABLE'?'bg-emerald-100 text-emerald-800':ringNote[v.id]==='Busy'||ringNote[v.id]==='Declined'?'bg-rose-100 text-rose-800':v.hostAvailabilityStatus==='WAITING'||ringNote[v.id]==='Ringing'?'bg-amber-100 text-amber-800':'bg-slate-200 text-slate-700'}`}>{ringNote[v.id] || (v.hostAvailabilityStatus==='AVAILABLE'?'Available':v.hostAvailabilityStatus==='WAITING'?'Waiting':'No answer')}</span>
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" onClick={async()=>{try{const call=await api.startRing(v.id,'GATE_TO_HOST');window.dispatchEvent(new CustomEvent('vicit:ring-local',{detail:call}));}catch(e:any){setError(e.message||'Could not ring the host')}}} className="btn-primary flex-1 !py-2 text-xs"><BellRing size={14}/> Ring</button>
+                    {result.host?.phone && <a href={`tel:${result.host.phone}`} className={`btn-quiet flex-1 !py-2 text-xs ${ringNote[v.id]==='No answer'||ringNote[v.id]==='Busy'||ringNote[v.id]==='Declined'?'!border-amber-300 !bg-amber-50':''}`}><Phone size={14}/> Call</a>}
+                  </div>
                 </div>}
                 {v.status === 'INVITED' && !v.photoPath && (
                   <p className="tile-muted !py-2 text-center text-xs font-medium text-amber-700">Photo not captured yet — entry unlocks once the visitor adds a photo</p>
@@ -657,13 +702,19 @@ export default function GatePage() {
                     <select className="input !py-2 text-sm" value={activeGateId} onChange={e => { setActiveGateId(e.target.value); setWithheldItems(''); setAllowedItems(''); clearEvidenceRack(); setParticularsChecked(false); }}>
                       {currentCheckpoints.map((g: any) => <option key={g.id} value={g.id}>{g.location?.organisation?.name ? `${g.location.organisation.name} · ` : ''}{g.location?.name} · {g.sequence + 1}. {g.name}</option>)}
                     </select>
-                    <label className="block text-[11px] font-semibold text-slate-900">Withheld items (one per line)<textarea rows={2} value={withheldItems} onChange={e=>setWithheldItems(e.target.value)} className="input mt-1 !border-rose-100 !bg-rose-50/60 !py-2 font-sans text-sm placeholder:font-sans placeholder:text-slate-500" placeholder="Item retained at this gate…"/></label>
-                    <label className="block text-[11px] font-semibold text-slate-900">Allowed items (one per line)<textarea rows={2} value={allowedItems} onChange={e=>setAllowedItems(e.target.value)} className="input mt-1 !border-emerald-100 !bg-emerald-50/60 !py-2 font-sans text-sm placeholder:font-sans placeholder:text-slate-500" placeholder="Items permitted through…"/></label>
+                    <div className="overflow-hidden rounded-xl border border-rose-100 bg-rose-50/40">
+                      <button type="button" onClick={() => setShowWithheld((open) => !open)} className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-rose-800">Withheld <span className="font-medium normal-case tracking-normal text-rose-600">{showWithheld ? 'Hide' : withheldItems.trim() ? 'Edit' : 'Add'}</span></button>
+                      <Collapse open={showWithheld}><div className="px-3 pb-3"><textarea rows={2} value={withheldItems} onChange={e=>setWithheldItems(e.target.value)} className="input !border-rose-100 !bg-white !py-2 font-sans text-sm" placeholder="One item per line"/></div></Collapse>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-emerald-100 bg-emerald-50/40">
+                      <button type="button" onClick={() => setShowAllowed((open) => !open)} className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-emerald-800">Allowed <span className="font-medium normal-case tracking-normal text-emerald-700">{showAllowed ? 'Hide' : allowedItems.trim() ? 'Edit' : 'Add'}</span></button>
+                      <Collapse open={showAllowed}><div className="px-3 pb-3"><textarea rows={2} value={allowedItems} onChange={e=>setAllowedItems(e.target.value)} className="input !border-emerald-100 !bg-white !py-2 font-sans text-sm" placeholder="One item per line"/></div></Collapse>
+                    </div>
                     <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
                       <div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-slate-700">Checkpoint photo evidence</p></div><button type="button" onClick={evidenceCameraOpen ? stopEvidenceCamera : startEvidenceCamera} className="btn-ghost !py-2 !px-3 text-xs"><Camera size={14}/>{evidenceCameraOpen ? 'Close camera' : 'Open camera'}</button></div>
                       {evidenceCameraOpen && <div className="overflow-hidden rounded-xl bg-black"><video ref={evidenceVideoRef} autoPlay muted playsInline className="aspect-video w-full object-cover"/><div className="flex justify-center p-3"><button type="button" onClick={captureEvidencePhoto} disabled={evidencePhotos.length >= 10} className="btn-primary !rounded-full !px-6 !py-2"><Camera size={16}/> Capture photo</button></div></div>}
                       {evidenceCameraError && <p className="text-[11px] text-rose-600">{evidenceCameraError}</p>}
-                      {evidencePhotos.length > 0 && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">{evidencePhotos.map((item, index) => <div key={item.preview} className="relative overflow-hidden rounded-lg border border-slate-200"><img src={item.preview} alt={`Checkpoint evidence ${index + 1}`} className="aspect-square w-full object-cover"/><button type="button" onClick={() => removeEvidencePhoto(index)} aria-label={`Remove photo ${index + 1}`} className="absolute right-1 top-1 rounded-full bg-slate-950/80 p-1.5 text-white shadow"><X size={13}/></button><span className="absolute bottom-1 left-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[9px] text-white">{index + 1}</span></div>)}</div>}
+                      {evidencePhotos.length > 0 && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">{evidencePhotos.map((item, index) => <div key={item.preview} className="relative overflow-hidden rounded-lg border border-slate-200"><button type="button" onClick={() => setGallery({ images: evidencePhotos.map((photo, i) => ({ src: photo.preview, alt: `Capture ${i + 1}` })), index })} className="block w-full"><img src={item.preview} alt={`Checkpoint evidence ${index + 1}`} className="aspect-square w-full object-cover"/></button><button type="button" onClick={() => removeEvidencePhoto(index)} aria-label={`Remove photo ${index + 1}`} className="absolute right-1 top-1 rounded-full bg-slate-950/80 p-1.5 text-white shadow"><X size={13}/></button><span className="pointer-events-none absolute bottom-1 left-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[9px] text-white">{index + 1}</span></div>)}</div>}
                     </div>
                     {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={particularsChecked} onChange={e=>setParticularsChecked(e.target.checked)}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">
@@ -761,6 +812,7 @@ export default function GatePage() {
           <p className="mt-4 text-xs text-white/60">Tap outside to close</p>
         </div>
       )}
+      {gallery && <PhotoGallery images={gallery.images} index={gallery.index} onIndex={(index) => setGallery((g) => (g ? { ...g, index } : g))} onClose={() => setGallery(null)} />}
     </div>
   );
 }
