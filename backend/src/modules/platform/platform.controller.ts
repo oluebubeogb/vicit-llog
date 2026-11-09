@@ -21,6 +21,7 @@ export class PlatformController {
   @Get('audit') audit(@CurrentUser() user: any) { return this.service.platformAudit(user); }
   @Get('agencies') agencies(@CurrentUser() user: any) { return this.service.agencies(user); }
   @Patch('agencies/:agencyId') updateAgency(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updateAgency(user, agencyId, body); }
+  @Post('people/:id/reset-password') resetPersonPassword(@Param('id') id: string, @CurrentUser() user: any) { return this.service.resetPersonPassword(user, id); }
   @Patch('people/:id') updatePerson(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updatePlatformPerson(user, id, body); }
   @Post('agencies') createAgency(@Body() body: any, @CurrentUser() user: any) { return this.service.createAgency(user, body); }
   @Post('agencies/:agencyId/logo')

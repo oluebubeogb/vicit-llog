@@ -72,6 +72,7 @@ model Organisation {
   requireApproval Boolean         @default(false)
   defaultWorkflow WorkflowType    @default(NONE)
   photoRetentionDays Int          @default(90)
+  maxGates        Int             @default(10)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   users           User[]
@@ -103,6 +104,9 @@ model Gate {
   location   Location @relation(fields: [locationId], references: [id])
   isActive   Boolean  @default(true)
   sequence   Int      @default(0)
+  admissionsEnabled Boolean @default(true)
+  particularsCheckEnabled Boolean @default(true)
+  dailyAdmissionLimit Int?
   assignments GateOfficerAssignment[]
   visits     GateVisit[]
   createdAt  DateTime @default(now())
@@ -285,6 +289,7 @@ model GateVisit {
   gateId      String
   officerId   String
   decision    String
+  particularsChecked Boolean @default(false)
   notes       String?
   occurredAt  DateTime @default(now())
   visitor     Visitor  @relation(fields: [visitorId], references: [id], onDelete: Cascade)

@@ -13,13 +13,16 @@ export default function LocationsPage() {
   const [showLoc, setShowLoc] = useState(false);
   const [showGate, setShowGate] = useState<string | null>(null);
   const [locForm, setLocForm] = useState({ name: '', code: '', address: '' });
-  const [gateForm, setGateForm] = useState({ name: '', code: '' });
+  const [gateForm, setGateForm] = useState<any>({ name: '', code: '', officerId: '', admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
   const [loading, setLoading] = useState(true);
+  const [maxGates, setMaxGates] = useState(10);
+  const [gateSettingsOpen, setGateSettingsOpen] = useState<string | null>(null);
+  const [gateSettings, setGateSettings] = useState<any>({ admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
 
   function load() {
     setLoading(true);
-    Promise.all([api.locations(), api.users()])
-      .then(([locs, people]) => { setLocations(locs); setOfficers((people || []).filter((p: any) => p.role === 'GATE')); })
+    Promise.all([api.locations(), api.users(), api.locationSettings()])
+      .then(([locs, people, settings]) => { setLocations(locs); setOfficers((people || []).filter((p: any) => p.role === 'GATE')); setMaxGates(settings?.maxGates ?? 10); })
       .finally(() => setLoading(false));
   }
 
@@ -37,9 +40,9 @@ export default function LocationsPage() {
 
   async function createGate(e: React.FormEvent, locId: string) {
     e.preventDefault();
-    await api.addGate(locId, gateForm);
+    await api.addGate(locId, { ...gateForm, officerId: (gateForm as any).officerId || undefined, admissionsEnabled: (gateForm as any).admissionsEnabled ?? true, particularsCheckEnabled: (gateForm as any).particularsCheckEnabled ?? true, dailyAdmissionLimit: (gateForm as any).dailyAdmissionLimit || null });
     setShowGate(null);
-    setGateForm({ name: '', code: '' });
+    setGateForm({ name: '', code: '', officerId: '', admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
     load();
   }
 
@@ -57,6 +60,8 @@ export default function LocationsPage() {
           </button>
         }
       />
+
+      <div className="surface mb-4 flex flex-wrap items-center gap-3 p-4"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">Gate capacity settings</p><p className="text-xs text-slate-500">{locations.reduce((n,l)=>n+(l.gates?.length||0),0)} gates currently created · limit {maxGates}</p></div><form className="flex items-center gap-2" onSubmit={async e=>{e.preventDefault();try{await api.updateLocationSettings({maxGates});load()}catch(err:any){window.alert(err.message)}}}><input aria-label="Maximum gates" type="number" min={Math.max(1,locations.reduce((n,l)=>n+(l.gates?.length||0),0))} max={500} className="input !w-24" value={maxGates} onChange={e=>setMaxGates(Number(e.target.value))}/><button className="btn-primary !py-2 text-xs">Save limit</button></form></div>
 
       <Collapse open={showLoc}>
         <form onSubmit={createLoc} className="surface mb-4 space-y-2.5">
@@ -104,6 +109,13 @@ export default function LocationsPage() {
                       {officers.map((o: any) => <option key={o.id} value={o.id}>{o.fullName}</option>)}
                     </select>
                     <span className="w-full pl-6 text-[11px] text-slate-500">{(g.assignments || []).map((a: any) => a.user?.fullName).filter(Boolean).join(', ') || 'No officers assigned'}</span>
+                    <button type="button" className="ml-6 text-[11px] font-semibold text-brand-700 underline" onClick={()=>{setGateSettingsOpen(gateSettingsOpen===g.id?null:g.id);setGateSettings({admissionsEnabled:g.admissionsEnabled??true,particularsCheckEnabled:g.particularsCheckEnabled??true,dailyAdmissionLimit:g.dailyAdmissionLimit??''})}}>Gate settings</button>
+                    {gateSettingsOpen===g.id&&<form className="grid w-full gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2" onSubmit={async e=>{e.preventDefault();try{await api.updateGateSettings(g.id,{...gateSettings,dailyAdmissionLimit:gateSettings.dailyAdmissionLimit||null});setGateSettingsOpen(null);load()}catch(err:any){window.alert(err.message)}}}>
+                      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.admissionsEnabled} onChange={e=>setGateSettings({...gateSettings,admissionsEnabled:e.target.checked})}/> Admissions enabled</label>
+                      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.particularsCheckEnabled} onChange={e=>setGateSettings({...gateSettings,particularsCheckEnabled:e.target.checked})}/> Require particulars check</label>
+                      <input type="number" min="1" className="input !py-2 text-xs sm:col-span-2" placeholder="Daily admission limit (blank = unlimited)" value={gateSettings.dailyAdmissionLimit} onChange={e=>setGateSettings({...gateSettings,dailyAdmissionLimit:e.target.value})}/>
+                      <button className="btn-primary !py-2 text-xs sm:col-span-2">Save gate settings</button>
+                    </form>}
                   </div>
                 ))}
               </div>
@@ -114,6 +126,10 @@ export default function LocationsPage() {
                 <form onSubmit={(e) => createGate(e, loc.id)} className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-brand-100 bg-brand-50/40 p-3">
                   <input placeholder="Gate name" value={gateForm.name} onChange={(e) => setGateForm({ ...gateForm, name: e.target.value })} className="input !py-2 text-sm" required />
                   <input placeholder="Gate code" value={gateForm.code} onChange={(e) => setGateForm({ ...gateForm, code: e.target.value })} className="input !py-2 text-sm" required />
+                  <select className="input col-span-2 !py-2 text-sm" value={(gateForm as any).officerId||''} onChange={e=>setGateForm({...gateForm,officerId:e.target.value} as any)}><option value="">Assign officer now (optional)</option>{officers.map(o=><option key={o.id} value={o.id}>{o.fullName}</option>)}</select>
+                  <label className="col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={(gateForm as any).admissionsEnabled??true} onChange={e=>setGateForm({...gateForm,admissionsEnabled:e.target.checked} as any)}/> Admissions enabled</label>
+                  <label className="col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={(gateForm as any).particularsCheckEnabled??true} onChange={e=>setGateForm({...gateForm,particularsCheckEnabled:e.target.checked} as any)}/> Require particulars check confirmation</label>
+                  <input type="number" min="1" placeholder="Daily admission limit (optional)" className="input col-span-2 !py-2 text-sm" value={(gateForm as any).dailyAdmissionLimit||''} onChange={e=>setGateForm({...gateForm,dailyAdmissionLimit:e.target.value} as any)}/>
                   <button type="submit" className="btn-primary col-span-2 !py-2">
                     Save gate
                   </button>

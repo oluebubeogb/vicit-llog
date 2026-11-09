@@ -122,6 +122,9 @@ export class GateService {
     if (decision === 'DENIED' && !String(body.notes || '').trim()) throw new BadRequestException('A reason is required when denying entry');
     const gate = await this.prisma.gate.findFirst({ where: { id: gateId, isActive: true }, include: { location: true, assignments: true } });
     if (!gate) throw new NotFoundException('Active gate not found');
+    if (!gate.admissionsEnabled && decision === 'PASSED') throw new BadRequestException('Admissions are disabled at this checkpoint. Contact the agency administrator.');
+    if (gate.particularsCheckEnabled && body.particularsChecked !== true) throw new BadRequestException('Confirm that particulars have been checked at this checkpoint before proceeding.');
+    if (decision === 'PASSED' && gate.dailyAdmissionLimit) { const start = new Date(); start.setHours(0,0,0,0); const admittedToday = await this.prisma.gateVisit.count({ where: { gateId, decision: 'PASSED', occurredAt: { gte: start } } }); if (admittedToday >= gate.dailyAdmissionLimit) throw new BadRequestException('This checkpoint has reached its daily admission limit.'); }
     const global = ['SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
     if (!global && gate.location.organisationId !== actor.orgId) throw new NotFoundException('Gate not found');
     if (visitor.invite.organisationId !== gate.location.organisationId) throw new BadRequestException('This visitor is not invited to this agency');
@@ -142,7 +145,7 @@ export class GateService {
       if (item.imagePath && !/^\/visitors\/particulars\/[a-f0-9-]+\.(jpg|png|webp)$/i.test(String(item.imagePath))) throw new BadRequestException('Particular image must be uploaded through the evidence capture endpoint');
     }
     const event = await this.prisma.$transaction(async tx => {
-      const created = await tx.gateVisit.create({ data: { visitorId, gateId, officerId: actor.id, decision, notes: body.notes ? String(body.notes).slice(0, 2000) : null } });
+      const created = await tx.gateVisit.create({ data: { visitorId, gateId, officerId: actor.id, decision, particularsChecked: body.particularsChecked === true, notes: body.notes ? String(body.notes).slice(0, 2000) : null } });
       if (particulars.length) await tx.gateParticular.createMany({ data: particulars.map(item => ({ gateVisitId: created.id, kind: String(item.kind).toUpperCase(), description: String(item.description).trim().slice(0, 500), quantity: Math.max(1, Math.min(1000, Number(item.quantity) || 1)), imagePath: item.imagePath ? String(item.imagePath).slice(0, 1000) : null, createdById: actor.id })) });
       if (decision === 'DENIED') await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.DENIED, deniedAt: new Date(), deniedReason: String(body.notes || 'Denied at checkpoint').slice(0, 1000), entryById: actor.id } });
       else {

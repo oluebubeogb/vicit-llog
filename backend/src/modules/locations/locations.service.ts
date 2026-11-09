@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 @Injectable()
@@ -24,15 +24,23 @@ export class LocationsService {
     }
   }
 
-  async createGate(locationId: string, orgId: string, data: { name: string; code: string }) {
+  async createGate(locationId: string, orgId: string, data: { name: string; code: string; officerId?: string; admissionsEnabled?: boolean; particularsCheckEnabled?: boolean; dailyAdmissionLimit?: number | null }) {
     const loc = await this.prisma.location.findFirst({
       where: { id: locationId, organisationId: orgId },
     });
     if (!loc) throw new NotFoundException('Location not found');
+    const org = await this.prisma.organisation.findUnique({ where: { id: orgId }, select: { maxGates: true } });
+    const gateCount = await this.prisma.gate.count({ where: { location: { organisationId: orgId } } });
+    if (gateCount >= (org?.maxGates ?? 10)) throw new BadRequestException(`This agency has reached its gate limit (${org?.maxGates ?? 10}). Increase the limit in Locations & gates settings.`);
+    if (data.officerId) { const officer = await this.prisma.user.findFirst({ where: { id: data.officerId, organisationId: orgId, role: 'GATE', isActive: true } }); if (!officer) throw new NotFoundException('Active gate officer not found in this agency'); }
+    const dailyAdmissionLimit = data.dailyAdmissionLimit === null || data.dailyAdmissionLimit === undefined || data.dailyAdmissionLimit === ('' as any) ? null : Number(data.dailyAdmissionLimit);
+    if (dailyAdmissionLimit !== null && (!Number.isInteger(dailyAdmissionLimit) || dailyAdmissionLimit < 1)) throw new BadRequestException('Daily admission limit must be a positive whole number');
     try {
       const last = await this.prisma.gate.aggregate({ where: { locationId }, _max: { sequence: true } });
-      return await this.prisma.gate.create({
-        data: { ...data, locationId, sequence: (last._max.sequence ?? -1) + 1 },
+      return await this.prisma.$transaction(async tx => {
+        const gate = await tx.gate.create({ data: { name: data.name, code: data.code, locationId, sequence: (last._max.sequence ?? -1) + 1, admissionsEnabled: data.admissionsEnabled ?? true, particularsCheckEnabled: data.particularsCheckEnabled ?? true, dailyAdmissionLimit } });
+        if (data.officerId) await tx.gateOfficerAssignment.create({ data: { gateId: gate.id, userId: data.officerId } });
+        return gate;
       });
     } catch {
       throw new ConflictException('Gate code already exists at this location');
@@ -57,6 +65,25 @@ export class LocationsService {
       if (displaced) await tx.gate.update({ where: { id: displaced.id }, data: { sequence: gate.sequence } });
       return tx.gate.update({ where: { id: gateId }, data: { sequence } });
     });
+  }
+
+  async settings(orgId: string) {
+    return this.prisma.organisation.findUnique({ where: { id: orgId }, select: { maxGates: true } });
+  }
+
+  async updateSettings(orgId: string, maxGates: number) {
+    if (!Number.isInteger(maxGates) || maxGates < 1 || maxGates > 500) throw new BadRequestException('Maximum gates must be between 1 and 500');
+    const current = await this.prisma.gate.count({ where: { location: { organisationId: orgId } } });
+    if (maxGates < current) throw new BadRequestException(`There are already ${current} gates. The limit cannot be lower than the current count.`);
+    return this.prisma.organisation.update({ where: { id: orgId }, data: { maxGates }, select: { maxGates: true } });
+  }
+
+  async updateGate(gateId: string, orgId: string, data: any) {
+    const gate = await this.prisma.gate.findFirst({ where: { id: gateId, location: { organisationId: orgId } } });
+    if (!gate) throw new NotFoundException('Gate not found');
+    const dailyAdmissionLimit = data.dailyAdmissionLimit === '' || data.dailyAdmissionLimit === null || data.dailyAdmissionLimit === undefined ? null : Number(data.dailyAdmissionLimit);
+    if (dailyAdmissionLimit !== null && (!Number.isInteger(dailyAdmissionLimit) || dailyAdmissionLimit < 1)) throw new BadRequestException('Daily admission limit must be a positive whole number');
+    return this.prisma.gate.update({ where: { id: gateId }, data: { admissionsEnabled: data.admissionsEnabled === undefined ? gate.admissionsEnabled : !!data.admissionsEnabled, particularsCheckEnabled: data.particularsCheckEnabled === undefined ? gate.particularsCheckEnabled : !!data.particularsCheckEnabled, dailyAdmissionLimit } });
   }
 
   async listGates(orgId: string) {

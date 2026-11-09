@@ -1,0 +1,5 @@
+ALTER TABLE "Organisation" ADD COLUMN "maxGates" INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE "Gate" ADD COLUMN "admissionsEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Gate" ADD COLUMN "particularsCheckEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Gate" ADD COLUMN "dailyAdmissionLimit" INTEGER;
+ALTER TABLE "GateVisit" ADD COLUMN "particularsChecked" BOOLEAN NOT NULL DEFAULT false;

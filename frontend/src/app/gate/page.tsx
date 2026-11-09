@@ -56,6 +56,7 @@ export default function GatePage() {
   const [withheldItems, setWithheldItems] = useState('');
   const [allowedItems, setAllowedItems] = useState('');
   const [particularImage, setParticularImage] = useState<File | null>(null);
+  const [particularsChecked, setParticularsChecked] = useState(false);
 
   const [photoDecoding, setPhotoDecoding] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
@@ -137,11 +138,11 @@ export default function GatePage() {
         ...allowedItems.split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'ALLOWED', description })),
       ];
       if (imagePath && particulars.length) particulars[0].imagePath = imagePath;
-      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, notes: decision === 'DENIED' ? denyReason : '', particulars });
+      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, notes: decision === 'DENIED' ? denyReason : '', particulars, particularsChecked });
       const currentGate = checkpoints.find((g: any) => g.id === activeGateId);
       const nextGate = currentGate && checkpoints.filter((g: any) => g.locationId === currentGate.locationId && g.sequence > currentGate.sequence).sort((a: any,b: any)=>a.sequence-b.sequence)[0];
       if (nextGate) setActiveGateId(nextGate.id);
-      setWithheldItems(''); setAllowedItems(''); setParticularImage(null); setDenyFor(null); setDenyReason('');
+      setWithheldItems(''); setAllowedItems(''); setParticularImage(null); setParticularsChecked(false); setDenyFor(null); setDenyReason('');
       await lookup();
     } catch (err: any) { setError(err.message || 'Checkpoint could not be recorded'); } finally { setActionLoading(''); }
   }
@@ -545,7 +546,7 @@ export default function GatePage() {
 
               {(v.gateVisits || []).length > 0 && <div className="mt-3 space-y-2">
                 {v.gateVisits.map((event: any) => <div key={event.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                  <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-700">{event.gate?.name || 'Checkpoint'}</b><span className={`text-[10px] font-bold ${event.decision==='DENIED'?'text-rose-700':'text-emerald-700'}`}>{event.decision}</span></div>
+                  <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-700">{event.gate?.name || 'Checkpoint'}</b><span className={`text-[10px] font-bold ${event.decision==='DENIED'?'text-rose-700':'text-emerald-700'}`}>{event.decision}</span></div>{event.particularsChecked&&<p className="mt-1 text-[10px] font-medium text-emerald-700">Particulars check confirmed</p>}
                   <p className="mt-0.5 text-[10px] text-slate-400">{event.officer?.fullName || 'Officer'} · {fmtDate(event.occurredAt)}</p>
                   {(event.particulars || []).filter((x:any)=>x.kind==='WITHHELD').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-rose-50 px-2.5 py-2 text-xs text-rose-800"><b>WITHHELD</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>} {x.returnedAt?<span className="ml-2 font-semibold text-emerald-700">Returned</span>:<button type="button" onClick={()=>markParticularReturned(x.id)} disabled={!!actionLoading} className="ml-2 font-semibold underline">Mark returned</button>}</div>)}
                   {(event.particulars || []).filter((x:any)=>x.kind==='ALLOWED').map((x:any)=><div key={x.id} className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-2 text-xs text-emerald-800"><b>ALLOWED</b> · {x.description} {x.quantity>1?`(×${x.quantity})`:''}{x.imagePath&&<a className="ml-2 underline" href={particularPhoto(x.imagePath)} target="_blank" rel="noreferrer">View photo</a>}</div>)}
@@ -558,7 +559,7 @@ export default function GatePage() {
                 )}
                 {v.status === 'INVITED' && currentCheckpoints.length > 0 && (
                   <div className="w-full space-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
-                    <p className="text-xs font-semibold text-slate-700">Checkpoint inspection</p>
+                    <p className="text-xs font-semibold text-slate-700">Checkpoint inspection</p>{checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false&&<p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">Admissions are disabled at this gate.</p>}
                     <select className="input !py-2 text-sm" value={activeGateId} onChange={e => setActiveGateId(e.target.value)}>
                       {currentCheckpoints.map((g: any) => <option key={g.id} value={g.id}>{g.location?.organisation?.name ? `${g.location.organisation.name} · ` : ''}{g.location?.name} · {g.sequence + 1}. {g.name}</option>)}
                     </select>
@@ -566,11 +567,12 @@ export default function GatePage() {
                     <label className="block text-[11px] font-semibold text-emerald-700">Allowed items (one per line)<textarea rows={2} value={allowedItems} onChange={e=>setAllowedItems(e.target.value)} className="input mt-1 !py-2 text-sm" placeholder="Items permitted through…"/></label>
                     <label className="flex items-center gap-2 text-xs text-slate-600"><Camera size={14}/><span>Optional particulars photo</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="min-w-0 text-xs" onChange={e=>setParticularImage(e.target.files?.[0] || null)}/></label>
                     {particularImage && <p className="text-[11px] text-slate-500">{particularImage.name}</p>}
+                    {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900"><input type="checkbox" checked={particularsChecked} onChange={e=>setParticularsChecked(e.target.checked)}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…':'Pass checkpoint'}</button>
+                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false || (checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false && !particularsChecked)} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…':'Pass checkpoint'}</button>
                       <button type="button" onClick={() => { setDenyFor(denyFor===v.id?null:v.id); setDenyReason(''); }} disabled={!!actionLoading} className="btn-danger !px-4"><Ban size={17}/></button>
                     </div>
-                    <Collapse open={denyFor === v.id}><textarea value={denyReason} onChange={e=>setDenyReason(e.target.value)} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!denyReason.trim()} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
+                    <Collapse open={denyFor === v.id}><textarea value={denyReason} onChange={e=>setDenyReason(e.target.value)} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!denyReason.trim()||(checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&!particularsChecked)} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
                   </div>
                 )}
                 {v.status === 'INVITED' && currentCheckpoints.length === 0 && ['GATE', 'GLOBAL_GATE'].includes(currentRole) && (

@@ -221,6 +221,18 @@ export class PlatformService {
     return { user, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
   }
 
+  async resetPersonPassword(actor: any, userId: string) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can reset platform or agency passwords');
+    const target = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!target || target.role === Role.SUPER_ADMIN) throw new NotFoundException('Editable account not found');
+    const initialPassword = generateNigerianPassword();
+    const passwordHash = await bcrypt.hash(initialPassword, 12);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: true } });
+    const mailResult = await this.mail.sendPasswordReset(target.email, target.fullName, initialPassword);
+    await this.audit.log({ action: 'PLATFORM_PASSWORD_RESET', entity: 'User', entityId: userId, userId: actor.id, details: { targetRole: target.role, email: target.email } });
+    return { userId, email: target.email, fullName: target.fullName, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
+  }
+
   async setUserActive(actor: any, userId: string, isActive: boolean) {
     if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException();
     if (userId === actor.id) throw new BadRequestException('You cannot suspend your own account');

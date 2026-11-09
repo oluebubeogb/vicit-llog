@@ -15,6 +15,12 @@ import { Role } from '@prisma/client';
 export class LocationsController {
   constructor(private locations: LocationsService) {}
 
+  @Get('settings') settings(@CurrentUser() user: any) { return this.locations.settings(user.orgId); }
+
+  @Patch('settings') updateSettings(@Body('maxGates') maxGates: number, @CurrentUser() user: any) { return this.locations.updateSettings(user.orgId, Number(maxGates)); }
+
+  @Patch('gates/:gateId') updateGate(@Param('gateId') gateId: string, @Body() body: any, @CurrentUser() user: any) { return this.locations.updateGate(gateId, user.orgId, body); }
+
   @Get()
   @ApiOperation({ summary: 'List locations with gates' })
   list(@CurrentUser() user: any) {

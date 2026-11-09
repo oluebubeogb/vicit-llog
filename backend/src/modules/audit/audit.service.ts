@@ -25,8 +25,18 @@ export class AuditService {
     });
   }
 
-  async findAll(limit = 100) {
+  async findAll(limit = 100, organisationId?: string) {
+    let scope: any = undefined;
+    if (organisationId) {
+      const [inviteIds, visitorIds] = await Promise.all([
+        this.prisma.invite.findMany({ where: { organisationId }, select: { id: true } }),
+        this.prisma.visitor.findMany({ where: { invite: { organisationId } }, select: { id: true } }),
+      ]);
+      const entityIds = [...inviteIds.map(x => x.id), ...visitorIds.map(x => x.id)];
+      scope = { OR: [ { user: { is: { organisationId } } }, ...(entityIds.length ? [{ entityId: { in: entityIds } }] : []) ] };
+    }
     const rows = await this.prisma.auditLog.findMany({
+      where: scope,
       take: limit,
       orderBy: { createdAt: 'desc' },
       include: {

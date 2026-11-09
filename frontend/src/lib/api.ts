@@ -223,6 +223,7 @@ export const api = {
   createAgency: (data: any) => request('/platform/agencies', { method: 'POST', body: JSON.stringify(data) }),
   updateAgency: (id: string, data: any) => request(`/platform/agencies/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   updatePlatformPerson: (id: string, data: any) => request(`/platform/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  resetPlatformPersonPassword: (id: string) => request(`/platform/people/${id}/reset-password`, { method: 'POST' }),
   uploadAgencyLogo: async (agencyId: string, file: File) => { const form = new FormData(); form.append('logo', file); return request(`/platform/agencies/${agencyId}/logo`, { method: 'POST', body: form }); },
   createAgencyUser: (agencyId: string, data: any) => request(`/platform/agencies/${agencyId}/users`, { method: 'POST', body: JSON.stringify(data) }),
   platformAdministrators: () => request('/platform/administrators'),
@@ -233,6 +234,9 @@ export const api = {
   createGlobalGateOfficer: (data: any) => request('/platform/global-gate-officers', { method: 'POST', body: JSON.stringify(data) }),
   setPlatformUserStatus: (id: string, isActive: boolean) => request(`/platform/administrators/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) }),
   locations: () => request('/locations'),
+  locationSettings: () => request('/locations/settings'),
+  updateLocationSettings: (data: any) => request('/locations/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  updateGateSettings: (id: string, data: any) => request(`/locations/gates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   createLocation: (data: any) =>
     request('/locations', { method: 'POST', body: JSON.stringify(data) }),
   addGate: (locationId: string, data: any) =>

@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Audit')
 @ApiBearerAuth()
@@ -16,7 +17,7 @@ export class AuditController {
 
   @Get()
   @ApiOperation({ summary: 'Admin: view audit trail' })
-  list(@Query('limit') limit?: string) {
-    return this.auditService.findAll(limit ? parseInt(limit, 10) : 100);
+  list(@CurrentUser() user: any, @Query('limit') limit?: string) {
+    return this.auditService.findAll(limit ? parseInt(limit, 10) : 100, user.orgId);
   }
 }
