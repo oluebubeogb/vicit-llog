@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query, Res, UseGuards, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Controller, Get, NotFoundException, Param, Query, Res, UseGuards, ForbiddenException } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
@@ -9,6 +9,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
 import { AnalyticsDrillService, DrillFilter, EXPORT_CAP } from './analytics-drill.service';
 import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard';
+import { AttendanceRegisterService, RegisterQuery } from './attendance-register.service';
 
 const ENUM = /^[A-Z_]{2,32}$/;
 const ID = /^[0-9a-f-]{36}$|^none$/i;
@@ -54,6 +55,7 @@ export class AnalyticsController {
   constructor(
     private analytics: AnalyticsService,
     private drill: AnalyticsDrillService,
+    private register: AttendanceRegisterService,
   ) {}
 
   @Get('platform')
@@ -94,6 +96,66 @@ export class AnalyticsController {
   }
 
   
+  /** Agency admins: own org. Super Admin: all or one agency. Super Admin II: read-only oversight (needs visits.view). */
+  private registerOrg(user: any, organisationId?: string): string | null {
+    if (user.role === Role.ADMIN) return user.orgId;
+    if (user.role === Role.SUPER_ADMIN || user.role === Role.GLOBAL_ADMIN) {
+      return organisationId && /^[0-9a-f-]{36}$/i.test(organisationId) ? organisationId : null;
+    }
+    throw new ForbiddenException();
+  }
+
+  private parseRegister(q: Record<string, any>): RegisterQuery {
+    const id = (v: any) => (typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v) ? v : undefined);
+    const date = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
+    const int = (v: any, lo: number, hi: number) => {
+      const n = parseInt(String(v ?? ''), 10);
+      return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined;
+    };
+    const status = typeof q.status === 'string' && /^(all|present|late|absent|no_exit)$/.test(q.status) ? q.status : 'all';
+    const role = typeof q.role === 'string' && /^(STAFF|ADMIN|GATE)$/.test(q.role) ? q.role : undefined;
+    return {
+      q: typeof q.q === 'string' ? q.q.slice(0, 120) : undefined,
+      from: date(q.from),
+      to: date(q.to),
+      days: int(q.days, 1, 366),
+      organisationId: id(q.organisationId),
+      locationId: id(q.locationId),
+      gateId: id(q.gateId),
+      role,
+      status,
+      page: int(q.page, 1, 10000),
+      pageSize: int(q.pageSize, 10, 100),
+    };
+  }
+
+  @Get('attendance/register')
+  @RateLimit(60, 60)
+  @ApiOperation({ summary: 'Searchable attendance register with presence/late/absent/no-exit status and insights' })
+  attendanceRegister(@CurrentUser() user: any, @Query() q: Record<string, any>) {
+    const f = this.parseRegister(q);
+    return this.register.register(this.registerOrg(user, f.organisationId || undefined), f);
+  }
+
+  @Get('attendance/register/export')
+  @RateLimit(6, 60)
+  @ApiOperation({ summary: 'CSV export of the attendance register (capped)' })
+  async attendanceRegisterExport(@CurrentUser() user: any, @Query() q: Record<string, any>, @Res() res: Response) {
+    const f = this.parseRegister(q);
+    await this.register.exportCsv(this.registerOrg(user, f.organisationId || undefined), f, res);
+  }
+
+  @Get('attendance/register/staff/:id')
+  @RateLimit(60, 60)
+  @ApiOperation({ summary: 'One staff member attendance history (scoped)' })
+  async attendanceStaff(@CurrentUser() user: any, @Param('id') id: string, @Query() q: Record<string, any>) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('Invalid staff id');
+    const f = this.parseRegister(q);
+    const out = await this.register.staffHistory(this.registerOrg(user, f.organisationId || undefined), id, f);
+    if (!out) throw new NotFoundException('Staff not found');
+    return out;
+  }
+
   @Get('attendance')
   @ApiOperation({ summary: 'Staff attendance insights (agency-scoped for ADMIN; platform for Super Admin / Super Admin II)' })
   attendance(@CurrentUser() user: any, @Query('days') days?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('organisationId') organisationId?: string) {

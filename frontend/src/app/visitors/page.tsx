@@ -9,7 +9,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import Sheet from '@/components/ui/Sheet';
 import StatusPill from '@/components/ui/StatusPill';
 import { Empty, Notice, SkeletonList } from '@/components/ui/Bits';
-import { InviteDetail, InviteRow } from '@/components/InviteBits';
+import { InviteDetail, InviteRow, inviteSheetProps } from '@/components/InviteBits';
 import { inviteStatus } from '@/lib/format';
 
 const FILTERS = [
@@ -173,9 +173,7 @@ export default function VisitorsPage() {
       <Sheet
         open={!!detail}
         onClose={() => setDetail(null)}
-        icon={<Users size={20} />}
-        title={detail?.purpose}
-        subtitle={detail && <StatusPill status={inviteStatus(detail)} />}
+        {...inviteSheetProps(detail)}
         footer={
           canRevive(detail) ? (
             <button

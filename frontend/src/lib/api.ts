@@ -281,6 +281,23 @@ export const api = {
     Object.entries(params || {}).forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)); });
     return request(`/analytics/attendance/drill?${q.toString()}`);
   },
+  attendanceRegister: (params: Record<string, string | number | undefined | null>) =>
+    request(`/analytics/attendance/register?${toQuery(params)}`),
+  attendanceRegisterStaff: (id: string, params: Record<string, string | number | undefined | null> = {}) =>
+    request(`/analytics/attendance/register/staff/${id}?${toQuery(params)}`),
+  attendanceRegisterExport: async (params: Record<string, string | number | undefined | null>) => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/analytics/attendance/register/export?${toQuery(params)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || 'Export failed');
+    }
+    const cd = res.headers.get('content-disposition') || '';
+    const name = /filename="?([^";]+)"?/i.exec(cd)?.[1] || 'vicit-attendance-register.csv';
+    return { blob: await res.blob(), name };
+  },
   reorderGate: (gateId: string, sequence: number) => request(`/locations/gates/${gateId}/order`, { method: 'PATCH', body: JSON.stringify({ sequence }) }),
   checkpoints: () => request('/gate/checkpoints'),
   uploadParticularImage: async (file: File) => { const form = new FormData(); form.append('image', file); return request('/gate/particular-image', { method: 'POST', body: form }); },

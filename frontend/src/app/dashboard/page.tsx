@@ -24,7 +24,7 @@ import Sparkline from '@/components/ui/Sparkline';
 import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import StatusPill from '@/components/ui/StatusPill';
 import { Empty, SkeletonList } from '@/components/ui/Bits';
-import { InviteDetail, InviteRow } from '@/components/InviteBits';
+import { InviteDetail, InviteRow, inviteSheetProps } from '@/components/InviteBits';
 import { inviteStatus, plural, titleCase } from '@/lib/format';
 
 const DAY = 86400000;
@@ -422,11 +422,12 @@ export default function DashboardPage() {
         open={sheetOpen}
         onClose={() => setView(null)}
         tone={invite ? (isPending(invite) ? 'amber' : 'brand') : drillKind === 'pending' ? 'amber' : 'brand'}
-        icon={invite ? <Users size={20} /> : drillKind === 'pending' ? <Clock size={20} /> : <Users size={20} />}
-        title={invite ? invite.purpose : drillKind === 'pending' ? 'Pending approval' : 'Active & used invites'}
+        icon={invite ? undefined : drillKind === 'pending' ? <Clock size={20} /> : <Users size={20} />}
+        leading={invite ? inviteSheetProps(invite).leading : undefined}
+        title={invite ? inviteSheetProps(invite).title : drillKind === 'pending' ? 'Pending approval' : 'Active & used invites'}
         subtitle={
           invite ? (
-            <span className="flex items-center gap-2">
+            <span className="flex flex-col gap-1">
               {view?.kind === 'invite' && view.from && (
                 <button
                   type="button"
@@ -436,7 +437,7 @@ export default function DashboardPage() {
                   <ArrowLeft size={12} /> Back
                 </button>
               )}
-              <StatusPill status={inviteStatus(invite)} />
+              <span>{inviteSheetProps(invite).subtitle}</span>
             </span>
           ) : drillKind === 'pending' ? (
             'Requests waiting on an administrator'
@@ -444,6 +445,7 @@ export default function DashboardPage() {
             'The invites behind this number'
           )
         }
+        chips={invite ? inviteSheetProps(invite).chips : undefined}
       >
         {invite ? (
           <InviteDetail inv={invite} />

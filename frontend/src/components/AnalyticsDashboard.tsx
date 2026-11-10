@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import {
   Area,
@@ -473,6 +474,9 @@ export default function AnalyticsDashboard({
                     <p className="text-lg font-bold text-slate-800">{v ?? 0}</p>
                   </div>
                 ))}
+              </div>
+              <div className="mb-3">
+                <Link href="/attendance" className="text-xs font-semibold text-brand-700 hover:underline">Open attendance register →</Link>
               </div>
               <p className="mb-2 text-xs font-semibold text-slate-600">Top staff by days present</p>
               <ul className="divide-y divide-slate-100">

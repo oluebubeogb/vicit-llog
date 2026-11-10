@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import StatusPill from '@/components/ui/StatusPill';
 import Avatar from '@/components/ui/Avatar';
+import { photoUrl, avatarUrl } from '@/lib/format';
 
 const human = (s: string = '') => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -31,17 +32,6 @@ export function InviteReview({ summary }: { summary: any }) {
   return (
     <div className="space-y-4">
       {loading && <p className="text-xs text-slate-400">Loading invitation…</p>}
-      <div className="flex items-start gap-3">
-        <Avatar name={visitors[0]?.fullName || invite.guestNames?.[0] || 'Guest'} size={48} />
-        <div className="min-w-0 flex-1">
-          <b className="block text-base text-slate-900">{visitors.map((v: any) => v.fullName).filter(Boolean).join(', ') || invite.guestNames?.join(', ') || 'Guest'}</b>
-          <p className="text-sm text-slate-600">{invite.purpose || 'Visit'}</p>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            <StatusPill status={invite.status || 'PENDING'} />
-            {invite.category && <StatusPill status={invite.category} />}
-          </div>
-        </div>
-      </div>
       <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
         <Cell label="Host" value={[invite.host?.fullName, invite.host?.phone, invite.host?.email].filter(Boolean).join(' · ') || '—'} />
         <Cell label="Agency" value={invite.organisation?.name || '—'} />
@@ -58,11 +48,16 @@ export function InviteReview({ summary }: { summary: any }) {
           <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-100">
             {visitors.map((v: any) => (
               <li key={v.id} className="px-3 py-2 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <b>{v.fullName}</b>
-                  <StatusPill status={v.status} />
+                <div className="flex items-center gap-3">
+                  <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={40} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <b className="truncate">{v.fullName}</b>
+                      <StatusPill status={v.status} />
+                    </div>
+                    <p className="text-xs text-slate-500">{[v.phone, v.email, v.enteredAt && `In ${new Date(v.enteredAt).toLocaleString()}`, v.exitedAt && `Out ${new Date(v.exitedAt).toLocaleString()}`, v.deniedReason].filter(Boolean).join(' · ')}</p>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500">{[v.phone, v.email, v.enteredAt && `In ${new Date(v.enteredAt).toLocaleString()}`, v.exitedAt && `Out ${new Date(v.exitedAt).toLocaleString()}`, v.deniedReason].filter(Boolean).join(' · ')}</p>
               </li>
             ))}
           </ul>

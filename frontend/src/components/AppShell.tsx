@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { getUser, api } from '@/lib/api';
-import { buildNavLinks, isBarePath } from '@/lib/navLinks';
+import { buildNavLinks, buildSidebarLinks, isBarePath } from '@/lib/navLinks';
 import BrandMark from '@/components/BrandMark';
 import BottomNav from '@/components/BottomNav';
 import AgencyIdentity from '@/components/AgencyIdentity';
@@ -54,7 +54,7 @@ function useSessionNav() {
     };
   }, [pathname]);
 
-  return { pathname, role, permissions, unread, mounted, links: buildNavLinks(role, permissions) };
+  return { pathname, role, permissions, unread, mounted, links: buildSidebarLinks(role, permissions) };
 }
 
 function DesktopSidebar({

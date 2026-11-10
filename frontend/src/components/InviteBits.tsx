@@ -25,7 +25,7 @@ import Avatar from '@/components/ui/Avatar';
 import Tooltip from '@/components/ui/Tooltip';
 import { Field, Fields } from '@/components/ui/Bits';
 import PersonLink from '@/components/PersonLink';
-import { fmtDate, fmtDuration, inviteStatus, MODE_LABEL, photoUrl, plural, relTime, titleCase } from '@/lib/format';
+import { avatarUrl, fmtDate, fmtDuration, inviteStatus, MODE_LABEL, photoUrl, plural, relTime, titleCase } from '@/lib/format';
 
 export const MODE_ICON: Record<string, ReactNode> = {
   PEDESTRIAN: <Footprints size={14} />,
@@ -41,6 +41,37 @@ export function guestLabel(inv: any): string {
   if (names.length === 1 && count <= 1) return names[0];
   const extra = count - 1;
   return `${names[0]} +${extra} more`;
+}
+
+export function inviteGuestName(inv: any): string {
+  const names: string[] = (inv?.visitors?.length ? inv.visitors.map((v: any) => v.fullName) : inv?.guestNames || []).filter(Boolean);
+  return names.join(', ') || guestLabel(inv) || 'Guest';
+}
+
+/** Visitor check-in photo if present, otherwise the host/staff avatar. */
+export function invitePortraitSrc(inv: any): string | null {
+  const withPhoto = (inv?.visitors || []).find((v: any) => v.photoPath);
+  if (withPhoto?.photoPath) return photoUrl(withPhoto.photoPath);
+  if (inv?.host?.avatarPath) return avatarUrl(inv.host.avatarPath);
+  return null;
+}
+
+/** Single Sheet header: avatar, name, purpose, status chips. Do not also render a hero body. */
+export function inviteSheetProps(inv: any | null | undefined) {
+  if (!inv) return {};
+  const name = inviteGuestName(inv);
+  return {
+    leading: <Avatar name={name} src={invitePortraitSrc(inv)} size={48} />,
+    title: name,
+    subtitle: inv.purpose || 'Visit',
+    chips: (
+      <>
+        <StatusPill status={inviteStatus(inv)} />
+        {inv.category ? <StatusPill status={inv.category} /> : null}
+      </>
+    ),
+    icon: undefined as undefined,
+  };
 }
 
 /** Rich, de-duplicated invite row: purpose once, status pill once, guests + time as context. */

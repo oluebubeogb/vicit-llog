@@ -6,7 +6,7 @@ import { api, getUser } from '@/lib/api';
 import { isValidEmail } from '@/lib/email';
 import {
   Activity,
-  BarChart3,
+  BarChart3, ClipboardCheck,
   Ban,
   Check,
   ChevronRight,
@@ -39,7 +39,7 @@ import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import Collapse from '@/components/ui/Collapse';
 import { Empty, Field, Fields, Notice } from '@/components/ui/Bits';
 import PersonLink from '@/components/PersonLink';
-import { InviteDetail, InviteRow, VisitorCard } from '@/components/InviteBits';
+import { InviteDetail, InviteRow, VisitorCard, inviteSheetProps } from '@/components/InviteBits';
 import { AUDIT_TILE, auditMeta, fieldLabel, fmtValue } from '@/components/AuditBits';
 import { avatarUrl, fmtDate, inviteStatus, photoUrl, plural, relTime, titleCase } from '@/lib/format';
 
@@ -279,6 +279,7 @@ export default function AdminPage() {
 
   const tools = [
     { href: '/analytics', l: 'Analytics', tip: 'Charts for visits, peak hours, hosts and gates', icon: BarChart3, tone: 'from-brand-50 to-brand-100 text-brand-600' },
+    { href: '/attendance', l: 'Attendance register', tip: 'Searchable staff arrivals, exits and absences', icon: ClipboardCheck, tone: 'from-sky-50 to-sky-100 text-sky-700' },
     { href: '/blacklist', l: 'Blacklist', tip: 'People who must be stopped at the gate', icon: Ban, tone: 'from-rose-50 to-rose-100 text-rose-600' },
     { href: '/locations', l: 'Locations', tip: 'Sites and the gates officers scan at', icon: MapPin, tone: 'from-emerald-50 to-emerald-100 text-emerald-600' },
     { href: '/branding', l: 'Branding', tip: 'Name, logo, colours and approval rules', icon: Palette, tone: 'from-violet-50 to-violet-100 text-violet-600' },
@@ -870,9 +871,7 @@ export default function AdminPage() {
         open={!!detailInvite}
         onClose={() => setDetailInvite(null)}
         tone={detailInvite && PENDING.includes(detailInvite.status) ? 'amber' : 'brand'}
-        icon={<ClipboardList size={20} />}
-        title={detailInvite?.purpose}
-        subtitle={detailInvite && <StatusPill status={inviteStatus(detailInvite)} />}
+        {...inviteSheetProps(detailInvite)}
         footer={
           detailInvite &&
           (PENDING.includes(detailInvite.status) ? (

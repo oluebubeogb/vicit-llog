@@ -64,7 +64,7 @@ export class PlatformService {
       where: { id },
       include: {
         organisation: { select: { id: true, name: true, code: true, logoUrl: true } },
-        host: { select: { id: true, fullName: true, email: true, phone: true, portfolio: true, role: true } },
+        host: { select: { id: true, fullName: true, email: true, phone: true, portfolio: true, role: true, avatarPath: true } },
         visitors: {
           include: {
             gateVisits: {

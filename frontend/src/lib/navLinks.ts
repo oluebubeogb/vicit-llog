@@ -6,6 +6,7 @@ import {
   User,
   ScanLine,
   LayoutDashboard,
+  ClipboardCheck,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -58,6 +59,18 @@ export function buildNavLinks(
   }
   if (role === 'GATE' || role === 'GLOBAL_GATE') return gateLinks;
   return staffLinks;
+}
+
+/** Desktop sidebar: same as the mobile footer, plus Attendance for admins (not added to the crowded bottom nav). */
+export function buildSidebarLinks(role?: string | null, permissions: string[] = []): AppNavLink[] {
+  const links = buildNavLinks(role, permissions);
+  if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN' || role === 'ADMIN') {
+    const att: AppNavLink = { href: '/attendance', icon: ClipboardCheck, label: 'Attendance' };
+    const idx = links.findIndex((l) => l.href === '/profile');
+    if (idx >= 0) links.splice(idx, 0, att);
+    else links.push(att);
+  }
+  return links;
 }
 
 export function platformHome(role?: string | null) {

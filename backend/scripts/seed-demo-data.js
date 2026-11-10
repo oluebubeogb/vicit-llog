@@ -38,32 +38,113 @@ const INVITE_TOKEN_PREFIX = 'demo-';
 const PROTECTED_ROLES = ['SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE', 'ADMIN', 'GATE'];
 const AGENCY_ROLES = ['ADMIN', 'STAFF', 'GATE'];
 
-const STAFF_PROFILES = [
-  { first: 'Chioma', last: 'Okeke', portfolio: 'Human Resources', phone: '+2348034412081' },
-  { first: 'Tunde', last: 'Adebayo', portfolio: 'Finance', phone: '+2348091126745' },
-  { first: 'Aisha', last: 'Bello', portfolio: 'Legal', phone: '+2348025567390' },
-  { first: 'Emeka', last: 'Nwosu', portfolio: 'Operations', phone: '+2347013382294' },
-  { first: 'Funke', last: 'Adeyemi', portfolio: 'Communications', phone: '+2348136674012' },
-  { first: 'Ibrahim', last: 'Musa', portfolio: 'Information Technology', phone: '+2348052291883' },
+const STAFF_PER_AGENCY = 6;
+const VISITORS_PER_AGENCY = 36;
+const PORTFOLIOS = [
+  'Human Resources',
+  'Finance',
+  'Legal',
+  'Operations',
+  'Communications',
+  'Information Technology',
 ];
 
-const VISITOR_POOL = [
-  { fullName: 'Olumide Ajayi', email: 'olumide.ajayi@example.com', phone: '+2348092211001', address: '12 Boyle Street, Onikan, Lagos' },
-  { fullName: 'Hadiza Sani', email: 'hadiza.sani@example.com', phone: '+2348033342210', address: '5 Gana Street, Maitama, Abuja' },
-  { fullName: 'Chiamaka Uzo', email: 'chiamaka.uzo@example.com', phone: '+2348021187734', address: '27 Admiralty Road, Lekki Phase 1, Lagos' },
-  { fullName: 'David Ekong', email: 'david.ekong@example.com', phone: '+2347014458821', address: '9 Okon Essien Lane, Uyo' },
-  { fullName: 'Rukayat Ibrahim', email: 'rukayat.ibrahim@example.com', phone: '+2348056671902', address: '18 Aminu Kano Crescent, Wuse II, Abuja' },
-  { fullName: 'Peter Nwafor', email: 'peter.nwafor@example.com', phone: '+2348097765432', address: '6 New Market Road, Onitsha' },
-  { fullName: 'Yetunde Shonibare', email: 'yetunde.shonibare@example.com', phone: '+2348132209876', address: '3 Akin Adesola Street, Victoria Island, Lagos' },
-  { fullName: 'Emmanuel Kalu', email: 'emmanuel.kalu@example.com', phone: '+2348029912345', address: '14 Factory Road, Aba' },
-  { fullName: 'Fatima Abdulkadir', email: 'fatima.abdulkadir@example.com', phone: '+2348035567812', address: '11 Ahmadu Bello Way, Kaduna' },
-  { fullName: 'Goretti Ekanem', email: 'goretti.ekanem@example.com', phone: '+2348094432178', address: '8 Marian Road, Calabar' },
-  { fullName: 'Idris Balogun', email: 'idris.balogun@example.com', phone: '+2347018876509', address: '22 Ikorodu Road, Maryland, Lagos' },
-  { fullName: 'Stella Okorie', email: 'stella.okorie@example.com', phone: '+2348051123987', address: '4 Trans Amadi Layout, Port Harcourt' },
-  { fullName: 'Kunle Oladipo', email: 'kunle.oladipo@example.com', phone: '+2348096654321', address: '16 Ring Road, Ibadan' },
-  { fullName: 'Ngozi Chukwu', email: 'ngozi.chukwu@example.com', phone: '+2348037788890', address: '9 Independence Layout, Enugu' },
-  { fullName: 'Suleiman Garba', email: 'suleiman.garba@example.com', phone: '+2348024455667', address: '7 Ahmadu Bello Way, Kano' },
+// Yoruba, Igbo, Hausa and other Nigerian given names / surnames. Combinations
+// are shuffled once (deterministic) and partitioned per agency so no full name
+// is reused across organisations.
+const FIRST_NAMES = [
+  'Adebayo', 'Adeola', 'Adetola', 'Aisha', 'Akachi', 'Amaka', 'Aminu', 'Amara',
+  'Bolanle', 'Bose', 'Chiamaka', 'Chidinma', 'Chinedu', 'Chioma', 'Damilola', 'David',
+  'Efe', 'Emeka', 'Emmanuel', 'Eniola', 'Fatima', 'Folake', 'Funke', 'Goretti',
+  'Hadiza', 'Halima', 'Ibrahim', 'Idris', 'Ifeoma', 'Ijeoma', 'Jumoke', 'Kelechi',
+  'Kunle', 'Lami', 'Maryam', 'Mobolaji', 'Ngozi', 'Nkechi', 'Obinna', 'Olumide',
+  'Oluwaseun', 'Osaze', 'Peter', 'Rukayat', 'Sade', 'Segun', 'Seyi', 'Stella',
+  'Suleiman', 'Tari', 'Temitope', 'Tobi', 'Tunde', 'Uche', 'Yakubu', 'Yetunde',
+  'Yusuf', 'Zainab', 'Zara', 'Bello', 'Chukwuemeka', 'Femi', 'Gbenga', 'Hauwa',
+  'Ikenna', 'Kemi', 'Nneka', 'Onyeka', 'Simisola', 'Tochukwu',
 ];
+const LAST_NAMES = [
+  'Abdullahi', 'Adebayo', 'Adeyemi', 'Agbaje', 'Ajayi', 'Akinola', 'Alabi', 'Aliyu',
+  'Bakare', 'Balogun', 'Bello', 'Chukwu', 'Danjuma', 'Ekanem', 'Ekong', 'Eze',
+  'Garba', 'Ibrahim', 'Idris', 'Kalu', 'Lawal', 'Maduike', 'Mohammed', 'Musa',
+  'Nnamdi', 'Nwafor', 'Nwosu', 'Obi', 'Okonkwo', 'Okorie', 'Okoro', 'Okeke',
+  'Oladipo', 'Olatunji', 'Okafor', 'Onuoha', 'Sani', 'Shonibare', 'Umeh', 'Usman',
+  'Yusuf', 'Dike', 'Ekwueme', 'Fashola', 'Gbadamosi', 'Ibe', 'Jibril', 'Nwachukwu',
+  'Ogundipe', 'Salami',
+];
+const ADDRESSES = [
+  '12 Boyle Street, Onikan, Lagos',
+  '5 Gana Street, Maitama, Abuja',
+  '27 Admiralty Road, Lekki Phase 1, Lagos',
+  '9 Okon Essien Lane, Uyo',
+  '18 Aminu Kano Crescent, Wuse II, Abuja',
+  '6 New Market Road, Onitsha',
+  '3 Akin Adesola Street, Victoria Island, Lagos',
+  '14 Factory Road, Aba',
+  '11 Ahmadu Bello Way, Kaduna',
+  '8 Marian Road, Calabar',
+  '22 Ikorodu Road, Maryland, Lagos',
+  '4 Trans Amadi Layout, Port Harcourt',
+  '16 Ring Road, Ibadan',
+  '9 Independence Layout, Enugu',
+  '7 Ahmadu Bello Way, Kano',
+  '2 Tafawa Balewa Close, Asokoro, Abuja',
+  '31 Aba Road, Port Harcourt',
+  '15 Allen Avenue, Ikeja, Lagos',
+];
+
+function buildUniquePeople(count) {
+  const combos = [];
+  for (const last of LAST_NAMES) {
+    for (const first of FIRST_NAMES) {
+      if (String(first).toLowerCase() === String(last).toLowerCase()) continue;
+      combos.push({ first, last, fullName: `${first} ${last}` });
+    }
+  }
+  const rng = mulberry32(hashSeed('vicit-demo-people-v7'));
+  for (let i = combos.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = combos[i];
+    combos[i] = combos[j];
+    combos[j] = tmp;
+  }
+  const seen = new Set();
+  const unique = [];
+  for (const p of combos) {
+    const key = p.fullName.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(p);
+    if (unique.length >= count) break;
+  }
+  if (unique.length < count) {
+    throw new Error(`Demo name pool only produced ${unique.length} unique names; need ${count}`);
+  }
+  return unique;
+}
+
+function partitionPeople(orgs) {
+  const need = orgs.length * (STAFF_PER_AGENCY + VISITORS_PER_AGENCY);
+  const pool = buildUniquePeople(need);
+  const byOrg = new Map();
+  let offset = 0;
+  for (const org of orgs) {
+    const staff = pool.slice(offset, offset + STAFF_PER_AGENCY).map((p, i) => ({
+      ...p,
+      portfolio: PORTFOLIOS[i % PORTFOLIOS.length],
+      phone: `+23480${String(20000000 + offset + i).slice(-8)}`,
+    }));
+    const visitors = pool.slice(offset + STAFF_PER_AGENCY, offset + STAFF_PER_AGENCY + VISITORS_PER_AGENCY).map((p, i) => ({
+      ...p,
+      email: `${p.first.toLowerCase()}.${p.last.toLowerCase()}@example.com`,
+      phone: `+23481${String(30000000 + offset + i).slice(-8)}`,
+      address: ADDRESSES[i % ADDRESSES.length],
+    }));
+    byOrg.set(org.id, { staff, visitors });
+    offset += STAFF_PER_AGENCY + VISITORS_PER_AGENCY;
+  }
+  return byOrg;
+}
 
 const PURPOSES = [
   'Quarterly vendor review',
@@ -523,12 +604,16 @@ async function ensureLocations(org, officers, rng) {
   return { locations, gates: allGates.length ? allGates : locations.flatMap((l) => l.gates || []), created };
 }
 
-async function ensureStaff(org, passwordHash) {
+async function ensureStaff(org, passwordHash, staffPeople) {
   const created = [];
   const reused = [];
   const tagged = new Set(await taggedIds('User'));
-  for (const p of STAFF_PROFILES) {
-    const fullName = `${p.first} ${p.last}`;
+  const people = staffPeople && staffPeople.length ? staffPeople : [];
+  if (!people.length) {
+    console.warn(`No unique staff names allocated for ${org.name}; skipping staff seed.`);
+  }
+  for (const p of people) {
+    const fullName = p.fullName || `${p.first} ${p.last}`;
     const already = await prisma.user.findFirst({
       where: {
         organisationId: org.id,
@@ -585,9 +670,12 @@ async function ensureStaff(org, passwordHash) {
   return { created, reused, all: created.concat(reused) };
 }
 
-async function seedInvitesAndVisits(org, hosts, gates, officers, rng) {
+async function seedInvitesAndVisits(org, hosts, gates, officers, rng, visitorPeople) {
   const counts = { invites: 0, visitors: 0, visits: 0, rings: 0, notifications: 0 };
   if (!hosts.length) return counts;
+  const guestsPool = (visitorPeople || []).slice();
+  let guestCursor = 0;
+  const nextVisitor = () => (guestCursor < guestsPool.length ? guestsPool[guestCursor++] : null);
 
   const pastDays = lastWeekdays(22);
   const futureDays = upcomingDays(6);
@@ -628,8 +716,9 @@ async function seedInvitesAndVisits(org, hosts, gates, officers, rng) {
     if (existing) continue;
 
     const host = pick(rng, hosts);
-    const guest = VISITOR_POOL[plan.index % VISITOR_POOL.length];
-    const companion = plan.index % 5 === 0 ? VISITOR_POOL[(plan.index + 3) % VISITOR_POOL.length] : null;
+    const guest = nextVisitor();
+    if (!guest) continue;
+    const companion = plan.index % 5 === 0 ? nextVisitor() : null;
     const purpose = PURPOSES[plan.index % PURPOSES.length];
     const mode = pick(rng, modes);
     const arr = minutesBetween(rng, 9, 0, 15, 30);
@@ -638,7 +727,9 @@ async function seedInvitesAndVisits(org, hosts, gates, officers, rng) {
     const createdAt = new Date(expectedAt.getTime() - (1 + Math.floor(rng() * 4)) * 24 * 3600 * 1000);
     const gate = gates.length ? pick(rng, gates) : null;
     const officer = officers.length ? pick(rng, officers) : host;
-    const guestNames = companion ? [guest.fullName, companion.fullName] : [guest.fullName];
+    const guestNames = (companion && companion.fullName !== guest.fullName)
+      ? [guest.fullName, companion.fullName]
+      : [guest.fullName];
 
     const invite = await prisma.invite.create({
       data: {
@@ -662,7 +753,8 @@ async function seedInvitesAndVisits(org, hosts, gates, officers, rng) {
     await tag('Invite', invite.id);
     counts.invites += 1;
 
-    const guests = companion ? [guest, companion] : [guest];
+    const second = companion && companion.fullName !== guest.fullName ? companion : null;
+    const guests = second ? [guest, second] : [guest];
     const visitorRows = [];
     for (let g = 0; g < guests.length; g++) {
       const person = guests[g];
@@ -873,13 +965,19 @@ async function seed(demoPassword) {
     orderBy: { createdAt: 'asc' },
   });
 
-  const agencies = orgs.filter((o) => o.users.some((u) => AGENCY_ROLES.includes(u.role)));
+  const agencies = orgs
+    .filter((o) => o.users.some((u) => AGENCY_ROLES.includes(u.role)))
+    .sort((a, b) => {
+      const c = new Date(a.createdAt) - new Date(b.createdAt);
+      return c !== 0 ? c : String(a.id).localeCompare(String(b.id));
+    });
   if (!agencies.length) {
     console.log('No agencies with admin/staff/gate users were found. Nothing to seed.');
     return { agencies: 0 };
   }
 
   const passwordHash = await bcrypt.hash(demoPassword, 12);
+  const allotment = partitionPeople(agencies);
   const report = [];
 
   for (const org of agencies) {
@@ -890,11 +988,12 @@ async function seed(demoPassword) {
     const admins = org.users.filter((u) => u.role === 'ADMIN' && u.isActive);
     const officers = org.users.filter((u) => u.role === 'GATE' && u.isActive);
     const { locations, gates, created: locCreated } = await ensureLocations(org, officers, rng);
-    const staff = await ensureStaff(org, passwordHash);
+    const names = allotment.get(org.id) || { staff: [], visitors: [] };
+    const staff = await ensureStaff(org, passwordHash, names.staff);
     const hosts = staff.all.concat(existingStaff, admins).filter((u, i, arr) => arr.findIndex((x) => x.id === u.id) === i);
     // Attendance subjects: demo + existing STAFF, plus agency admins and officers (tagged so reset can drop those rows).
     const subjects = staff.all.concat(existingStaff, admins, officers).filter((u, i, arr) => arr.findIndex((x) => x.id === u.id) === i);
-    const visits = await seedInvitesAndVisits(org, hosts.length ? hosts : subjects, gates, officers, inviteRng);
+    const visits = await seedInvitesAndVisits(org, hosts.length ? hosts : subjects, gates, officers, inviteRng, names.visitors);
     const attendance = await seedAttendance(org, subjects, officers, gates, attRng);
     const alerts = await seedAlertsForAdmins(org, admins, rng);
 

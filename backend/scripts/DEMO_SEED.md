@@ -50,7 +50,8 @@ SEED_DEMO=YES npm run seed:demo -- --reset
 
 - Locations and gates only when the agency has none (Lagos Victoria Island + Abuja Wuse II, fictional addresses). Existing locations are reused.
 - Existing agency gate officers may be assigned onto **new demo gates** (assignments are tagged and removed on reset).
-- Six STAFF users with Nigerian names and portfolios (HR, Finance, Legal, Operations, Communications, IT).
+- Six STAFF users with Nigerian names and portfolios (HR, Finance, Legal, Operations, Communications, IT). Full names are unique across **all** agencies (a shuffled pool is partitioned per organisation). Visitors and hosts use those same unique names.
+- If an earlier seed reused names across agencies, run `--reset` and then re-seed to replace tagged demo staff and invites.
 - About 24 invites across the past ~30 days and the coming week (meetings, deliveries, interviews, tours, …) with visitors, statuses, and gate check-in/out where appropriate.
 - Staff attendance for the last ~20 weekdays (arrivals 07:30–09:45, exits 16:30–18:30, some late, some absences, some missing exits), including existing agency staff/admins/officers. Those attendance rows are tagged for reset.
 - In-app notifications and a few host/gate ring calls.

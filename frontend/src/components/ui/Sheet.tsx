@@ -16,6 +16,8 @@ export default function Sheet({
   title,
   subtitle,
   icon,
+  leading,
+  chips,
   children,
   footer,
   size = 'md',
@@ -26,6 +28,9 @@ export default function Sheet({
   title?: ReactNode;
   subtitle?: ReactNode;
   icon?: ReactNode;
+  /** Replaces the gradient icon tile — use an Avatar / photo. */
+  leading?: ReactNode;
+  chips?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
   size?: 'md' | 'lg';
@@ -34,9 +39,9 @@ export default function Sheet({
   const [mounted, setMounted] = useState(false);
   const reduce = useReducedMotion();
   const drag = useDragControls();
-  const retained = useRef<{ title?: ReactNode; subtitle?: ReactNode; icon?: ReactNode; children?: ReactNode; footer?: ReactNode }>({});
-  if (open) retained.current = { title, subtitle, icon, children, footer };
-  const c = open ? { title, subtitle, icon, children, footer } : retained.current;
+  const retained = useRef<{ title?: ReactNode; subtitle?: ReactNode; icon?: ReactNode; leading?: ReactNode; chips?: ReactNode; children?: ReactNode; footer?: ReactNode }>({});
+  if (open) retained.current = { title, subtitle, icon, leading, chips, children, footer };
+  const c = open ? { title, subtitle, icon, leading, chips, children, footer } : retained.current;
 
   useEffect(() => setMounted(true), []);
 
@@ -114,21 +119,24 @@ export default function Sheet({
             >
               <span className="h-1.5 w-11 rounded-full bg-slate-300/80" />
             </div>
-            {(c.title || c.icon) && (
+            {(c.title || c.icon || c.leading) && (
               <motion.div
                 onPointerDown={(e) => drag.start(e)}
                 className="relative flex touch-none items-start gap-3 px-5 pb-3 pt-1 sm:pt-5"
                 variants={{ open: { opacity: 1, y: 0 }, closed: { opacity: 0, y: -6 } }}
                 transition={{ delay: 0.06, duration: 0.3 }}
               >
-                {c.icon && (
+                {c.leading ? (
+                  <div className="shrink-0">{c.leading}</div>
+                ) : c.icon ? (
                   <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-white ${toneIcon[tone]}`}>
                     {c.icon}
                   </div>
-                )}
+                ) : null}
                 <div className="min-w-0 flex-1 pt-0.5">
                   {c.title && <h2 className="truncate text-lg font-bold tracking-tight text-slate-900">{c.title}</h2>}
                   {c.subtitle && <div className="mt-0.5 text-sm text-slate-500">{c.subtitle}</div>}
+                  {c.chips && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{c.chips}</div>}
                 </div>
                 <button
                   type="button"
