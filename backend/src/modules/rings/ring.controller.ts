@@ -5,7 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RingService } from './ring.service';
 import { RingHub } from './ring.hub';
-import { RingActionDto, StartRingDto } from './dto/ring.dto';
+import { RingActionDto, RingSignalDto, StartRingDto } from './dto/ring.dto';
 
 @ApiTags('Rings')
 @Controller('rings')
@@ -37,11 +37,25 @@ export class RingController {
     });
   }
 
+  @Get('ice-servers')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  iceServers() {
+    return this.rings.iceServers();
+  }
+
   @Get('active')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   active(@CurrentUser() user: any) {
     return this.rings.active(user);
+  }
+
+  @Post(':id/signal')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  signal(@Param('id') id: string, @Body() body: RingSignalDto, @CurrentUser() user: any) {
+    return this.rings.signal(user, id, body);
   }
 
   @Get(':id')

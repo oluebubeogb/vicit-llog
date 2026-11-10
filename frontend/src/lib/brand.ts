@@ -1,5 +1,19 @@
 /** Brand colour engine: turns one hex colour into a 50–950 scale of CSS variables. */
 
+export const APP_VERSION = '1.0.1';
+
+export type LoginBranding = {
+  logoUrl?: string | null;
+  logoWidth?: string | null;
+  watermarkUrl?: string | null;
+  watermarkWidth?: string | null;
+  watermarkHeight?: string | null;
+  watermarkOpacity?: number | null;
+  headline?: string | null;
+  primaryColor?: string | null;
+  secondaryColor?: string | null;
+};
+
 export type PublicBranding = {
   name: string;
   appName?: string;
@@ -10,6 +24,10 @@ export type PublicBranding = {
   primaryTextColor?: string | null;
   emailIconBg?: string | null;
   updatedAt?: string | null;
+  footerCredit?: string | null;
+  footerCreditEnabled?: boolean;
+  assetVersion?: string | null;
+  login?: LoginBranding | null;
 };
 
 export const DEFAULT_BRANDING: PublicBranding = {
@@ -20,6 +38,25 @@ export const DEFAULT_BRANDING: PublicBranding = {
   secondaryColor: '#1e40af',
   primaryTextColor: null,
   emailIconBg: '#ffffff',
+  footerCredit: "Powered by CISTECH's Vicit 1.0.1",
+  footerCreditEnabled: true,
+  assetVersion: APP_VERSION,
+  login: null,
+};
+
+/** Used while branding is unknown so the default Vicit mark/colours never flash. */
+export const NEUTRAL_BRANDING: PublicBranding = {
+  name: '',
+  appName: process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
+  logoUrl: null,
+  primaryColor: null,
+  secondaryColor: null,
+  primaryTextColor: null,
+  emailIconBg: '#ffffff',
+  footerCredit: "Powered by CISTECH's Vicit 1.0.1",
+  footerCreditEnabled: true,
+  assetVersion: APP_VERSION,
+  login: null,
 };
 
 export const AUTO_ON_PRIMARY_LIGHT = '#ffffff';
@@ -137,12 +174,60 @@ export function applyBranding(b: PublicBranding) {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-export function logoSrc(logoUrl?: string | null): string {
-  if (!logoUrl) return '/icon-192.png';
-  return /^https?:\/\//.test(logoUrl) ? logoUrl : `${API_URL}${logoUrl}`;
+export function assetVersion(b?: PublicBranding | null): string {
+  return b?.assetVersion || APP_VERSION;
+}
+
+export function versionedAsset(path: string, version?: string | null): string {
+  const v = version || APP_VERSION;
+  if (!path) return path;
+  return path + (path.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(v);
+}
+
+export function logoSrc(logoUrl?: string | null, opts?: { fallback?: boolean; version?: string | null }): string | null {
+  if (!logoUrl) return opts?.fallback === false ? null : versionedAsset('/icon-192.png', opts?.version);
+  const src = /^https?:\/\//.test(logoUrl) ? logoUrl : `${API_URL}${logoUrl}`;
+  return versionedAsset(src, opts?.version);
 }
 
 export const BRAND_CACHE_KEY = 'vicit_brand';
+export const LOGIN_BRAND_CACHE_KEY = 'vicit_login_brand';
 
-/** Inline script run before paint so cached brand colours apply with no flash. */
-export const BRAND_BOOT_SCRIPT = `(function(){try{var b=JSON.parse(localStorage.getItem('${BRAND_CACHE_KEY}')||'null');var u=JSON.parse(localStorage.getItem('vicit_user')||'null');var t=localStorage.getItem('vicit_token');var role=u&&u.role;var org=u&&(u.organisationId||(u.organisation&&u.organisation.id)||'unknown');var scope=!t||!u?'public':(['ADMIN','STAFF','GATE'].indexOf(role)>=0?'agency:'+org:(['SUPER_ADMIN','GLOBAL_ADMIN','GLOBAL_GATE'].indexOf(role)>=0?'platform:'+org:'platform'));if(!b||!b.vars||b.scope!==scope)return;var r=document.documentElement;for(var k in b.vars){r.style.setProperty(k,b.vars[k]);}}catch(e){}})();`;
+export function identityScope() {
+  if (typeof window === 'undefined') return 'public';
+  try {
+    const user = JSON.parse(localStorage.getItem('vicit_user') || 'null');
+    const token = localStorage.getItem('vicit_token');
+    if (!token || !user) return 'public';
+    const role = String(user.role || '');
+    const org = user.organisationId || (user.organisation && user.organisation.id) || 'unknown';
+    if (['ADMIN', 'STAFF', 'GATE'].includes(role)) return 'agency:' + org;
+    if (['SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(role)) return 'platform:' + org;
+    return 'platform';
+  } catch {
+    return 'public';
+  }
+}
+
+export function readCachedBrand(scope?: string): PublicBranding | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const target = scope || identityScope();
+    const key = target === 'public' ? LOGIN_BRAND_CACHE_KEY : BRAND_CACHE_KEY;
+    const cached = JSON.parse(localStorage.getItem(key) || 'null');
+    if (cached?.data && (target === 'public' || cached.scope === target)) {
+      return { ...NEUTRAL_BRANDING, ...cached.data };
+    }
+    // Authenticated users may still have a previous org cache with matching scope in BRAND_CACHE_KEY
+    if (target !== 'public') {
+      const org = JSON.parse(localStorage.getItem(BRAND_CACHE_KEY) || 'null');
+      if (org?.data && org.scope === target) return { ...NEUTRAL_BRANDING, ...org.data };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Inline script run before paint so cached brand colours apply with no flash of the default logo. */
+export const BRAND_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem('vicit_token');var u=JSON.parse(localStorage.getItem('vicit_user')||'null');var role=u&&u.role;var org=u&&(u.organisationId||(u.organisation&&u.organisation.id)||'unknown');var scope=!t||!u?'public':(['ADMIN','STAFF','GATE'].indexOf(role)>=0?'agency:'+org:(['SUPER_ADMIN','GLOBAL_ADMIN','GLOBAL_GATE'].indexOf(role)>=0?'platform:'+org:'platform'));var key=scope==='public'?'${LOGIN_BRAND_CACHE_KEY}':'${BRAND_CACHE_KEY}';var b=JSON.parse(localStorage.getItem(key)||'null');if(!b||!b.vars)return;if(scope!=='public'&&b.scope!==scope)return;var r=document.documentElement;for(var k in b.vars){r.style.setProperty(k,b.vars[k]);}r.setAttribute('data-brand-ready','1');}catch(e){}})();`;

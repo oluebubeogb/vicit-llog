@@ -7,6 +7,8 @@ import {
   ScanLine,
   LayoutDashboard,
   ClipboardCheck,
+  Briefcase,
+  Package,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -40,7 +42,7 @@ export function buildNavLinks(
   ];
   const gateLinks: AppNavLink[] = [
     { href: '/gate', icon: ScanLine, label: 'Scan', exact: true },
-    { href: '/invite/new', icon: UserPlus, label: 'Invite' },
+    { href: '/gate/dispatch', icon: Package, label: 'Dispatch' },
     { href: '/gate/visits', icon: LayoutDashboard, label: 'Visits' },
     { href: '/notifications', icon: Bell, label: 'Alerts', badge: true },
     { href: '/profile', icon: User, label: 'Profile' },
@@ -64,11 +66,31 @@ export function buildNavLinks(
 /** Desktop sidebar: same as the mobile footer, plus Attendance for admins (not added to the crowded bottom nav). */
 export function buildSidebarLinks(role?: string | null, permissions: string[] = []): AppNavLink[] {
   const links = buildNavLinks(role, permissions);
+  if ((role === 'GATE' || role === 'GLOBAL_GATE') && !links.some((l) => l.href === '/invite/new')) {
+    const inv: AppNavLink = { href: '/invite/new', icon: UserPlus, label: 'Invite' };
+    const i = links.findIndex((l) => l.href === '/gate/visits');
+    if (i >= 0) links.splice(i, 0, inv);
+    else links.push(inv);
+  }
   if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN' || role === 'ADMIN') {
     const att: AppNavLink = { href: '/attendance', icon: ClipboardCheck, label: 'Attendance' };
     const idx = links.findIndex((l) => l.href === '/profile');
     if (idx >= 0) links.splice(idx, 0, att);
     else links.push(att);
+  }
+  if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN' || role === 'ADMIN' || role === 'GATE' || role === 'GLOBAL_GATE') {
+    const ctr: AppNavLink = { href: '/contractors', icon: Briefcase, label: 'Contractors' };
+    const i = links.findIndex((l) => l.href === '/profile' || l.href === '/attendance');
+    if (i >= 0) links.splice(i, 0, ctr);
+    else links.push(ctr);
+  }
+  if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN' || role === 'ADMIN') {
+    if (!links.some((l) => l.href === '/gate/dispatch')) {
+      const d: AppNavLink = { href: '/gate/dispatch', icon: Package, label: 'Dispatch' };
+      const i = links.findIndex((l) => l.href === '/contractors' || l.href === '/profile');
+      if (i >= 0) links.splice(i, 0, d);
+      else links.push(d);
+    }
   }
   return links;
 }

@@ -6,7 +6,7 @@ import SplashScreen from '@/components/SplashScreen';
 import BackgroundArt from '@/components/BackgroundArt';
 import PushRegister from '@/components/PushRegister';
 import RingOverlay from '@/components/RingOverlay';
-import { BRAND_BOOT_SCRIPT } from '@/lib/brand';
+import { APP_VERSION, BRAND_BOOT_SCRIPT } from '@/lib/brand';
 
 const APP = process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog';
 
@@ -41,10 +41,10 @@ export const metadata: Metadata = {
   formatDetection: { telephone: false },
   icons: {
     icon: [
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { url: '/icon-192.png?v=1.0.1', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png?v=1.0.1', sizes: '512x512', type: 'image/png' },
     ],
-    apple: '/apple-touch-icon.png',
+    apple: '/apple-touch-icon.png?v=1.0.1',
   },
 };
 
@@ -78,7 +78,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </BrandProvider>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'}).catch(()=>{});});}`,
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){if(r.active&&r.active.scriptURL&&!r.active.scriptURL.includes('sw.js?v=')){/* keep, new register will skipWaiting */}});});navigator.serviceWorker.register('/sw.js?v=${APP_VERSION}',{scope:'/',updateViaCache:'none'}).then(function(reg){reg.update&&reg.update();}).catch(function(){});});}`,
           }}
         />
       </body>

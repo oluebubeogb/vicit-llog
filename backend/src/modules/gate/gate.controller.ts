@@ -70,6 +70,12 @@ export class GateController {
   @Post('particulars/:id/return')
   returnParticular(@Param('id') id: string, @CurrentUser() user: any) { return this.gateService.returnParticular(id, user); }
 
+  @Post('particulars/:id/resolve')
+  @ApiOperation({ summary: 'Resolve a withheld particular as returned, seized, or other' })
+  resolveParticular(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+    return this.gateService.resolveParticular(id, user, body || {});
+  }
+
   @Get('history/:visitorId')
   history(@Param('visitorId') visitorId: string, @CurrentUser() user: any) {
     return this.gateService.checkpointHistory(visitorId, user);

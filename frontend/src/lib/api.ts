@@ -303,12 +303,17 @@ export const api = {
   uploadParticularImage: async (file: File) => { const form = new FormData(); form.append('image', file); return request('/gate/particular-image', { method: 'POST', body: form }); },
   checkpointHistory: (visitorId: string) => request(`/gate/history/${visitorId}`),
   returnParticular: (id: string) => request(`/gate/particulars/${id}/return`, { method: 'POST' }),
+  resolveParticular: (id: string, data: any) => request(`/gate/particulars/${id}/resolve`, { method: 'POST', body: JSON.stringify(data) }),
   recordCheckpoint: (data: any) => request('/gate/checkpoint', { method: 'POST', body: JSON.stringify(data) }),
   hostArrivalResponse: (visitorId: string, available: boolean, waitMinutes?: number) => request(`/gate/host-response/${visitorId}`, { method: 'PATCH', body: JSON.stringify({ available, waitMinutes }) }),
   requestHostAvailability: (visitorId: string) => request(`/gate/host-prompt/${visitorId}`, { method: 'POST' }),
   startRing: (visitorId: string, direction: 'GATE_TO_HOST' | 'HOST_TO_GATE') =>
     request('/rings', { method: 'POST', body: JSON.stringify({ visitorId, direction }) }),
-  ringAction: (id: string, action: 'accept' | 'decline' | 'busy' | 'cancel') =>
+  startDispatchRing: (dispatchId: string, hostId: string, direction: 'GATE_TO_HOST' | 'HOST_TO_GATE' = 'GATE_TO_HOST') =>
+    request('/rings', { method: 'POST', body: JSON.stringify({ dispatchId, hostId, direction }) }),
+  ringSignal: (id: string, payload: any) => request(`/rings/${id}/signal`, { method: 'POST', body: JSON.stringify(payload) }),
+  ringIceServers: () => request('/rings/ice-servers'),
+  ringAction: (id: string, action: 'accept' | 'decline' | 'busy' | 'cancel' | 'hangup') =>
     request(`/rings/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
   ring: (id: string) => request(`/rings/${id}`),
   activeRing: () => request('/rings/active'),
@@ -364,4 +369,35 @@ export const api = {
     form.append('logo', file);
     return request('/branding/logo', { method: 'POST', body: form });
   },
+  platformBranding: () => request('/branding/platform'),
+  updatePlatformBranding: (data: any) => request('/branding/platform', { method: 'PATCH', body: JSON.stringify(data) }),
+  uploadLoginLogo: async (file: File) => { const form = new FormData(); form.append('logo', file); return request('/branding/login-logo', { method: 'POST', body: form }); },
+  uploadLoginWatermark: async (file: File) => { const form = new FormData(); form.append('watermark', file); return request('/branding/login-watermark', { method: 'POST', body: form }); },
+  directoryAgencies: () => request('/directory/agencies'),
+  directoryHosts: (organisationId: string) => request(`/directory/hosts?organisationId=${encodeURIComponent(organisationId)}`),
+  contractors: (params: Record<string, string | number | undefined | null> = {}) => request(`/contractors?${toQuery(params)}`),
+  contractor: (token: string) => request(`/contractors/by-token/${encodeURIComponent(token)}`),
+  createContractor: (data: any) => request('/contractors', { method: 'POST', body: JSON.stringify(data) }),
+  updateContractor: (id: string, data: any) => request(`/contractors/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  renewContractor: (id: string, data: any = {}) => request(`/contractors/${id}/renew`, { method: 'POST', body: JSON.stringify(data) }),
+  reprintContractor: (id: string, email = false) => request(`/contractors/${id}/reprint`, { method: 'POST', body: JSON.stringify({ email }) }),
+  uploadContractorPhoto: async (id: string, blob: Blob, filename = 'photo.jpg') => {
+    const form = new FormData();
+    form.append('photo', blob, filename);
+    return request(`/contractors/${id}/photo`, { method: 'POST', body: form });
+  },
+  contractorCheckIn: (data: any) => request('/gate/contractor-entry', { method: 'POST', body: JSON.stringify(data) }),
+  contractorCheckOut: (data: any) => request('/gate/contractor-exit', { method: 'POST', body: JSON.stringify(data) }),
+  dispatches: (status?: string) => request(`/dispatches${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  dispatch: (id: string) => request(`/dispatches/${id}`),
+  createDispatch: (data: any) => request('/dispatches', { method: 'POST', body: JSON.stringify(data) }),
+  decideDispatch: (id: string, data: any) => request(`/dispatches/${id}/decide`, { method: 'POST', body: JSON.stringify(data) }),
+  markDispatch: (id: string, status: string) => request(`/dispatches/${id}/mark`, { method: 'POST', body: JSON.stringify({ status }) }),
+  uploadDispatchPhoto: async (blob: Blob, filename = 'photo.jpg') => {
+    const form = new FormData();
+    form.append('photo', blob, filename);
+    return request('/dispatches/photo', { method: 'POST', body: form });
+  },
+  transferVisit: (visitorId: string, data: any) => request(`/invites/visitors/${visitorId}/transfer`, { method: 'POST', body: JSON.stringify(data) }),
 };
+

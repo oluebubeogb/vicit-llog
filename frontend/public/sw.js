@@ -1,5 +1,5 @@
 /* Vicit Llog service worker — asset cache + standard Web Push (VAPID). */
-const CACHE = 'vicit-llog-v6';
+const CACHE = 'vicit-llog-1.0.1';
 const ASSETS = ['/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
@@ -21,11 +21,16 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
   const url = request.url;
+  const dest = request.destination;
+  // Never cache HTML/documents or branding so returning visitors never see obsolete chrome.
+  if (request.mode === 'navigate' || dest === 'document' || dest === 'empty') return;
   if (
     url.includes('/auth/') ||
     url.includes('/api') ||
     url.includes('api.') ||
-    url.endsWith('/sw.js') ||
+    url.includes('/branding') ||
+    url.includes('/manifest') ||
+    url.includes('/sw.js') ||
     url.includes('/rings/stream') ||
     !url.startsWith(self.location.origin)
   ) {

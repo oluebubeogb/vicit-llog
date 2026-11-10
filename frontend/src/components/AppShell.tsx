@@ -10,6 +10,7 @@ import BrandMark from '@/components/BrandMark';
 import BottomNav from '@/components/BottomNav';
 import AgencyIdentity from '@/components/AgencyIdentity';
 import { useBrand } from '@/components/BrandProvider';
+import FooterCredit from '@/components/FooterCredit';
 
 function useSessionNav() {
   const pathname = usePathname();
@@ -104,6 +105,9 @@ function DesktopSidebar({
           );
         })}
       </nav>
+      <div className="mt-auto border-t border-slate-100 px-2 pt-4">
+        <FooterCredit />
+      </div>
     </aside>
   );
 }
@@ -126,7 +130,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main
         className={clsx(
           'relative mx-auto min-h-screen pt-[env(safe-area-inset-top)]',
-          'max-w-lg pb-28 px-0',
+          'max-w-lg pb-36 px-0',
           'lg:ml-60 lg:max-w-none lg:pb-10 lg:pr-8 lg:pt-6',
         )}
       >
@@ -136,6 +140,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </main>
       <div className="lg:hidden">
+        <div className="pointer-events-none fixed inset-x-0 bottom-[5.6rem] z-40 px-4 pb-[env(safe-area-inset-bottom)]">
+          <FooterCredit className="pointer-events-auto" />
+        </div>
         <BottomNav />
       </div>
     </div>

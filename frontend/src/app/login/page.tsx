@@ -6,18 +6,26 @@ import { Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react';
 import { api, setToken, setUser } from '@/lib/api';
 import InstallBanner from '@/components/InstallBanner';
 import BrandMark from '@/components/BrandMark';
+import FooterCredit from '@/components/FooterCredit';
 import Tooltip from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
 import { useBrand } from '@/components/BrandProvider';
+import { logoSrc } from '@/lib/brand';
 
 export default function LoginPage() {
   const router = useRouter();
   const { brand } = useBrand();
+  const login = brand.login || {};
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const logo = login.logoUrl || brand.logoUrl;
+  const logoWidth = login.logoWidth || '180px';
+  const watermark = login.watermarkUrl ? logoSrc(login.watermarkUrl, { fallback: false, version: brand.assetVersion }) : null;
+  const headline = login.headline || brand.name;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,18 +50,43 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="hero fixed inset-0 z-10 flex flex-col items-center justify-center overflow-y-auto !rounded-none px-6 pb-10 pt-[max(2rem,env(safe-area-inset-top))]">
+    <div className="hero fixed inset-0 z-10 flex flex-col items-center justify-center overflow-y-auto !rounded-none px-6 pb-16 pt-[max(2rem,env(safe-area-inset-top))]">
+      {watermark && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={watermark}
+            alt=""
+            className="max-w-none object-contain"
+            style={{
+              width: login.watermarkWidth || '70vw',
+              height: login.watermarkHeight || '70vh',
+              opacity: login.watermarkOpacity ?? 0.08,
+            }}
+          />
+        </span>
+      )}
+
       <div className="relative w-full max-w-sm">
         <div className="animate-in mb-6">
           <InstallBanner variant="login" />
         </div>
 
         <div className="stagger mb-7 flex flex-col items-center text-center">
-          <div className="relative">
+          <div className="relative flex justify-center">
             <span className="absolute inset-0 animate-pulse-ring rounded-[26px]" />
-            <BrandMark size={84} className="animate-float" />
+            <BrandMark
+              size={96}
+              width={logoWidth}
+              src={logoSrc(logo, { fallback: false, version: brand.assetVersion })}
+              alt={headline || 'Sign in'}
+              className="animate-float !bg-white/95"
+            />
           </div>
-          <h1 className="mt-5 text-[26px] font-bold tracking-tight">{brand.name}</h1>
+          <h1 className="mt-5 text-[26px] font-bold tracking-tight">{headline}</h1>
           <p className="mt-1 text-sm text-on-brand/70">Visitor access & exit control</p>
         </div>
 
@@ -98,6 +131,7 @@ export default function LoginPage() {
         <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-on-brand/60">
           <ShieldCheck size={13} /> Secured, encrypted access
         </p>
+        <FooterCredit light className="mt-4 !text-on-brand/55" />
       </div>
     </div>
   );

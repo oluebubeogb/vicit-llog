@@ -72,6 +72,7 @@ model Organisation {
   customDomain    String?
   // Settings
   requireApproval Boolean         @default(false)
+  requireDispatchHostApproval Boolean @default(false)
   defaultWorkflow WorkflowType    @default(NONE)
   photoRetentionDays Int          @default(90)
   maxGates        Int             @default(10)
@@ -83,6 +84,8 @@ model Organisation {
   staffAttendances StaffAttendance[]
   blacklist       BlacklistEntry[]
   workflows       ApprovalWorkflow[]
+  contractors     Contractor[]
+  dispatchDestinations DispatchDestination[]
 }
 
 model Location {
@@ -203,10 +206,15 @@ model Visitor {
   hostRespondedAt DateTime?
   lastHostPromptAt DateTime?
   idNumber    String?
+  /// Shared same-day pass so one QR covers every invite for this person
+  passToken   String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   gateVisits  GateVisit[]
   rings       RingCall[]
+  transfers   VisitTransfer[]
+
+  @@index([passToken])
 }
 
 model BlacklistEntry {
@@ -253,8 +261,9 @@ model AuditLog {
 /// In-app ring between a gate officer and a host about one visitor.
 model RingCall {
   id         String    @id @default(uuid())
-  visitorId  String
-  visitor    Visitor   @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  visitorId  String?
+  visitor    Visitor?  @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  dispatchId String?
   fromUserId String
   toUserId   String
   direction  String
@@ -331,6 +340,8 @@ model GateVisit {
   particularsChecked Boolean @default(false)
   evidencePhotos String[] @default([])
   notes       String?
+  /// ENTRY (default) or EXIT — exit must also pass every checkpoint
+  direction   String   @default("ENTRY")
   occurredAt  DateTime @default(now())
   visitor     Visitor  @relation(fields: [visitorId], references: [id], onDelete: Cascade)
   gate        Gate     @relation(fields: [gateId], references: [id], onDelete: Restrict)
@@ -349,6 +360,11 @@ model GateParticular {
   imagePath   String?
   returnedAt  DateTime?
   returnedById String?
+  /// RETURNED | SEIZED | OTHER — required before the guest can exit
+  resolution     String?
+  resolutionNote String?
+  resolvedAt     DateTime?
+  resolvedById   String?
   createdById String
   createdAt   DateTime @default(now())
   gateVisit   GateVisit @relation(fields: [gateVisitId], references: [id], onDelete: Cascade)
@@ -388,4 +404,127 @@ model DemoSeedRecord {
 
   @@unique([model, recordId])
   @@index([model])
+}
+
+/// Singleton platform-level sign-in, footer, and contractor policy. Edited by Super Admin only.
+model PlatformSettings {
+  id                        String   @id @default("platform")
+  loginLogoUrl              String?
+  loginLogoWidth            String?  @default("180px")
+  loginWatermarkUrl         String?
+  loginWatermarkWidth       String?  @default("70vw")
+  loginWatermarkHeight      String?  @default("70vh")
+  loginWatermarkOpacity     Float    @default(0.08)
+  loginHeadline             String?
+  loginPrimaryColor         String?
+  loginSecondaryColor       String?
+  footerCredit              String   @default("Powered by CISTECH's Vicit 1.0.1")
+  footerCreditEnabled       Boolean  @default(true)
+  contractorMinDurationDays Int      @default(1)
+  assetVersion              String   @default("1.0.1")
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
+/// Temporary contractor / vendor pass. No login. Long-tail URL is staff-only.
+model Contractor {
+  id             String       @id @default(uuid())
+  token          String       @unique
+  qrToken        String       @unique
+  fullName       String
+  company        String?
+  phone          String?
+  email          String?
+  photoPath      String?
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  validFrom      DateTime
+  validThrough   DateTime
+  createdById    String
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  visits         ContractorVisit[]
+
+  @@index([organisationId, validThrough])
+  @@index([email])
+  @@index([phone])
+}
+
+model ContractorVisit {
+  id             String     @id @default(uuid())
+  contractorId   String
+  contractor     Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  organisationId String
+  destination    String?
+  gateId         String?
+  officerId      String?
+  arrivedAt      DateTime   @default(now())
+  exitedAt       DateTime?
+  day            DateTime
+  notes          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([contractorId, day])
+  @@index([organisationId, day])
+}
+
+model Dispatch {
+  id              String   @id @default(uuid())
+  courierName     String
+  courierPhone    String?
+  courierCompany  String?
+  photoPath       String?
+  notes           String?
+  status          String   @default("REGISTERED")
+  createdById     String
+  gateId          String?
+  requireApproval Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  destinations    DispatchDestination[]
+  items           DispatchItem[]
+
+  @@index([createdAt])
+  @@index([status])
+}
+
+model DispatchItem {
+  id          String   @id @default(uuid())
+  dispatchId  String
+  dispatch    Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int      @default(1)
+}
+
+model DispatchDestination {
+  id             String       @id @default(uuid())
+  dispatchId     String
+  dispatch       Dispatch     @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  hostId         String?
+  status         String       @default("PENDING")
+  decidedAt      DateTime?
+  decidedById    String?
+  note           String?
+
+  @@unique([dispatchId, organisationId])
+  @@index([organisationId, status])
+}
+
+model VisitTransfer {
+  id                 String   @id @default(uuid())
+  visitorId          String
+  visitor            Visitor  @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  fromOrganisationId String
+  toOrganisationId   String
+  fromHostId         String
+  toHostId           String?
+  comment            String
+  createdAt          DateTime @default(now())
+
+  @@index([visitorId, createdAt])
+  @@index([toOrganisationId, createdAt])
 }

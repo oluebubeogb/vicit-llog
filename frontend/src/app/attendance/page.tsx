@@ -111,6 +111,8 @@ export default function AttendanceRegisterPage() {
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [view, setView] = useState<'list' | 'sheet'>('list');
+  const [personType, setPersonType] = useState('all');
 
   useEffect(() => {
     const u = getUser();
@@ -159,8 +161,10 @@ export default function AttendanceRegisterPage() {
       status: status !== 'all' ? status : undefined,
       page,
       pageSize: 25,
+      type: personType !== 'all' ? personType : undefined,
+      view,
     }),
-    [debounced, from, to, orgId, locationId, gateId, role, status, page, platform],
+    [debounced, from, to, orgId, locationId, gateId, role, status, page, platform, personType, view],
   );
 
   const load = useCallback(() => {
@@ -375,11 +379,91 @@ export default function AttendanceRegisterPage() {
         </div>
       )}
 
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="segmented">
+          <button type="button" data-active={view === 'list'} onClick={() => setView('list')}>Day list</button>
+          <button type="button" data-active={view === 'sheet'} onClick={() => { setView('sheet'); if (from === to) setFrom(shiftIso(to, -6)); }}>Spreadsheet</button>
+        </div>
+        <select className="input min-w-0 flex-1 !py-2 text-sm sm:!w-48 sm:flex-none" value={personType} onChange={(e) => { setPersonType(e.target.value); setPage(1); }}>
+          <option value="all">Staff + contractors</option>
+          <option value="staff">Staff only</option>
+          <option value="contractor">Contractors</option>
+        </select>
+      </div>
+
       <div className="surface overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-800">Register</h2>
-          <span className="text-xs text-slate-400">{loading ? 'Loading…' : `${data?.total || 0} rows`}</span>
+          <h2 className="text-sm font-semibold text-slate-800">{view === 'sheet' ? 'Spreadsheet' : 'Register'}</h2>
+          <span className="text-xs text-slate-400">{loading ? 'Loading…' : view === 'sheet' ? `${data?.sheet?.rows?.length || 0} people` : `${data?.total || 0} rows`}</span>
         </div>
+        {view === 'sheet' ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                  <th className="px-2 py-2 font-semibold md:sticky md:left-0 md:z-10 md:bg-slate-50 sm:px-3">S/N</th>
+                  <th className="px-2 py-2 font-semibold md:sticky md:left-10 md:z-10 md:bg-slate-50 sm:px-3">Name</th>
+                  <th className="px-3 py-2 font-semibold">Department</th>
+                  {(data?.sheet?.days || []).map((d: any) => (
+                    <th key={d.key} colSpan={2} className="border-l border-slate-200 px-3 py-2 text-center font-semibold text-slate-700">{d.label}</th>
+                  ))}
+                </tr>
+                <tr className="border-b border-slate-100 bg-white text-[10px] uppercase tracking-wide text-slate-400">
+                  <th className="" /><th className="" /><th />
+                  {(data?.sheet?.days || []).flatMap((d: any) => [
+                    <th key={d.key+'-in'} className="border-l border-slate-100 px-2 py-1 text-center">In</th>,
+                    <th key={d.key+'-out'} className="px-2 py-1 text-center">Out</th>,
+                  ])}
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.sheet?.rows || []).map((r: any) => (
+                  <tr key={r.type + r.id} className="border-b border-slate-100 hover:bg-brand-50/40">
+                    <td className="whitespace-nowrap px-2 py-2 text-slate-400 sm:px-3 md:sticky md:left-0 md:bg-white">{r.sn}</td>
+                    <td className="whitespace-nowrap px-2 py-2 font-semibold text-slate-800 sm:px-3 md:sticky md:left-10 md:bg-white">
+                      {r.name}
+                      <span className="block text-[10px] font-medium text-slate-400">{r.type === 'contractor' ? 'Contractor' : 'Staff'}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-500">{r.department}</td>
+                    {(data?.sheet?.days || []).flatMap((d: any) => [
+                      <td key={r.id+d.key+'in'} className="whitespace-nowrap border-l border-slate-50 px-2 py-2 text-center font-mono text-slate-700">{r.cells?.[d.key]?.in || '—'}</td>,
+                      <td key={r.id+d.key+'out'} className="whitespace-nowrap px-2 py-2 text-center font-mono text-slate-700">{r.cells?.[d.key]?.out || '—'}</td>,
+                    ])}
+                  </tr>
+                ))}
+                {!loading && !(data?.sheet?.rows || []).length && (
+                  <tr><td colSpan={20} className="p-6 text-center text-sm text-slate-500">No attendance rows match these filters.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : from === to ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2">S/N</th>
+                  <th className="px-3 py-2">Name</th>
+                  <th className="px-3 py-2">Department</th>
+                  <th className="px-3 py-2">Time in</th>
+                  <th className="px-3 py-2">Time out</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.rows || []).map((row: any, i: number) => (
+                  <tr key={row.id} className="border-b border-slate-100">
+                    <td className="px-3 py-2 text-slate-400">{(page - 1) * (data?.pageSize || 25) + i + 1}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-800">{row.staff.fullName}<span className="block text-[10px] font-medium text-slate-400">{row.type === 'contractor' ? 'Contractor' : row.staff.roleLabel}</span></td>
+                    <td className="px-3 py-2 text-slate-500">{row.department || row.staff.portfolio || row.staff.roleLabel}</td>
+                    <td className="px-3 py-2 font-mono">{row.absent ? '—' : clock(row.arrivedAt)}</td>
+                    <td className="px-3 py-2 font-mono">{row.absent ? '—' : clock(row.exitedAt)}</td>
+                  </tr>
+                ))}
+                {!loading && !(data?.rows || []).length && <tr><td colSpan={5} className="p-6 text-center text-sm text-slate-500">No attendance rows match these filters.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        ) : (
         <ul className="divide-y divide-slate-100">
           {(data?.rows || []).map((row: Row) => (
             <li key={row.id}>
@@ -401,7 +485,8 @@ export default function AttendanceRegisterPage() {
           ))}
           {!loading && !(data?.rows || []).length && <li className="p-6 text-center text-sm text-slate-500">No attendance rows match these filters.</li>}
         </ul>
-        {pages > 1 && (
+        )}
+        {pages > 1 && view !== 'sheet' && (
           <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-xs">
             <button type="button" className="btn-quiet !py-1.5" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
               <ChevronLeft size={14} /> Previous

@@ -13,6 +13,7 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { publicFrontendBase } from '../../common/utils/urls';
 import { buildGateQrPayload } from '../../common/utils/qr';
+import { linkSameDayVisits } from '../../common/utils/visitor-pass';
 import { gatePassCaption, qrFileName, renderCaptionedQrPng } from '../../common/utils/qr-caption';
 
 function isLocalUrl(u: string) {
@@ -72,7 +73,9 @@ export class VisitorsService {
 
     fs.writeFileSync(filepath, file.buffer);
 
-    const qrPayload = buildGateQrPayload(visitorId, invite.passphrase, invite.token);
+    const linked = await linkSameDayVisits(this.prisma, visitorId);
+    const canonicalId = linked.visitorIds[0] || visitorId;
+    const qrPayload = buildGateQrPayload(canonicalId, invite.passphrase, invite.token, linked.passToken);
     const locationName = invite.locationId
       ? (await this.prisma.location.findUnique({ where: { id: invite.locationId }, select: { name: true } }))?.name
       : undefined;
@@ -92,8 +95,15 @@ export class VisitorsService {
         photoPath: filename,
         qrCodeData: qrDataUrl,
         status: VisitStatus.INVITED,
+        passToken: linked.passToken,
       },
     });
+    if (linked.visitorIds.length > 1) {
+      await this.prisma.visitor.updateMany({
+        where: { id: { in: linked.visitorIds.filter((id) => id !== visitorId) } },
+        data: { passToken: linked.passToken, qrCodeData: qrDataUrl },
+      });
+    }
 
     const allHavePhotos = (
       await this.prisma.visitor.findMany({ where: { inviteId: invite.id } })
@@ -196,7 +206,7 @@ export class VisitorsService {
     const date = invite.expectedAt || visitor.createdAt;
     return {
       png: renderCaptionedQrPng(
-        buildGateQrPayload(visitor.id, invite.passphrase, invite.token),
+        buildGateQrPayload(visitor.id, invite.passphrase, invite.token, (visitor as any).passToken),
         gatePassCaption({
           fullName: visitor.fullName,
           visitorId: visitor.id,

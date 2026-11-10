@@ -47,7 +47,9 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     return { id: user.id, email: user.email, role: user.role, permissions: user.permissions, orgId: user.organisationId, fullName: user.fullName };
   }
 
-  async start(actor: any, input: { visitorId: string; direction: 'GATE_TO_HOST' | 'HOST_TO_GATE' }) {
+  async start(actor: any, input: { visitorId?: string; dispatchId?: string; hostId?: string; direction: 'GATE_TO_HOST' | 'HOST_TO_GATE' }) {
+    if (input.dispatchId) return this.startDispatch(actor, input);
+    if (!input.visitorId) throw new BadRequestException('Visitor or dispatch is required');
     const visitor = await this.prisma.visitor.findUnique({
       where: { id: input.visitorId },
       include: { invite: { include: { host: true, organisation: { select: { id: true, name: true } } } } },
@@ -112,30 +114,83 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     return callerView;
   }
 
-  async act(actor: any, id: string, action: 'accept' | 'decline' | 'busy' | 'cancel') {
+  async act(actor: any, id: string, action: 'accept' | 'decline' | 'busy' | 'cancel' | 'hangup') {
     const call = await this.prisma.ringCall.findUnique({ where: { id } });
     if (!call) throw new NotFoundException('Ring not found');
-    if (call.status !== 'RINGING') return this.present(call.id, actor.id);
     const isCaller = call.fromUserId === actor.id;
     const isCallee = call.toUserId === actor.id;
     if (!isCaller && !isCallee && actor.role !== 'SUPER_ADMIN') throw new ForbiddenException('This ring is not for you');
+
+    if (action === 'hangup') {
+      if (call.status !== 'RINGING' && call.status !== 'ACCEPTED') return this.present(call.id, actor.id);
+      const status = call.status === 'ACCEPTED' ? 'ENDED' : isCaller ? 'CANCELLED' : 'DECLINED';
+      await this.finish(call.id, status, call.status === 'ACCEPTED');
+      return this.present(call.id, actor.id);
+    }
+
+    if (call.status !== 'RINGING') return this.present(call.id, actor.id);
     if (action === 'cancel' && !isCaller && actor.role !== 'SUPER_ADMIN') throw new ForbiddenException('Only the caller can cancel');
     if (action !== 'cancel' && !isCallee && actor.role !== 'SUPER_ADMIN') throw new ForbiddenException('Only the person being rung can answer');
 
-    const status = action === 'accept' ? 'ACCEPTED' : action === 'decline' ? 'DECLINED' : action === 'busy' ? 'BUSY' : 'CANCELLED';
-    await this.finish(call.id, status, action === 'accept');
-    if (action === 'accept' && call.direction === 'GATE_TO_HOST') {
+    if (action === 'accept') {
+      await this.acceptCall(call);
+      return this.present(call.id, actor.id);
+    }
+
+    const status = action === 'decline' ? 'DECLINED' : action === 'busy' ? 'BUSY' : 'CANCELLED';
+    await this.finish(call.id, status, false);
+    return this.present(call.id, actor.id);
+  }
+
+  iceServers() {
+    const iceServers: Array<Record<string, any>> = [{ urls: 'stun:stun.l.google.com:19302' }];
+    const turn = (process.env.TURN_URL || '').trim();
+    if (turn) {
+      iceServers.push({
+        urls: turn,
+        username: process.env.TURN_USERNAME || undefined,
+        credential: process.env.TURN_CREDENTIAL || undefined,
+      });
+    }
+    return { iceServers };
+  }
+
+  async signal(actor: any, id: string, payload: { type: string; sdp?: string; candidate?: any }) {
+    const call = await this.prisma.ringCall.findUnique({ where: { id } });
+    if (!call) throw new NotFoundException('Ring not found');
+    if (call.fromUserId !== actor.id && call.toUserId !== actor.id && actor.role !== 'SUPER_ADMIN') {
+      throw new ForbiddenException('This ring is not for you');
+    }
+    if (call.status !== 'ACCEPTED') throw new BadRequestException('Voice can only be negotiated after the ring is answered');
+    const other = actor.id === call.fromUserId ? call.toUserId : call.fromUserId;
+    this.hub.publish(other, { type: 'signal', callId: id, from: actor.id, payload });
+    return { ok: true };
+  }
+
+  private async acceptCall(call: { id: string; visitorId: string | null; direction: string; fromUserId: string; toUserId: string }) {
+    const timer = this.timers.get(call.id);
+    if (timer) clearTimeout(timer);
+    this.timers.delete(call.id);
+    const current = await this.prisma.ringCall.findUnique({ where: { id: call.id } });
+    if (!current || current.status !== 'RINGING') return;
+    await this.prisma.ringCall.update({
+      where: { id: call.id },
+      data: { status: 'ACCEPTED', answeredAt: new Date(), endedAt: null },
+    });
+    if (call.direction === 'GATE_TO_HOST' && call.visitorId) {
       await this.prisma.visitor.update({
         where: { id: call.visitorId },
         data: { hostAvailabilityStatus: 'AVAILABLE', hostWaitUntil: null, hostRespondedAt: new Date() },
       }).catch(() => {});
     }
-    return this.present(call.id, actor.id);
+    const [caller, callee] = await Promise.all([this.present(call.id, call.fromUserId), this.present(call.id, call.toUserId)]);
+    this.hub.publish(call.fromUserId, { type: 'ring', call: caller });
+    this.hub.publish(call.toUserId, { type: 'ring', call: callee });
   }
 
   async active(actor: any) {
     const call = await this.prisma.ringCall.findFirst({
-      where: { status: 'RINGING', OR: [{ toUserId: actor.id }, { fromUserId: actor.id }] },
+      where: { status: { in: ['RINGING', 'ACCEPTED'] }, OR: [{ toUserId: actor.id }, { fromUserId: actor.id }] },
       orderBy: { createdAt: 'desc' },
     });
     return { call: call ? await this.present(call.id, actor.id) : null };
@@ -146,6 +201,76 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     if (!call) throw new NotFoundException('Ring not found');
     if (call.fromUserId !== actor.id && call.toUserId !== actor.id && actor.role !== 'SUPER_ADMIN') throw new ForbiddenException('This ring is not for you');
     return this.present(call.id, actor.id);
+  }
+
+
+  private async startDispatch(actor: any, input: { dispatchId?: string; hostId?: string; direction: 'GATE_TO_HOST' | 'HOST_TO_GATE' }) {
+    const dispatch = await this.prisma.dispatch.findUnique({
+      where: { id: input.dispatchId },
+      include: { destinations: true },
+    });
+    if (!dispatch) throw new NotFoundException('Dispatch not found');
+    let hostId = input.hostId || dispatch.destinations.find((d) => d.hostId)?.hostId || null;
+    if (input.direction === 'HOST_TO_GATE') {
+      // host ringing the originating officer
+      const dest = dispatch.destinations.find((d) => d.hostId === actor.id);
+      if (!dest && actor.role !== 'SUPER_ADMIN') throw new ForbiddenException('Only a listed host can ring about this dispatch');
+      hostId = actor.id;
+    }
+    if (!hostId) throw new BadRequestException('Choose a host to ring for this dispatch');
+    const host = await this.prisma.user.findUnique({ where: { id: hostId }, select: { id: true, fullName: true, phone: true, role: true, isActive: true } });
+    if (!host || !host.isActive) throw new NotFoundException('Host not found');
+
+    let fromId = actor.id;
+    let toUser = host;
+    if (input.direction === 'HOST_TO_GATE') {
+      const officer = await this.prisma.user.findUnique({ where: { id: dispatch.createdById }, select: { id: true, fullName: true, phone: true, role: true } });
+      if (!officer) throw new BadRequestException('No gate officer is available to ring');
+      toUser = officer as any;
+    } else if (!['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN'].includes(actor.role)) {
+      throw new ForbiddenException('Only a gate officer can ring the host');
+    }
+    if (toUser.id === fromId) throw new BadRequestException('You cannot ring yourself');
+
+    const previous = await this.prisma.ringCall.findMany({ where: { fromUserId: fromId, status: 'RINGING' }, select: { id: true } });
+    for (const row of previous) await this.finish(row.id, 'CANCELLED');
+    const targetBusy = await this.prisma.ringCall.findFirst({ where: { toUserId: toUser.id, status: 'RINGING' }, select: { id: true } });
+    const call = await this.prisma.ringCall.create({
+      data: {
+        visitorId: null,
+        dispatchId: dispatch.id,
+        fromUserId: fromId,
+        toUserId: toUser.id,
+        direction: input.direction,
+        gateId: dispatch.gateId,
+        status: targetBusy ? 'BUSY' : 'RINGING',
+        endedAt: targetBusy ? new Date() : null,
+      },
+    });
+    const callerView = await this.present(call.id, fromId);
+    const calleeView = await this.present(call.id, toUser.id);
+    this.hub.publish(fromId, { type: 'ring', call: callerView });
+    if (!targetBusy) {
+      this.hub.publish(toUser.id, { type: 'ring', call: calleeView });
+      this.arm(call.id, RING_MS);
+      await this.notifications.create({
+        userId: toUser.id,
+        title: input.direction === 'GATE_TO_HOST' ? 'Gate is ringing about a dispatch' : 'Host is ringing',
+        body: `${dispatch.courierName} · dispatch`,
+        link: `/ring?call=${call.id}`,
+        meta: { type: 'RING', callId: call.id, dispatchId: dispatch.id, url: `/ring?call=${call.id}` },
+        channels: ['in_app'],
+      });
+    }
+    return callerView;
+  }
+
+  private async dispatchSummary(id: string) {
+    const d = await this.prisma.dispatch.findUnique({
+      where: { id },
+      select: { id: true, courierName: true, courierCompany: true, status: true, notes: true },
+    });
+    return d;
   }
 
   private arm(id: string, ms: number) {
@@ -163,7 +288,9 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     if (timer) clearTimeout(timer);
     this.timers.delete(id);
     const current = await this.prisma.ringCall.findUnique({ where: { id } });
-    if (!current || current.status !== 'RINGING') return;
+    if (!current) return;
+    const closable = current.status === 'RINGING' || (current.status === 'ACCEPTED' && ['ENDED', 'CANCELLED'].includes(status));
+    if (!closable) return;
     await this.prisma.ringCall.update({
       where: { id },
       data: { status, endedAt: new Date(), answeredAt: answered ? new Date() : current.answeredAt },
@@ -223,7 +350,7 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (!call) throw new NotFoundException('Ring not found');
-    const locationId = call.visitor.invite?.locationId;
+    const locationId = call.visitor?.invite?.locationId;
     const [from, to, gate, location] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: call.fromUserId }, select: { id: true, fullName: true, role: true, phone: true } }),
       this.prisma.user.findUnique({ where: { id: call.toUserId }, select: { id: true, fullName: true, role: true, phone: true } }),
@@ -242,7 +369,8 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
       endedAt: call.endedAt,
       expiresAt: new Date(call.createdAt.getTime() + RING_MS).toISOString(),
       youAre: viewerId === call.toUserId ? 'callee' : 'caller',
-      visitor: { id: call.visitor.id, fullName: call.visitor.fullName, status: call.visitor.status, purpose: call.visitor.invite?.purpose || null },
+      visitor: call.visitor ? { id: call.visitor.id, fullName: call.visitor.fullName, status: call.visitor.status, purpose: call.visitor.invite?.purpose || null } : null,
+      dispatch: call.dispatchId ? await this.dispatchSummary(call.dispatchId) : null,
       gate: gate ? { id: gate.id, name: gate.name, location: gate.location?.name || location?.name || null } : location ? { id: null, name: 'Gate', location: location.name } : null,
       from: from ? { id: from.id, fullName: from.fullName, role: from.role, phone: from.phone } : null,
       to: to ? { id: to.id, fullName: to.fullName, role: to.role, phone: to.phone } : null,

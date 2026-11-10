@@ -16,6 +16,8 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { MailModule } from './modules/mail/mail.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { RingModule } from './modules/rings/ring.module';
+import { ContractorsModule } from './modules/contractors/contractors.module';
+import { DispatchesModule } from './modules/dispatches/dispatches.module';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { RingModule } from './modules/rings/ring.module';
     HealthModule,
     PlatformModule,
     RingModule,
+    ContractorsModule,
+    DispatchesModule,
   ],
 })
 export class AppModule {}

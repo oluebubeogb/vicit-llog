@@ -13,6 +13,16 @@ import { Role } from '@prisma/client';
 export class InvitesController {
   constructor(private invitesService: InvitesService) {}
 
+  @Post('visitors/:visitorId/transfer')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.STAFF, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
+  @ApiOperation({ summary: 'Transfer a visit to another agency or host' })
+  transfer(@Param('visitorId') visitorId: string, @Body() body: any, @CurrentUser() user: any) {
+    return this.invitesService.transferVisit(user, visitorId, body || {});
+  }
+
+
   @Post()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

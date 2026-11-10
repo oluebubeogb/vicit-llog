@@ -1,6 +1,8 @@
 'use client';
 
 import { ReactNode, useState } from 'react';
+import TransferVisit from '@/components/TransferVisit';
+import CheckpointTracker from '@/components/CheckpointTracker';
 import clsx from 'clsx';
 import {
   CalendarClock,
@@ -18,6 +20,7 @@ import {
   Hourglass,
   Tag,
   UserRound,
+  ArrowRightLeft,
   Users,
 } from 'lucide-react';
 import StatusPill from '@/components/ui/StatusPill';
@@ -146,6 +149,7 @@ function minutesBetween(a?: string | null, b?: string | null) {
 
 /** Visitor timeline card for invite details. */
 export function VisitorCard({ v }: { v: any }) {
+  const [transfer, setTransfer] = useState(false);
   const steps = [
     { at: v.createdAt, label: 'Registered', icon: <UserRound size={12} />, tone: 'bg-brand-500' },
     v.enteredAt && { at: v.enteredAt, label: 'Checked in', icon: <LogIn size={12} />, tone: 'bg-emerald-500' },
@@ -183,6 +187,28 @@ export function VisitorCard({ v }: { v: any }) {
           <Timer size={11} /> {v.exitedAt ? 'Stayed' : 'On site for'} {fmtDuration(dur)}
         </p>
       )}
+      {(v.gateVisits || []).length > 0 && (
+        <div className="mt-3">
+          <CheckpointTracker
+            gates={Array.from(new Map((v.gateVisits || []).map((e: any) => [e.gate?.id || e.gateId, e.gate || { id: e.gateId, name: e.gate?.name || 'Gate', sequence: e.gate?.sequence || 0 }])).values()) as any}
+            visits={v.gateVisits || []}
+            direction={v.status === 'ARRIVED' || v.status === 'EXITED' ? 'both' : 'ENTRY'}
+          />
+        </div>
+      )}
+      {(v.transfers || []).length > 0 && (
+        <ul className="mt-2 space-y-1 text-[11px] text-indigo-800">
+          {v.transfers.map((t: any) => (
+            <li key={t.id} className="rounded-lg bg-indigo-50 px-2 py-1">{new Date(t.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} — {t.comment}</li>
+          ))}
+        </ul>
+      )}
+      {v.status !== 'EXITED' && v.status !== 'CANCELLED' && (
+        <button type="button" className="btn-quiet mt-3 w-full !py-2 text-xs" onClick={() => setTransfer(true)}>
+          <ArrowRightLeft size={13} /> Transfer visit
+        </button>
+      )}
+      <TransferVisit open={transfer} onClose={() => setTransfer(false)} visitor={v} onDone={() => window.location.reload()} />
     </div>
   );
 }

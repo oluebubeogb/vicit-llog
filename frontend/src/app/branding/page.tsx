@@ -14,6 +14,8 @@ import {
   Save,
   ShieldCheck,
   Type,
+  LogIn,
+  Package,
 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/Tooltip';
@@ -159,6 +161,7 @@ export default function BrandingPage() {
     emailIconBg: '#ffffff',
     customDomain: '',
     requireApproval: false,
+    requireDispatchHostApproval: false,
     photoRetentionDays: 90,
   });
   const [initial, setInitial] = useState<typeof form | null>(null);
@@ -181,6 +184,7 @@ export default function BrandingPage() {
           emailIconBg: b.emailIconBg || '#ffffff',
           customDomain: b.customDomain || '',
           requireApproval: !!b.requireApproval,
+          requireDispatchHostApproval: !!b.requireDispatchHostApproval,
           photoRetentionDays: b.photoRetentionDays ?? 90,
         };
         setForm(f);
@@ -221,6 +225,7 @@ export default function BrandingPage() {
         secondaryColor: form.secondaryColor,
         customDomain: form.customDomain,
         requireApproval: form.requireApproval,
+        requireDispatchHostApproval: form.requireDispatchHostApproval,
         photoRetentionDays: form.photoRetentionDays,
       });
       setInitial(form);
@@ -322,7 +327,7 @@ export default function BrandingPage() {
       </div>
 
       <form onSubmit={save} className="space-y-4 pb-20">
-        <Section icon={<Type size={16} />} title="Identity" info="Defaults from the ORGANIZATION env on first boot; editable here anytime." applies={['Navigation', 'Login', 'Visitor pages', 'Emails', 'App name']}>
+        <Section icon={<Type size={16} />} title="Identity" info="Defaults from the ORGANIZATION env on first boot; editable here anytime." applies={['Navigation', 'In-app pages', 'Visitor pages', 'Emails', 'App name']}>
           <label className="block">
             <span className="label">Organisation name</span>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" required minLength={2} maxLength={120} />
@@ -405,6 +410,25 @@ export default function BrandingPage() {
               <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${form.requireApproval ? 'left-6' : 'left-1'}`} />
             </span>
           </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={form.requireDispatchHostApproval}
+            onClick={() => setForm({ ...form, requireDispatchHostApproval: !form.requireDispatchHostApproval })}
+            className="tile flex w-full items-center gap-3 text-left transition hover:shadow-soft"
+          >
+            <Package size={18} className="text-brand-600" />
+            <span className="flex-1">
+              <span className="flex items-center gap-1 text-sm font-semibold text-slate-800">
+                Require host approval for dispatches
+                <InfoTip text="When on, gate officers can still register a courier, but a host must approve before the dispatch is marked delivered." size={12} />
+              </span>
+              <span className="block text-xs text-slate-500">{form.requireDispatchHostApproval ? 'Hosts approve incoming letters and parcels' : 'Dispatches are logged without host approval'}</span>
+            </span>
+            <span className={`relative h-7 w-12 shrink-0 rounded-full transition ${form.requireDispatchHostApproval ? 'bg-gradient-to-r from-brand-500 to-brand-700' : 'bg-slate-200'}`}>
+              <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${form.requireDispatchHostApproval ? 'left-6' : 'left-1'}`} />
+            </span>
+          </button>
           <label className="block">
             <span className="label">
               <Clock size={14} /> Photo retention
@@ -429,6 +453,155 @@ export default function BrandingPage() {
           </div>
         </div>
       </form>
+
+      {viewer?.role === 'SUPER_ADMIN' && <SignInSettings />}
     </div>
+  );
+}
+
+function SignInSettings() {
+  const [form, setForm] = useState({
+    loginLogoUrl: '',
+    loginLogoWidth: '180px',
+    loginWatermarkUrl: '',
+    loginWatermarkWidth: '70vw',
+    loginWatermarkHeight: '70vh',
+    loginWatermarkOpacity: 0.08,
+    loginHeadline: '',
+    loginPrimaryColor: '',
+    loginSecondaryColor: '',
+    footerCredit: "Powered by CISTECH's Vicit 1.0.1",
+    footerCreditEnabled: true,
+    contractorMinDurationDays: 1,
+  });
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState('');
+  const logoRef = useRef<HTMLInputElement>(null);
+  const markRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api.platformBranding().then((b) => {
+      setForm({
+        loginLogoUrl: b.loginLogoUrl || '',
+        loginLogoWidth: b.loginLogoWidth || '180px',
+        loginWatermarkUrl: b.loginWatermarkUrl || '',
+        loginWatermarkWidth: b.loginWatermarkWidth || '70vw',
+        loginWatermarkHeight: b.loginWatermarkHeight || '70vh',
+        loginWatermarkOpacity: b.loginWatermarkOpacity ?? 0.08,
+        loginHeadline: b.loginHeadline || '',
+        loginPrimaryColor: b.loginPrimaryColor || '',
+        loginSecondaryColor: b.loginSecondaryColor || '',
+        footerCredit: b.footerCredit || "Powered by CISTECH's Vicit 1.0.1",
+        footerCreditEnabled: b.footerCreditEnabled !== false,
+        contractorMinDurationDays: b.contractorMinDurationDays ?? 1,
+      });
+    }).catch(() => {});
+  }, []);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setMsg(null);
+    try {
+      await api.updatePlatformBranding(form);
+      window.dispatchEvent(new Event('vicit-brand-updated'));
+      setMsg({ tone: 'success', text: 'Sign-in page and footer credit are live on every device.' });
+    } catch (err: any) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onFile(kind: 'logo' | 'watermark', file: File) {
+    setUploading(kind);
+    setMsg(null);
+    try {
+      const res = kind === 'logo' ? await api.uploadLoginLogo(file) : await api.uploadLoginWatermark(file);
+      setForm((f) => ({
+        ...f,
+        loginLogoUrl: kind === 'logo' ? res.loginLogoUrl || f.loginLogoUrl : f.loginLogoUrl,
+        loginWatermarkUrl: kind === 'watermark' ? res.loginWatermarkUrl || f.loginWatermarkUrl : f.loginWatermarkUrl,
+      }));
+      setMsg({ tone: 'success', text: kind === 'logo' ? 'Sign-in logo uploaded' : 'Watermark uploaded' });
+    } catch (err: any) {
+      setMsg({ tone: 'error', text: err.message });
+    } finally {
+      setUploading('');
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="mt-6 space-y-4 pb-28">
+      <Section icon={<LogIn size={16} />} title="Sign-in page" info="These settings are used on every login screen, regardless of the last agency that was visited." applies={['Login only']}>
+        <label className="block">
+          <span className="label">Headline</span>
+          <input value={form.loginHeadline} onChange={(e) => setForm({ ...form, loginHeadline: e.target.value })} className="input" placeholder="Optional — defaults to the platform name" maxLength={120} />
+        </label>
+        <div className="flex items-center gap-4">
+          <button type="button" onClick={() => logoRef.current?.click()} className="group relative flex h-20 min-w-[5rem] items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-brand-200 bg-white px-3 transition hover:border-brand-400">
+            {form.loginLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoSrc(form.loginLogoUrl) || ''} alt="Sign-in logo" className="max-h-16 max-w-[6rem] object-contain" />
+            ) : (
+              <ImagePlus className="text-brand-300" size={28} />
+            )}
+          </button>
+          <div className="min-w-0 flex-1">
+            <button type="button" onClick={() => logoRef.current?.click()} disabled={uploading === 'logo'} className="btn-ghost">
+              <ImagePlus size={16} /> {uploading === 'logo' ? 'Uploading…' : 'Upload sign-in logo'}
+            </button>
+            <p className="mt-1 text-xs text-slate-400">Wide or square marks are both fine — set the width below.</p>
+            <input ref={logoRef} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile('logo', e.target.files[0])} />
+          </div>
+        </div>
+        <label className="block">
+          <span className="label">Logo width <InfoTip text="Accepts px, %, vw or rem. Use a wider value for logos that lean towards imagery." size={12} /></span>
+          <input value={form.loginLogoWidth} onChange={(e) => setForm({ ...form, loginLogoWidth: e.target.value })} className="input font-mono" placeholder="180px" />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <ColorField label="Sign-in primary" value={form.loginPrimaryColor || '#2563eb'} onChange={(v) => setForm({ ...form, loginPrimaryColor: v })} tip="Background and accents on the login page only" />
+          <ColorField label="Sign-in secondary" value={form.loginSecondaryColor || '#1e40af'} onChange={(v) => setForm({ ...form, loginSecondaryColor: v })} tip="Gradient end on the login page only" />
+        </div>
+        <div className="flex items-center gap-4">
+          <button type="button" onClick={() => markRef.current?.click()} className="btn-ghost">
+            <ImagePlus size={16} /> {uploading === 'watermark' ? 'Uploading…' : 'Upload watermark'}
+          </button>
+          <input ref={markRef} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile('watermark', e.target.files[0])} />
+          {form.loginWatermarkUrl && <span className="text-xs font-medium text-emerald-700">Watermark set</span>}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <label className="block"><span className="label">Width</span><input value={form.loginWatermarkWidth} onChange={(e) => setForm({ ...form, loginWatermarkWidth: e.target.value })} className="input font-mono !px-2" placeholder="70vw" /></label>
+          <label className="block"><span className="label">Height</span><input value={form.loginWatermarkHeight} onChange={(e) => setForm({ ...form, loginWatermarkHeight: e.target.value })} className="input font-mono !px-2" placeholder="70vh" /></label>
+          <label className="block"><span className="label">Opacity</span><input type="number" min={0} max={1} step={0.01} value={form.loginWatermarkOpacity} onChange={(e) => setForm({ ...form, loginWatermarkOpacity: Number(e.target.value) })} className="input font-mono !px-2" /></label>
+        </div>
+      </Section>
+
+      <Section icon={<ShieldCheck size={16} />} title="Footer credit" info="Shown on the login screen, under the mobile navigation, and at the foot of the desktop sidebar." applies={['Login', 'Mobile footer', 'Desktop sidebar']}>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={form.footerCreditEnabled}
+          onClick={() => setForm({ ...form, footerCreditEnabled: !form.footerCreditEnabled })}
+          className="tile flex w-full items-center justify-between gap-3 text-left"
+        >
+          <span className="text-sm font-semibold text-slate-800">Show footer credit</span>
+          <span className={`relative h-7 w-12 shrink-0 rounded-full transition ${form.footerCreditEnabled ? 'bg-gradient-to-r from-brand-500 to-brand-700' : 'bg-slate-200'}`}>
+            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${form.footerCreditEnabled ? 'left-6' : 'left-1'}`} />
+          </span>
+        </button>
+        <input value={form.footerCredit} onChange={(e) => setForm({ ...form, footerCredit: e.target.value })} className="input" maxLength={160} />
+        <label className="block">
+          <span className="label">Minimum contractor pass (days)</span>
+          <input type="number" min={1} max={365} value={form.contractorMinDurationDays} onChange={(e) => setForm({ ...form, contractorMinDurationDays: parseInt(e.target.value) || 1 })} className="input !w-28" />
+        </label>
+      </Section>
+
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      <button type="submit" disabled={saving} className="btn-primary w-full">
+        <Save size={16} /> {saving ? 'Saving…' : 'Save sign-in page'}
+      </button>
+    </form>
   );
 }

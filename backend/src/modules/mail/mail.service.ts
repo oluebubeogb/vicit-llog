@@ -540,4 +540,62 @@ export class MailService {
     );
     return this.sendMail({ to: opts.to, subject, text, html });
   }
+  async sendContractorCardEmail(opts: {
+    to: string;
+    fullName: string;
+    company?: string | null;
+    orgName?: string;
+    organisationId?: string;
+    validFrom: string;
+    validThrough: string;
+    qrPng: Buffer;
+    photoPng?: Buffer | null;
+  }) {
+    const b = await this.brand(opts.organisationId);
+    const subject = `${b.name} — Your contractor pass`;
+    const through = fmtWhen(opts.validThrough);
+    const from = fmtWhen(opts.validFrom);
+    const text = [
+      `Hello ${opts.fullName},`,
+      `Your contractor identification card is ready.`,
+      opts.company ? `Company: ${opts.company}` : '',
+      opts.orgName ? `Agency: ${opts.orgName}` : '',
+      `Valid from: ${from}`,
+      `Valid through: ${through}`,
+      `Show the attached barcode at the gate. Ask an administrator for a reprint if you need another copy.`,
+    ].filter(Boolean).join('\n');
+    const attachments: any[] = [
+      { filename: 'contractor-pass.png', content: opts.qrPng, cid: 'contractor-qr@vicit', contentType: 'image/png', contentDisposition: 'inline' },
+    ];
+    if (opts.photoPng) {
+      attachments.push({ filename: 'contractor-photo.jpg', content: opts.photoPng, cid: 'contractor-photo@vicit', contentType: 'image/jpeg', contentDisposition: 'inline' });
+    }
+    const photoCell = opts.photoPng
+      ? `<img src="cid:contractor-photo@vicit" alt="" width="88" height="88" style="display:block;width:88px;height:88px;border-radius:44px;object-fit:cover;border:3px solid #fff;" />`
+      : '';
+    const html = this.layout(
+      b,
+      subject,
+      `${this.heading(b, 'Your contractor pass', `Hello ${opts.fullName}`)}
+      ${this.p('Keep this card with you. The gate will scan the code on the left — it is valid through the date below.')}
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:18px 0;border-radius:20px;overflow:hidden;background:${tint(b.color, 0.92)};">
+        <tr>
+          <td width="48%" valign="middle" bgcolor="#ffffff" style="background:#ffffff;padding:16px;text-align:center;">
+            <img src="cid:contractor-qr@vicit" alt="Contractor barcode" width="200" height="200" style="display:block;margin:0 auto;width:200px;height:200px;background:#ffffff;" />
+          </td>
+          <td width="52%" valign="middle" style="padding:18px 16px;color:${b.onColor};">
+            ${photoCell}
+            <div style="font-size:18px;font-weight:700;margin:10px 0 4px;color:#0f172a;">${esc(opts.fullName)}</div>
+            <div style="font-size:13px;color:#334155;">${esc(opts.company || 'Contractor')}</div>
+            <div style="font-size:12px;color:#475569;margin-top:4px;">${esc(opts.orgName || b.name)}</div>
+            <div style="margin-top:12px;display:inline-block;background:#0f172a;color:#fff;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;padding:6px 10px;border-radius:999px;">Valid through ${esc(through)}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:8px;">From ${esc(from)}</div>
+          </td>
+        </tr>
+      </table>`,
+      'Your contractor identification card is attached.',
+    );
+    return this.sendMail({ to: opts.to, subject, text, html, attachments });
+  }
+
 }

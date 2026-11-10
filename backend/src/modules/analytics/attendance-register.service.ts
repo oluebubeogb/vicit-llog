@@ -18,6 +18,8 @@ export type RegisterQuery = {
   staffId?: string;
   page?: number;
   pageSize?: number;
+  type?: string; // staff | contractor | all
+  view?: string; // list | sheet
 };
 
 const EXPECTED_ROLES: Role[] = [Role.STAFF, Role.ADMIN, Role.GATE];
@@ -103,7 +105,7 @@ export class AttendanceRegisterService {
     const rows = await this.prisma.staffAttendance.findMany({
       where: attWhere,
       include: {
-        user: { select: { id: true, fullName: true, email: true, role: true, avatarPath: true, organisationId: true, createdAt: true, isActive: true } },
+        user: { select: { id: true, fullName: true, email: true, role: true, portfolio: true, avatarPath: true, organisationId: true, createdAt: true, isActive: true } },
         organisation: { select: { id: true, name: true, code: true } },
       },
       orderBy: [{ day: 'desc' }, { arrivedAt: 'desc' }],
@@ -164,12 +166,15 @@ export class AttendanceRegisterService {
         status: rowStatus,
         anomaly,
         arrivalMinutes: minutesOfDay(r.arrivedAt, tz),
+        type: 'staff' as const,
+        department: r.user.portfolio || roleLabel(r.user.role),
         staff: {
           id: r.user.id,
           fullName: r.user.fullName,
           email: r.user.email,
           role: r.user.role,
           roleLabel: roleLabel(r.user.role),
+          portfolio: r.user.portfolio,
           avatarPath: r.user.avatarPath,
           createdAt: r.user.createdAt,
         },
@@ -192,6 +197,7 @@ export class AttendanceRegisterService {
         fullName: true,
         email: true,
         role: true,
+        portfolio: true,
         avatarPath: true,
         createdAt: true,
         organisationId: true,
@@ -219,6 +225,8 @@ export class AttendanceRegisterService {
           absentRows.push({
             id: `absent:${person.id}:${day}`,
             kind: 'absent' as any,
+            type: 'staff' as const,
+            department: person.portfolio || roleLabel(person.role),
             day,
             arrivedAt: null as any,
             exitedAt: null,
@@ -235,6 +243,7 @@ export class AttendanceRegisterService {
               email: person.email,
               role: person.role,
               roleLabel: roleLabel(person.role),
+              portfolio: person.portfolio ?? null,
               avatarPath: person.avatarPath,
               createdAt: person.createdAt,
             },
@@ -246,13 +255,23 @@ export class AttendanceRegisterService {
       }
     }
 
-    let combined = [...mapped, ...absentRows];
+    let combined: any[] = [...mapped, ...absentRows];
     if (status === 'present') combined = mapped.filter((r) => !r.missingExit && !r.late);
     else if (status === 'late') combined = mapped.filter((r) => r.late);
     else if (status === 'no_exit') combined = mapped.filter((r) => r.missingExit);
     else if (status === 'absent') combined = absentRows;
 
     combined.sort((a, b) => (a.day === b.day ? String(a.staff.fullName).localeCompare(b.staff.fullName) : b.day.localeCompare(a.day)));
+    const personType = (q.type || 'all').toLowerCase();
+    if (personType !== 'staff') {
+      const contractorRows = await this.contractorRows({ orgId, q, dayFrom, dayTo, tz, term, todayKey });
+      if (personType === 'contractor') combined = contractorRows;
+      else combined = [...combined, ...contractorRows];
+      combined.sort((a, b) => (a.day === b.day ? String(a.staff.fullName).localeCompare(b.staff.fullName) : b.day.localeCompare(a.day)));
+    } else {
+      combined = combined.filter((r: any) => r.type !== 'contractor');
+    }
+    const sheet = this.buildSheet(combined, fromKey, toKey, tz);
 
     // Insights from the unpaginated, un-status-filtered attendance in range (plus today's absences)
     const todayRows = mapped.filter((r) => r.day === todayKey);
@@ -277,6 +296,7 @@ export class AttendanceRegisterService {
           email: person.email,
           role: person.role,
           roleLabel: roleLabel(person.role),
+          portfolio: person.portfolio ?? null,
           avatarPath: person.avatarPath,
           createdAt: person.createdAt,
         },
@@ -379,6 +399,8 @@ export class AttendanceRegisterService {
       pageSize,
       total,
       rows: paged,
+      type: personType,
+      sheet,
     };
   }
 
@@ -402,13 +424,40 @@ export class AttendanceRegisterService {
 
   async exportCsv(orgId: string | null, q: RegisterQuery, res: Response) {
     const data = await this.register(orgId, { ...q, page: 1, pageSize: EXPORT_CAP });
-    const header = ['Date', 'Name', 'Email', 'Agency', 'Role', 'Status', 'Arrival', 'Exit', 'Duration (min)', 'Late', 'Gate'];
+    if ((q.view || '') === 'sheet' && data.sheet) {
+      const days = data.sheet.days as Array<{ key: string; label: string }>;
+      const header = ['S/N', 'Name', 'Department', 'Type', 'Agency', ...days.flatMap((d) => [`${d.label} In`, `${d.label} Out`])];
+      const lines = [header.map(csvEscape).join(',')];
+      for (const r of data.sheet.rows) {
+        lines.push(
+          [
+            r.sn,
+            r.name,
+            r.department,
+            r.type,
+            r.organisation?.name || '',
+            ...days.flatMap((d) => [r.cells[d.key]?.in || '', r.cells[d.key]?.out || '']),
+          ].map(csvEscape).join(','),
+        );
+      }
+      const stamp = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="vicit-attendance-sheet_${data.sheet.range.from}_${data.sheet.range.to}.csv"`);
+      res.send('\ufeff' + lines.join('\r\n'));
+      return;
+    }
+    const header = ['S/N', 'Date', 'Name', 'Department', 'Type', 'Email', 'Agency', 'Role', 'Status', 'Time In', 'Time Out', 'Duration (min)', 'Late', 'Gate'];
     const lines = [header.map(csvEscape).join(',')];
+    let sn = 0;
     for (const r of data.rows.slice(0, EXPORT_CAP)) {
+      sn += 1;
       lines.push(
         [
+          sn,
           r.day,
           r.staff.fullName,
+          (r as any).department || r.staff.roleLabel || '',
+          (r as any).type || 'staff',
           r.staff.email,
           r.organisation?.name || '',
           r.staff.roleLabel,
@@ -429,4 +478,110 @@ export class AttendanceRegisterService {
     res.setHeader('X-Export-Truncated', data.total > EXPORT_CAP ? 'true' : 'false');
     res.send('\ufeff' + lines.join('\r\n'));
   }
+  private async contractorRows(opts: { orgId: string | null; q: RegisterQuery; dayFrom: Date; dayTo: Date; tz: string; term: string; todayKey: string }) {
+    const where: any = { day: { gte: opts.dayFrom, lte: opts.dayTo } };
+    if (opts.orgId) where.organisationId = opts.orgId;
+    else if (opts.q.organisationId) where.organisationId = opts.q.organisationId;
+    if (opts.q.staffId) where.contractorId = opts.q.staffId;
+    const visits = await this.prisma.contractorVisit.findMany({
+      where,
+      include: {
+        contractor: { select: { id: true, fullName: true, email: true, company: true, organisationId: true } },
+      },
+      orderBy: [{ day: 'desc' }, { arrivedAt: 'desc' }],
+      take: 8000,
+    });
+    const orgIds = [...new Set(visits.map((v) => v.organisationId))];
+    const orgs = orgIds.length
+      ? await this.prisma.organisation.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true, code: true } })
+      : [];
+    const orgMap = new Map(orgs.map((o) => [o.id, o]));
+    let rows = visits.map((v) => {
+      const day = localDayKey(v.day);
+      const missingExit = !v.exitedAt;
+      const durationMinutes = v.exitedAt ? Math.max(0, Math.round((v.exitedAt.getTime() - v.arrivedAt.getTime()) / 60000)) : null;
+      const org = orgMap.get(v.organisationId) || null;
+      return {
+        id: v.id,
+        kind: 'attendance' as const,
+        type: 'contractor' as const,
+        day,
+        arrivedAt: v.arrivedAt,
+        exitedAt: v.exitedAt,
+        durationMinutes,
+        late: false,
+        missingExit,
+        absent: false,
+        status: (missingExit ? 'no_exit' : 'present') as 'present' | 'late' | 'no_exit',
+        anomaly: missingExit && day < opts.todayKey,
+        arrivalMinutes: minutesOfDay(v.arrivedAt, opts.tz),
+        department: v.contractor.company || 'Contractor',
+        staff: {
+          id: v.contractor.id,
+          fullName: v.contractor.fullName,
+          email: v.contractor.email,
+          role: 'CONTRACTOR',
+          roleLabel: 'Contractor',
+          portfolio: v.contractor.company,
+          avatarPath: null,
+          createdAt: v.createdAt,
+        },
+        organisation: org,
+        arrivalGate: null,
+        exitGate: null,
+        destination: v.destination,
+      };
+    });
+    if (opts.term) {
+      rows = rows.filter((r) =>
+        [r.staff.fullName, r.staff.email, r.department, r.organisation?.name, r.destination]
+          .filter(Boolean)
+          .some((s) => String(s).toLowerCase().includes(opts.term)),
+      );
+    }
+    const status = (opts.q.status || 'all').toLowerCase();
+    if (status === 'present') rows = rows.filter((r) => !r.missingExit);
+    else if (status === 'no_exit') rows = rows.filter((r) => r.missingExit);
+    else if (status === 'late' || status === 'absent') rows = [];
+    return rows;
+  }
+
+  private buildSheet(rows: any[], fromKey: string, toKey: string, tz: string) {
+    const days = enumerateKeys(fromKey, toKey).map((key) => {
+      const d = new Date(`${key}T12:00:00.000Z`);
+      const label = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).format(d);
+      return { key, label };
+    });
+    const byPerson = new Map<string, any>();
+    for (const r of rows) {
+      if (r.absent) continue;
+      const id = `${r.type || 'staff'}:${r.staff.id}`;
+      if (!byPerson.has(id)) {
+        byPerson.set(id, {
+          id: r.staff.id,
+          type: r.type || 'staff',
+          name: r.staff.fullName,
+          department: r.department || r.staff.portfolio || r.staff.roleLabel || '',
+          organisation: r.organisation,
+          cells: {} as Record<string, { in: string; out: string; arrivedAt?: any; exitedAt?: any }>,
+        });
+      }
+      const person = byPerson.get(id);
+      const cell = person.cells[r.day] || { in: '', out: '' };
+      const inn = r.arrivedAt ? fmtTime(new Date(r.arrivedAt), tz) : '';
+      const out = r.exitedAt ? fmtTime(new Date(r.exitedAt), tz) : '';
+      // keep earliest in / latest out if multiple visits
+      if (!cell.in || (inn && inn < cell.in)) cell.in = inn;
+      if (out && (!cell.out || out > cell.out)) cell.out = out;
+      person.cells[r.day] = cell;
+    }
+    const list = [...byPerson.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return {
+      range: { from: fromKey, to: toKey },
+      days,
+      rows: list.map((r, i) => ({ sn: i + 1, ...r })),
+    };
+  }
+
+
 }

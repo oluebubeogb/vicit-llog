@@ -195,9 +195,14 @@ export class InvitesService {
 
   async findMyInvites(hostId: string) {
     return this.prisma.invite.findMany({
-      where: { hostId },
+      where: {
+        OR: [
+          { hostId },
+          { visitors: { some: { transfers: { some: { OR: [{ fromHostId: hostId }, { toHostId: hostId }] } } } } },
+        ],
+      },
       include: {
-        visitors: { include: { gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true } } }, orderBy: { occurredAt: 'asc' } } } },
+        visitors: { include: { gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true, sequence: true } } }, orderBy: { occurredAt: 'asc' } }, transfers: { orderBy: { createdAt: 'asc' } } } },
         host: { select: { id: true, fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -296,7 +301,7 @@ export class InvitesService {
     return this.prisma.invite.findMany({
       where: { organisationId: orgId },
       include: {
-        visitors: { include: { gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true } } }, orderBy: { occurredAt: 'asc' } } } },
+        visitors: { include: { gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true, sequence: true } } }, orderBy: { occurredAt: 'asc' } }, transfers: { orderBy: { createdAt: 'asc' } } } },
         host: { select: { id: true, fullName: true, email: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -440,6 +445,74 @@ export class InvitesService {
     });
 
     return { ...updated, emailsSent };
+  }
+
+
+  async transferVisit(actor: any, visitorId: string, body: { toOrganisationId: string; toHostId?: string; comment: string }) {
+    const comment = String(body.comment || '').trim();
+    if (comment.length < 3) throw new BadRequestException('Add a short comment so the next host understands the transfer');
+    const toOrganisationId = String(body.toOrganisationId || '').trim();
+    if (!toOrganisationId) throw new BadRequestException('Choose the destination agency');
+    const visitor = await this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: { invite: true, transfers: { orderBy: { createdAt: 'desc' }, take: 1 } },
+    });
+    if (!visitor) throw new NotFoundException('Visitor not found');
+    const last = visitor.transfers[0];
+    const isOriginalHost = visitor.invite.hostId === actor.id;
+    const isTransferredHost = last?.toHostId === actor.id || (last?.toOrganisationId === actor.orgId && ['ADMIN', 'STAFF', 'SUPER_ADMIN'].includes(actor.role));
+    const isAdmin = actor.role === 'SUPER_ADMIN' || (actor.role === 'ADMIN' && (visitor.invite.organisationId === actor.orgId || last?.toOrganisationId === actor.orgId));
+    if (!isOriginalHost && !isTransferredHost && !isAdmin) {
+      throw new ForbiddenException('You can only transfer a visit you invited, or one transferred to you or your agency');
+    }
+    const dest = await this.prisma.organisation.findUnique({ where: { id: toOrganisationId }, select: { id: true, name: true } });
+    if (!dest) throw new NotFoundException('Destination agency not found');
+    let toHostId: string | null = body.toHostId ? String(body.toHostId) : null;
+    if (toHostId) {
+      const host = await this.prisma.user.findFirst({
+        where: { id: toHostId, organisationId: toOrganisationId, isActive: true, role: { in: ['STAFF', 'ADMIN', 'SUPER_ADMIN'] } },
+        select: { id: true, fullName: true },
+      });
+      if (!host) throw new BadRequestException('Choose a host who belongs to the destination agency');
+    }
+    const fromOrganisationId = visitor.invite.organisationId;
+    const fromHostId = visitor.invite.hostId;
+    if (toOrganisationId === fromOrganisationId && (!toHostId || toHostId === fromHostId)) {
+      throw new BadRequestException('Pick a different agency or a different host');
+    }
+    const data: any = { organisationId: toOrganisationId };
+    if (toHostId) data.hostId = toHostId;
+    if (toOrganisationId !== fromOrganisationId) data.locationId = null;
+    await this.prisma.$transaction([
+      this.prisma.visitTransfer.create({
+        data: { visitorId, fromOrganisationId, toOrganisationId, fromHostId, toHostId, comment: comment.slice(0, 2000) },
+      }),
+      this.prisma.invite.update({ where: { id: visitor.inviteId }, data }),
+    ]);
+    if (toHostId) {
+      await this.notifications.create({
+        userId: toHostId,
+        title: 'Visit transferred to you',
+        body: `${visitor.fullName} was transferred to ${dest.name}. ${comment}`,
+        meta: { type: 'VISIT_TRANSFER', visitorId, inviteId: visitor.inviteId },
+        channels: ['in_app'],
+      }).catch(() => {});
+    }
+    await this.audit.log({
+      action: 'VISIT_TRANSFERRED',
+      entity: 'Visitor',
+      entityId: visitorId,
+      userId: actor.id,
+      details: { fromOrganisationId, toOrganisationId, comment },
+    });
+    return this.prisma.visitor.findUnique({
+      where: { id: visitorId },
+      include: {
+        invite: { include: { host: { select: { id: true, fullName: true } }, organisation: { select: { id: true, name: true, code: true } } } },
+        transfers: { orderBy: { createdAt: 'asc' } },
+        gateVisits: { include: { particulars: true, gate: { select: { id: true, name: true, sequence: true } } }, orderBy: { occurredAt: 'asc' } },
+      },
+    });
   }
 
   async getPublicInviteInfo(token: string) {

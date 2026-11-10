@@ -21,8 +21,14 @@ export const QR_RENDER_OPTIONS = {
  * Compact payload. Kept JSON (same shape as before) so already-issued codes and any
  * other integrations keep working:  {"v":"<visitorId>","p":"<PASSPHRASE>","t":"<token8>"}
  */
-export function buildGateQrPayload(visitorId: string, passphrase: string, token: string) {
-  return JSON.stringify({ v: visitorId, p: passphrase, t: token.slice(0, 8) });
+export function buildGateQrPayload(visitorId: string, passphrase: string, token: string, passToken?: string | null) {
+  const payload: Record<string, string> = { v: visitorId, p: passphrase, t: token.slice(0, 8) };
+  if (passToken) payload.g = passToken;
+  return JSON.stringify(payload);
+}
+
+export function buildContractorQrPayload(qrToken: string) {
+  return JSON.stringify({ c: qrToken });
 }
 
 export function renderQrDataUrl(payload: string): Promise<string> {
@@ -46,6 +52,10 @@ export type ParsedGateCode = {
   tokenPrefix?: string;
   /** Permanent staff attendance QR token (JSON "s" or /staff/<token>) */
   staffToken?: string;
+  /** Contractor attendance QR token (JSON "c" or /contractor/<token>) */
+  contractorToken?: string;
+  /** Shared same-day visitor pass (JSON "g") */
+  passToken?: string;
 };
 
 function normPassphrase(s: string): string {
@@ -85,15 +95,22 @@ export function parseGateCode(rawInput: unknown): ParsedGateCode {
       if (typeof lower.v === 'string' && UUID_RE.test(lower.v)) out.visitorId = lower.v.toLowerCase();
       if (typeof lower.t === 'string' && lower.t.trim()) out.tokenPrefix = lower.t.trim().toLowerCase();
       if (typeof lower.s === 'string' && lower.s.trim().length >= 16) out.staffToken = lower.s.trim();
+      if (typeof lower.c === 'string' && lower.c.trim().length >= 16) out.contractorToken = lower.c.trim();
+      if (typeof lower.g === 'string' && lower.g.trim().length >= 16) out.passToken = lower.g.trim();
+      if (out.contractorToken) return out;
       if (out.staffToken) return out;
-      if (out.passphrase || out.visitorId) return out;
+      if (out.passToken || out.passphrase || out.visitorId) return out;
     } catch {
       // fall through — maybe a mangled payload; try the other strategies
     }
     const pm = quoteFixed.match(/"p"\s*:\s*"([^"]+)"/i);
     const vm = quoteFixed.match(/"v"\s*:\s*"([^"]+)"/i);
     const sm = quoteFixed.match(/"s"\s*:\s*"([^"]+)"/i);
+    const cm = quoteFixed.match(/"c"\s*:\s*"([^"]+)"/i);
+    const gm = quoteFixed.match(/"g"\s*:\s*"([^"]+)"/i);
+    if (cm && cm[1].trim().length >= 16) return { contractorToken: cm[1].trim() };
     if (sm && sm[1].trim().length >= 16) return { staffToken: sm[1].trim() };
+    if (gm && gm[1].trim().length >= 16) return { passToken: gm[1].trim() };
     if (pm || vm) {
       return {
         passphrase: pm ? normPassphrase(pm[1]) : undefined,
@@ -103,11 +120,16 @@ export function parseGateCode(rawInput: unknown): ParsedGateCode {
   }
 
   // 2) URL (absolute or relative) to the visitor page, staff badge, or gate deep link
-  if (/^(https?:\/\/|www\.|\/)/i.test(raw) || /\/visitor\//i.test(raw) || /\/staff\//i.test(raw)) {
+  if (/^(https?:\/\/|www\.|\/)/i.test(raw) || /\/visitor\//i.test(raw) || /\/staff\//i.test(raw) || /\/contractor/i.test(raw)) {
     try {
       const url = new URL(raw, 'http://placeholder.local');
       const code = url.searchParams.get('code');
       if (code) return parseGateCode(code);
+      const contractor = url.pathname.match(/\/contractors?\/([^/?#]+)/i);
+      if (contractor) {
+        const tok = decodeURIComponent(contractor[1]).trim();
+        if (tok.length >= 16) return { contractorToken: tok };
+      }
       const staff = url.pathname.match(/\/staff\/([^/?#]+)/i);
       if (staff) {
         const tok = decodeURIComponent(staff[1]).trim();
@@ -133,7 +155,9 @@ export function parseGateCode(rawInput: unknown): ParsedGateCode {
     return { token: id, visitorId: id };
   }
 
-  // 4) Bare staff token (32+ hex/base64url chars, no spaces)
+  // 4) Bare staff / contractor / shared-pass tokens
+  if (/^c_[A-Za-z0-9_-]{16,128}$/.test(raw)) return { contractorToken: raw };
+  if (/^p_[A-Za-z0-9_-]{16,128}$/.test(raw)) return { passToken: raw };
   if (/^[A-Za-z0-9_-]{32,128}$/.test(raw) && !/[-]/.test(raw.replace(/-/g, ''))) {
     // Prefer treating long opaque tokens as staff QR when they are not UUIDs
     if (raw.length >= 32 && !UUID_RE.test(raw)) return { staffToken: raw };

@@ -184,6 +184,7 @@ export default function VisitorPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const photoCardRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -230,6 +231,7 @@ export default function VisitorPage() {
       setStream(s);
       setCapturing(true);
       setTimeout(() => {
+        photoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         if (videoRef.current) {
           videoRef.current.srcObject = s;
           videoRef.current.play().catch(() => {});
@@ -416,7 +418,7 @@ export default function VisitorPage() {
 
         {/* Photo capture — only if not yet taken and not arrived/exited */}
         {selected && !hasPhoto && !isArrived && !isExited && (
-          <div className="card animate-in p-4">
+          <div ref={photoCardRef} className="card animate-in p-4">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-50 to-brand-100 text-brand-600">
                 <Camera size={16} />

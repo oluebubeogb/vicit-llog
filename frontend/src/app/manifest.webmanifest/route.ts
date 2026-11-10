@@ -20,7 +20,7 @@ export async function GET() {
   const theme = b.primaryColor || '#2563eb';
   const bg = b.secondaryColor || '#1e40af';
   const manifest = {
-    id: '/',
+    id: '/?v=1.0.1',
     name,
     short_name: name.length > 12 ? name.split(/\s+/)[0].slice(0, 12) : name,
     description: `${name} · Visitor Access & Exit Control`,
@@ -33,19 +33,19 @@ export async function GET() {
     theme_color: theme,
     categories: ['business', 'productivity', 'security'],
     icons: [
-      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/icon-192.png?v=1.0.1', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-512.png?v=1.0.1', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icon-maskable-512.png?v=1.0.1', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
     shortcuts: [
-      { name: 'Scan at gate', url: '/gate', icons: [{ src: '/icon-192.png', sizes: '192x192' }] },
-      { name: 'New invite', url: '/invite/new', icons: [{ src: '/icon-192.png', sizes: '192x192' }] },
+      { name: 'Scan at gate', url: '/gate', icons: [{ src: '/icon-192.png?v=1.0.1', sizes: '192x192' }] },
+      { name: 'New invite', url: '/invite/new', icons: [{ src: '/icon-192.png?v=1.0.1', sizes: '192x192' }] },
     ],
   };
   return new NextResponse(JSON.stringify(manifest), {
     headers: {
       'Content-Type': 'application/manifest+json; charset=utf-8',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
     },
   });
 }

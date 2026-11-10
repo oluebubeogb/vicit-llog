@@ -7,7 +7,11 @@ import {
   brandCssVars,
   BRAND_CACHE_KEY,
   DEFAULT_BRANDING,
+  identityScope,
+  LOGIN_BRAND_CACHE_KEY,
+  NEUTRAL_BRANDING,
   PublicBranding,
+  readCachedBrand,
 } from '@/lib/brand';
 import { api, getToken, getUser } from '@/lib/api';
 
@@ -15,7 +19,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 type Ctx = { brand: PublicBranding; refresh: () => Promise<void>; set: (b: Partial<PublicBranding>) => void; ready: boolean };
 const BrandCtx = createContext<Ctx>({
-  brand: DEFAULT_BRANDING,
+  brand: NEUTRAL_BRANDING,
   refresh: async () => {},
   set: () => {},
   ready: false,
@@ -23,44 +27,39 @@ const BrandCtx = createContext<Ctx>({
 
 export const useBrand = () => useContext(BrandCtx);
 
-function identityScope() {
-  const user = getUser();
-  if (!getToken() || !user) return 'public';
-  if (['ADMIN', 'STAFF', 'GATE'].includes(String(user.role))) return `agency:${user.organisationId || user.organisation?.id || 'unknown'}`;
-  if (['SUPER_ADMIN','GLOBAL_ADMIN','GLOBAL_GATE'].includes(String(user.role))) return `platform:${user.organisationId || user.organisation?.id || 'default'}`;
-  return 'platform';
-}
-
 function persist(b: PublicBranding, scope: string) {
   try {
-    localStorage.setItem(BRAND_CACHE_KEY, JSON.stringify({ data: b, vars: brandCssVars(b), scope }));
+    const packed = JSON.stringify({ data: b, vars: brandCssVars({ ...DEFAULT_BRANDING, ...b }), scope });
+    if (scope === 'public') localStorage.setItem(LOGIN_BRAND_CACHE_KEY, packed);
+    else localStorage.setItem(BRAND_CACHE_KEY, packed);
   } catch {
     /* private mode */
   }
 }
 
+function initialBrand(): PublicBranding {
+  if (typeof window === 'undefined') return NEUTRAL_BRANDING;
+  return readCachedBrand() || NEUTRAL_BRANDING;
+}
+
 /**
- * Applies Branding & Settings everywhere: brand/accent colour scales (CSS variables),
- * organisation name, logo, theme-color. Cached in localStorage and applied before paint.
+ * Applies Branding & Settings everywhere. Cached branding is applied before paint
+ * and used as the first React state so the default Vicit logo/colours never flash.
  */
 export default function BrandProvider({ children }: { children: ReactNode }) {
-  const [brand, setBrand] = useState<PublicBranding>(DEFAULT_BRANDING);
+  const [brand, setBrand] = useState<PublicBranding>(initialBrand);
   const [ready, setReady] = useState(false);
 
   const commit = useCallback((b: PublicBranding, scope = identityScope()) => {
     setBrand(b);
-    applyBranding(b);
+    applyBranding({ ...DEFAULT_BRANDING, ...b, primaryColor: b.primaryColor || DEFAULT_BRANDING.primaryColor, secondaryColor: b.secondaryColor || DEFAULT_BRANDING.secondaryColor });
     persist(b, scope);
   }, []);
 
   const refresh = useCallback(async () => {
     const token = getToken();
-    const user = getUser();
-    const role = String(user?.role || '');
     try {
       if (token) {
-        // The authenticated endpoint returns the user's agency identity, or the platform
-        // owner's branding for platform operators. The server resolves the scope from JWT.
         const agency = await api.branding();
         commit({
           ...DEFAULT_BRANDING,
@@ -72,39 +71,50 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
           secondaryColor: agency?.secondaryColor || DEFAULT_BRANDING.secondaryColor,
           primaryTextColor: agency?.primaryTextColor ?? DEFAULT_BRANDING.primaryTextColor,
           emailIconBg: agency?.emailIconBg || DEFAULT_BRANDING.emailIconBg,
+          footerCredit: agency?.footerCredit ?? DEFAULT_BRANDING.footerCredit,
+          footerCreditEnabled: agency?.footerCreditEnabled !== false,
+          assetVersion: agency?.assetVersion || DEFAULT_BRANDING.assetVersion,
         }, identityScope());
       } else {
         const res = await fetch(`${API_URL}/branding/public`, { cache: 'no-store' });
-        if (res.ok) commit({ ...DEFAULT_BRANDING, ...(await res.json()) }, 'public');
+        if (res.ok) {
+          const pub = await res.json();
+          const login = pub.login || {};
+          commit({
+            ...DEFAULT_BRANDING,
+            ...pub,
+            name: login.headline || pub.name || DEFAULT_BRANDING.name,
+            logoUrl: login.logoUrl || pub.logoUrl || null,
+            primaryColor: login.primaryColor || pub.primaryColor || DEFAULT_BRANDING.primaryColor,
+            secondaryColor: login.secondaryColor || pub.secondaryColor || DEFAULT_BRANDING.secondaryColor,
+            login,
+            footerCredit: pub.footerCredit ?? DEFAULT_BRANDING.footerCredit,
+            footerCreditEnabled: pub.footerCreditEnabled !== false,
+            assetVersion: pub.assetVersion || DEFAULT_BRANDING.assetVersion,
+          }, 'public');
+        }
       }
     } catch {
-      // Do not leave a previous agency's branding visible after an account switch.
-      if (token) commit({ ...DEFAULT_BRANDING }, identityScope());
-      else commit({ ...DEFAULT_BRANDING }, 'public');
+      const cached = readCachedBrand(identityScope());
+      if (cached) commit(cached, identityScope());
     } finally {
       setReady(true);
     }
   }, [commit]);
 
   useEffect(() => {
-    try {
-      const cached = JSON.parse(localStorage.getItem(BRAND_CACHE_KEY) || 'null');
-      // Scope the cache to the logged-in agency/platform to prevent cross-agency
-      // branding flashes when different accounts use the same browser.
-      if (cached?.data && cached.scope === identityScope()) {
-        setBrand({ ...DEFAULT_BRANDING, ...cached.data });
-        applyBranding({ ...DEFAULT_BRANDING, ...cached.data });
-      }
-    } catch {
-      /* ignore */
+    const cached = readCachedBrand();
+    if (cached) {
+      setBrand(cached);
+      if (cached.primaryColor) applyBranding({ ...DEFAULT_BRANDING, ...cached });
     }
     refresh();
     const onBrandUpdate = () => refresh();
     const onAuthUpdate = () => {
-      // Clear the previous identity immediately; a new agency must never briefly
-      // inherit the branding cached for the account that was just signed out.
       const scope = identityScope();
-      commit({ ...DEFAULT_BRANDING }, scope);
+      const next = readCachedBrand(scope);
+      if (next) commit(next, scope);
+      else setBrand(NEUTRAL_BRANDING);
       refresh();
     };
     window.addEventListener('vicit-brand-updated', onBrandUpdate);
@@ -128,7 +138,6 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
 
   return (
     <BrandCtx.Provider value={{ brand, refresh, set, ready }}>
-      {/* Every framer-motion animation follows the OS "reduce motion" setting */}
       <MotionConfig reducedMotion="user">{children}</MotionConfig>
     </BrandCtx.Provider>
   );

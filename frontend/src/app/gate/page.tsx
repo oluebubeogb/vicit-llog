@@ -29,6 +29,7 @@ import Collapse from '@/components/ui/Collapse';
 import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
 import PhotoGallery, { GalleryImage } from '@/components/PhotoGallery';
+import CheckpointTracker from '@/components/CheckpointTracker';
 import { fmtDate, MODE_LABEL } from '@/lib/format';
 import {
   cameraSupport,
@@ -56,14 +57,19 @@ export default function GatePage() {
   const [denyReason, setDenyReason] = useState('');
   const [checkpoints, setCheckpoints] = useState<any[]>([]);
   const [activeGateId, setActiveGateId] = useState('');
-  const [withheldItems, setWithheldItems] = useState('');
-  const [allowedItems, setAllowedItems] = useState('');
-  const [evidencePhotos, setEvidencePhotos] = useState<Array<{ file: File; preview: string }>>([]);
+  const [withheldItems, setWithheldItems] = useState<Record<string, string>>({});
+  const [allowedItems, setAllowedItems] = useState<Record<string, string>>({});
+  const [evidencePhotos, setEvidencePhotos] = useState<Record<string, Array<{ file: File; preview: string }>>>({});
+  const [evidenceGuestId, setEvidenceGuestId] = useState<string | null>(null);
   const [evidenceCameraOpen, setEvidenceCameraOpen] = useState(false);
   const [evidenceCameraError, setEvidenceCameraError] = useState('');
-  const [particularsChecked, setParticularsChecked] = useState(false);
-  const [showWithheld, setShowWithheld] = useState(false);
-  const [showAllowed, setShowAllowed] = useState(false);
+  const [particularsChecked, setParticularsChecked] = useState<Record<string, boolean>>({});
+  const [showWithheld, setShowWithheld] = useState<Record<string, boolean>>({});
+  const [showAllowed, setShowAllowed] = useState<Record<string, boolean>>({});
+  const [expandedGuests, setExpandedGuests] = useState<Record<string, boolean>>({});
+  const [selectedGuests, setSelectedGuests] = useState<Record<string, boolean>>({});
+  const [denyReasons, setDenyReasons] = useState<Record<string, string>>({});
+  const [destination, setDestination] = useState('');
   const [gallery, setGallery] = useState<{ images: GalleryImage[]; index: number } | null>(null);
   const [ringNote, setRingNote] = useState<Record<string, string>>({});
 
@@ -197,16 +203,23 @@ export default function GatePage() {
     if (!activeGateId) { setError('Choose the checkpoint first.'); return; }
     setActionLoading(visitorId + '-checkpoint');
     try {
-      const uploadedEvidence = await Promise.all(evidencePhotos.map(async (photo) => (await api.uploadParticularImage(photo.file)).imagePath));
+      const rack = evidencePhotos[visitorId] || [];
+      const uploadedEvidence = await Promise.all(rack.map(async (photo) => (await api.uploadParticularImage(photo.file)).imagePath));
       const particulars: any[] = [
-        ...withheldItems.split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'WITHHELD', description })),
-        ...allowedItems.split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'ALLOWED', description })),
+        ...(withheldItems[visitorId] || '').split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'WITHHELD', description })),
+        ...(allowedItems[visitorId] || '').split(/\r?\n/).map((description: string) => description.trim()).filter(Boolean).map((description: string) => ({ kind: 'ALLOWED', description })),
       ];
-      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, notes: decision === 'DENIED' ? denyReason : '', particulars, particularsChecked, evidencePhotos: uploadedEvidence });
+      const visitor = (result?.visitors || []).find((x: any) => x.id === visitorId) || (result?.appointments || []).flatMap((a: any) => a.visitors || []).find((x: any) => x.id === visitorId);
+      const direction = visitor?.status === 'ARRIVED' ? 'EXIT' : 'ENTRY';
+      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, direction, notes: decision === 'DENIED' ? (denyReasons[visitorId] || denyReason) : '', particulars, particularsChecked: particularsChecked[visitorId] === true, evidencePhotos: uploadedEvidence });
       const currentGate = checkpoints.find((g: any) => g.id === activeGateId);
-      const nextGate = currentGate && checkpoints.filter((g: any) => g.locationId === currentGate.locationId && g.sequence > currentGate.sequence).sort((a: any,b: any)=>a.sequence-b.sequence)[0];
+      const nextGate = currentGate && checkpoints.filter((g: any) => g.locationId === currentGate.locationId && (direction === 'EXIT' ? g.sequence < currentGate.sequence : g.sequence > currentGate.sequence)).sort((a: any,b: any)=> direction === 'EXIT' ? b.sequence-a.sequence : a.sequence-b.sequence)[0];
       if (nextGate) setActiveGateId(nextGate.id);
-      setWithheldItems(''); setAllowedItems(''); clearEvidenceRack(); setParticularsChecked(false); setDenyFor(null); setDenyReason('');
+      setWithheldItems((c) => ({ ...c, [visitorId]: '' }));
+      setAllowedItems((c) => ({ ...c, [visitorId]: '' }));
+      clearEvidenceRack(visitorId);
+      setParticularsChecked((c) => ({ ...c, [visitorId]: false }));
+      setDenyFor(null);
       await lookup();
     } catch (err: any) { setError(err.message || 'Checkpoint could not be recorded'); } finally { setActionLoading(''); }
   }
@@ -221,9 +234,11 @@ export default function GatePage() {
     setEvidenceCameraOpen(false);
   }
 
-  async function startEvidenceCamera() {
+  async function startEvidenceCamera(guestId?: string) {
+    if (guestId) setEvidenceGuestId(guestId);
     setEvidenceCameraError('');
-    if (evidencePhotos.length >= 10) { setEvidenceCameraError('You can capture up to 10 photos per checkpoint.'); return; }
+    const gid = evidenceGuestId;
+    if ((evidencePhotos[gid || ''] || []).length >= 10) { setEvidenceCameraError('You can capture up to 10 photos per checkpoint.'); return; }
     if (!navigator.mediaDevices?.getUserMedia) { setEvidenceCameraError('Live camera access requires HTTPS and a supported browser.'); return; }
     stopEvidenceCamera();
     try {
@@ -238,7 +253,9 @@ export default function GatePage() {
   async function captureEvidencePhoto() {
     const video = evidenceVideoRef.current;
     if (!video || video.readyState < 2 || !video.videoWidth) { setEvidenceCameraError('Camera is still starting. Try again in a moment.'); return; }
-    if (evidencePhotos.length >= 10) { setEvidenceCameraError('You can capture up to 10 photos per checkpoint.'); return; }
+    const gid = evidenceGuestId;
+    if (!gid) { setEvidenceCameraError('Choose a guest first.'); return; }
+    if ((evidencePhotos[gid] || []).length >= 10) { setEvidenceCameraError('You can capture up to 10 photos per checkpoint.'); return; }
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -249,22 +266,29 @@ export default function GatePage() {
     const file = new File([blob], `checkpoint-${Date.now()}.webp`, { type: 'image/webp' });
     const preview = URL.createObjectURL(blob);
     evidencePreviewUrlsRef.current.push(preview);
-    setEvidencePhotos(current => [...current, { file, preview }]);
+    setEvidencePhotos(current => ({ ...current, [gid]: [...(current[gid] || []), { file, preview }] }));
     setEvidenceCameraError('');
   }
 
-  function removeEvidencePhoto(index: number) {
+  function removeEvidencePhoto(guestId: string, index: number) {
     setEvidencePhotos(current => {
-      const item = current[index];
+      const list = current[guestId] || [];
+      const item = list[index];
       if (item) { URL.revokeObjectURL(item.preview); evidencePreviewUrlsRef.current = evidencePreviewUrlsRef.current.filter(url => url !== item.preview); }
-      return current.filter((_, i) => i !== index);
+      return { ...current, [guestId]: list.filter((_, i) => i !== index) };
     });
   }
 
-  function clearEvidenceRack() {
-    evidencePreviewUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
-    evidencePreviewUrlsRef.current = [];
-    setEvidencePhotos([]);
+  function clearEvidenceRack(guestId?: string) {
+    if (!guestId) {
+      Object.values(evidencePhotos).flat().forEach((item) => URL.revokeObjectURL(item.preview));
+      evidencePreviewUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      evidencePreviewUrlsRef.current = [];
+      setEvidencePhotos({});
+    } else {
+      (evidencePhotos[guestId] || []).forEach((item) => URL.revokeObjectURL(item.preview));
+      setEvidencePhotos((c) => ({ ...c, [guestId]: [] }));
+    }
     stopEvidenceCamera();
   }
 
@@ -288,6 +312,11 @@ export default function GatePage() {
   async function markParticularReturned(id: string) {
     setActionLoading('particular-' + id);
     try { await api.returnParticular(id); await lookup(); } catch (err: any) { setError(err.message || 'Could not update item custody'); } finally { setActionLoading(''); }
+  }
+
+  async function resolveItem(id: string, resolution: 'RETURNED' | 'SEIZED' | 'OTHER', note?: string) {
+    setActionLoading('particular-' + id);
+    try { await api.resolveParticular(id, { resolution, note }); await lookup(); } catch (err: any) { setError(err.message || 'Could not resolve item'); } finally { setActionLoading(''); }
   }
 
   async function doExit(visitorId: string) {
@@ -648,7 +677,31 @@ export default function GatePage() {
         </div>
       )}
 
-      {result && result.kind !== 'staff' && (
+      {result && result.kind === 'contractor' && (
+        <div className="surface space-y-3 p-4">
+          <div className="flex items-start gap-3">
+            {result.contractor?.photoPath ? <img src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/contractors/photo/${result.contractor.photoPath}`} alt="" className="h-16 w-16 rounded-2xl object-cover" /> : <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><UserRound size={24} /></span>}
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-slate-900">{result.contractor?.fullName}</p>
+              <p className="text-xs text-slate-500">{[result.contractor?.company, result.contractor?.organisation?.name].filter(Boolean).join(' · ')}</p>
+              <StatusPill tone={result.contractor?.status === 'valid' ? 'emerald' : 'rose'} className="mt-1" label={`${result.contractor?.status} through ${result.contractor?.validThrough ? new Date(result.contractor.validThrough).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}`} />
+            </div>
+          </div>
+          {result.openVisit ? (
+            <div className="space-y-2">
+              <p className="text-sm text-slate-600">On site · headed for <b>{result.openVisit.destination}</b></p>
+              <button type="button" className="btn w-full bg-gradient-to-br from-amber-400 to-amber-600 !py-3 text-white" disabled={!!actionLoading} onClick={async () => { setActionLoading('cout'); try { await api.contractorCheckOut({ contractorId: result.contractor.id, visitId: result.openVisit.id }); await lookup(); } catch (e: any) { setError(e.message); } finally { setActionLoading(''); } }}>Record exit</button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="block"><span className="label">Where are they headed?</span><input className="input" value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="Office, workshop, name of host…" /></label>
+              <button type="button" className="btn-success w-full !py-3" disabled={!!actionLoading || !destination.trim()} onClick={async () => { setActionLoading('cin'); try { await api.contractorCheckIn({ contractorId: result.contractor.id, destination, gateId: activeGateId || undefined }); await lookup(); } catch (e: any) { setError(e.message); } finally { setActionLoading(''); } }}>Check in</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {result && result.kind !== 'staff' && result.kind !== 'contractor' && (
         <div className="space-y-3">
           <div className="card card-art p-4">
             <div className="flex items-start gap-3">
@@ -666,6 +719,24 @@ export default function GatePage() {
             </div>
           </div>
 
+          {(result.appointments || []).length > 1 && (
+            <div className="surface space-y-2 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Today&apos;s appointments</p>
+              {result.appointments.map((a: any) => (
+                <div key={a.inviteId} className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <b className="text-slate-800">{a.organisation?.name || 'Agency'}</b>
+                  {a.host?.fullName && <span> · {a.host.fullName}</span>}
+                  {a.purpose && <span> · {a.purpose}</span>}
+                  {a.expectedAt && <span className="text-slate-400"> · {new Date(a.expectedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {currentCheckpoints.length > 0 && (result.visitors || [])[0] && (
+            <CheckpointTracker gates={currentCheckpoints} visits={(result.visitors || []).flatMap((v: any) => v.gateVisits || [])} direction={(result.visitors || []).some((v: any) => v.status === 'ARRIVED') ? 'both' : 'ENTRY'} />
+          )}
+
           <div>
             <span className="label">
               Arriving by
@@ -680,44 +751,58 @@ export default function GatePage() {
             </div>
           </div>
 
-          {result.visitors?.map((v: any) => (
+          {result.visitors?.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-100 bg-white/80 px-3 py-2">
+              <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-slate-700">
+                <input type="checkbox" checked={result.visitors.every((v: any) => selectedGuests[v.id])} onChange={(e) => setSelectedGuests(Object.fromEntries(result.visitors.map((v: any) => [v.id, e.target.checked])))} />
+                Select all
+              </label>
+              <div className="ml-auto flex min-w-0 flex-wrap gap-2">
+                <button type="button" className="btn-success !px-3 !py-1.5 text-[11px]" disabled={!!actionLoading || !Object.values(selectedGuests).some(Boolean)} onClick={() => result.visitors.filter((v: any) => selectedGuests[v.id]).forEach((v: any) => doCheckpoint(v.id, 'PASSED'))}>Pass selected</button>
+                <button type="button" className="btn-danger !px-3 !py-1.5 text-[11px]" disabled={!!actionLoading || !Object.values(selectedGuests).some(Boolean)} onClick={() => { const first = result.visitors.find((v: any) => selectedGuests[v.id]); if (first) setDenyFor(first.id); }}>Decline selected</button>
+              </div>
+            </div>
+          )}
+
+          {result.visitors?.map((v: any) => {
+            const open = expandedGuests[v.id] === true || result.visitors.length === 1;
+            const draftPhotos = evidencePhotos[v.id] || [];
+            const openItems = (v.gateVisits || []).flatMap((ev: any) => (ev.particulars || []).filter((x: any) => x.kind === 'WITHHELD' && !x.resolvedAt && !x.returnedAt));
+            const showInspect = (v.status === 'INVITED' || v.status === 'ARRIVED') && currentCheckpoints.length > 0;
+            return (
             <div key={v.id} className={`card p-4 ${result.scannedVisitorId === v.id ? '!border-brand-300 ring-2 ring-brand-200' : ''}`}>
-              {result.scannedVisitorId === v.id && result.visitors?.length > 1 && (
-                <p className="eyebrow mb-2 flex items-center gap-1">
-                  <ScanLine size={12} /> Scanned QR belongs to this guest
-                </p>
-              )}
               <div className="flex items-start gap-3">
+                {result.visitors.length > 1 && <input type="checkbox" className="mt-2" checked={!!selectedGuests[v.id]} onChange={(e) => setSelectedGuests((c) => ({ ...c, [v.id]: e.target.checked }))} />}
                 {v.photoPath ? (
                   <Tooltip content="Tap to enlarge photo">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewPhoto({ url: photo(v.photoPath), name: v.fullName })}
-                      className="group relative shrink-0 overflow-hidden rounded-2xl shadow-soft ring-2 ring-white transition hover:ring-brand-400 focus:outline-none"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={photo(v.photoPath)} alt={v.fullName} className="h-20 w-20 object-cover transition duration-500 group-hover:scale-110" />
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-[10px] font-semibold text-white opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">View</span>
+                    <button type="button" onClick={() => setPreviewPhoto({ url: photo(v.photoPath), name: v.fullName })} className="group relative shrink-0 overflow-hidden rounded-2xl shadow-soft ring-2 ring-white">
+                      <img src={photo(v.photoPath)} alt={v.fullName} className="h-16 w-16 object-cover" />
                     </button>
                   </Tooltip>
                 ) : (
-                  <Avatar name={v.fullName} size={80} className="!rounded-2xl" />
+                  <Avatar name={v.fullName} size={64} className="!rounded-2xl" />
                 )}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-lg font-bold text-slate-900">{v.fullName}</p>
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setExpandedGuests((c) => ({ ...c, [v.id]: !open }))}>
+                  <p className="truncate text-base font-bold text-slate-900">{v.fullName}</p>
                   <StatusPill status={v.status} className="mt-1" />
-                  {(v.gateVisits || []).length > 0 && <p className="mt-1 text-[11px] text-slate-500">{v.gateVisits.length} checkpoint record{v.gateVisits.length===1?'':'s'}</p>}
-                  <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
-                    {v.enteredAt && <p className="flex items-center gap-1"><LogIn size={11} className="text-emerald-600" /> In {fmtDate(v.enteredAt)}</p>}
-                    {v.exitedAt && <p className="flex items-center gap-1"><LogOut size={11} /> Out {fmtDate(v.exitedAt)}</p>}
-                  </div>
-                </div>
+                  {result.scannedVisitorId === v.id && result.visitors?.length > 1 && <p className="mt-1 text-[10px] font-semibold text-brand-700">Scanned pass</p>}
+                </button>
+                {result.visitors.length > 1 && <span className="text-xs font-semibold text-slate-400">{open ? 'Hide' : 'Open'}</span>}
               </div>
 
-              {(v.gateVisits || []).length > 0 && <div className="mt-3 space-y-2">
+              <Collapse open={open}>
+              <div className="mt-3 space-y-2">
+              {currentCheckpoints.length > 0 && <CheckpointTracker gates={currentCheckpoints} visits={v.gateVisits || []} direction={v.status === 'ARRIVED' || v.status === 'EXITED' ? 'both' : 'ENTRY'} />}
+
+              {(v.transfers || []).length > 0 && (
+                <div className="rounded-xl bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+                  {(v.transfers || []).map((t: any) => <p key={t.id}>Transferred {new Date(t.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} — {t.comment}</p>)}
+                </div>
+              )}
+
+              {(v.gateVisits || []).length > 0 && <div className="space-y-2">
                 {v.gateVisits.map((event: any) => <div key={event.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                  <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-700">{event.gate?.name || 'Checkpoint'}</b><span className={`text-[10px] font-bold ${event.decision==='DENIED'?'text-rose-700':'text-emerald-700'}`}>{event.decision}</span></div>{event.particularsChecked&&<p className="mt-1 text-[10px] font-medium text-emerald-700">Particulars check confirmed</p>}
-                  <p className="mt-0.5 text-[10px] text-slate-400">{event.officer?.fullName || 'Officer'} · {fmtDate(event.occurredAt)}</p>
+                  <div className="flex items-center justify-between gap-2"><b className="text-xs text-slate-700">{event.gate?.name || 'Checkpoint'} · {event.direction === 'EXIT' ? 'Exit' : 'Entry'}</b><span className={`text-[10px] font-bold ${event.decision==='DENIED'?'text-rose-700':'text-emerald-700'}`}>{event.decision}</span></div>
                   {(() => {
                     const shots: GalleryImage[] = [
                       ...(event.evidencePhotos || []).map((path: string, i: number) => ({ src: particularPhoto(path), alt: `Evidence ${i + 1}` })),
@@ -726,110 +811,90 @@ export default function GatePage() {
                     const withheld = (event.particulars || []).filter((x: any) => x.kind === 'WITHHELD');
                     const allowed = (event.particulars || []).filter((x: any) => x.kind === 'ALLOWED');
                     return <>
-                      {withheld.length > 0 && <div className="mt-2 rounded-lg bg-rose-50 px-2.5 py-2 text-xs text-rose-800"><b className="uppercase tracking-wide">Withheld</b><ul className="mt-1 space-y-1">{withheld.map((x: any) => <li key={x.id}>{x.description}{x.quantity > 1 ? ` ×${x.quantity}` : ''} {x.imagePath && <button type="button" className="font-semibold underline" onClick={() => setGallery({ images: shots, index: Math.max(0, shots.findIndex((s) => s.src === particularPhoto(x.imagePath))) })}>Photo</button>} {x.returnedAt ? <span className="font-semibold text-emerald-700">Returned</span> : <button type="button" onClick={() => markParticularReturned(x.id)} disabled={!!actionLoading} className="font-semibold underline">Return</button>}</li>)}</ul></div>}
-                      {allowed.length > 0 && <div className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-2 text-xs text-emerald-800"><b className="uppercase tracking-wide">Allowed</b><ul className="mt-1 space-y-1">{allowed.map((x: any) => <li key={x.id}>{x.description}{x.quantity > 1 ? ` ×${x.quantity}` : ''} {x.imagePath && <button type="button" className="font-semibold underline" onClick={() => setGallery({ images: shots, index: Math.max(0, shots.findIndex((s) => s.src === particularPhoto(x.imagePath))) })}>Photo</button>}</li>)}</ul></div>}
+                      {withheld.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{withheld.map((x: any) => (
+                        <span key={x.id} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${x.resolvedAt || x.returnedAt ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+                          {x.description}{x.quantity > 1 ? ` ×${x.quantity}` : ''}
+                          {x.resolvedAt || x.returnedAt ? <span className="uppercase tracking-wide">{(x.resolution || 'returned').toLowerCase()}</span> : (
+                            <span className="flex gap-1">
+                              <button type="button" className="underline" onClick={() => resolveItem(x.id, 'RETURNED')}>Return</button>
+                              <button type="button" className="underline" onClick={() => resolveItem(x.id, 'SEIZED')}>Seize</button>
+                            </span>
+                          )}
+                        </span>
+                      ))}</div>}
+                      {allowed.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{allowed.map((x: any) => <span key={x.id} className="chip !bg-emerald-50 !text-emerald-800">{x.description}</span>)}</div>}
                       {shots.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{shots.map((shot, i) => <button type="button" key={`${shot.src}-${i}`} onClick={() => setGallery({ images: shots, index: i })} className="overflow-hidden rounded-lg border border-slate-200"><img src={shot.src} alt={shot.alt || 'Checkpoint photo'} className="aspect-square w-full object-cover"/></button>)}</div>}
                     </>;
                   })()}
                 </div>)}
               </div>}
 
-              <div className="mt-4 space-y-2">
                 {v.status === 'ARRIVED' && ['GATE','GLOBAL_GATE','SUPER_ADMIN'].includes(currentRole) && <div className={`rounded-2xl border p-3 ${v.hostAvailabilityStatus==='AVAILABLE'?'border-emerald-200 bg-emerald-50':v.hostAvailabilityStatus==='WAITING'?'border-amber-200 bg-amber-50':'border-slate-200 bg-slate-50'}`}>
                   <div className="flex items-center justify-between gap-2">
                     <b className="text-xs text-slate-800">Host</b>
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${v.hostAvailabilityStatus==='AVAILABLE'?'bg-emerald-100 text-emerald-800':ringNote[v.id]==='Busy'||ringNote[v.id]==='Declined'?'bg-rose-100 text-rose-800':v.hostAvailabilityStatus==='WAITING'||ringNote[v.id]==='Ringing'?'bg-amber-100 text-amber-800':'bg-slate-200 text-slate-700'}`}>{ringNote[v.id] || (v.hostAvailabilityStatus==='AVAILABLE'?'Available':v.hostAvailabilityStatus==='WAITING'?'Waiting':'No answer')}</span>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${v.hostAvailabilityStatus==='AVAILABLE'?'bg-emerald-100 text-emerald-800':'bg-slate-200 text-slate-700'}`}>{ringNote[v.id] || (v.hostAvailabilityStatus==='AVAILABLE'?'Available':v.hostAvailabilityStatus==='WAITING'?'Waiting':'No answer')}</span>
                   </div>
                   <div className="mt-2 flex gap-2">
                     <button type="button" onClick={async()=>{try{const call=await api.startRing(v.id,'GATE_TO_HOST');window.dispatchEvent(new CustomEvent('vicit:ring-local',{detail:call}));}catch(e:any){setError(e.message||'Could not ring the host')}}} className="btn-primary flex-1 !py-2 text-xs"><BellRing size={14}/> Ring</button>
-                    {result.host?.phone && <a href={`tel:${result.host.phone}`} className={`btn-quiet flex-1 !py-2 text-xs ${ringNote[v.id]==='No answer'||ringNote[v.id]==='Busy'||ringNote[v.id]==='Declined'?'!border-amber-300 !bg-amber-50':''}`}><Phone size={14}/> Call</a>}
+                    {result.host?.phone && <a href={`tel:${result.host.phone}`} className="btn-quiet flex-1 !py-2 text-xs"><Phone size={14}/> Call</a>}
                   </div>
                 </div>}
                 {v.status === 'INVITED' && !v.photoPath && (
                   <p className="tile-muted !py-2 text-center text-xs font-medium text-amber-700">Photo not captured yet — entry unlocks once the visitor adds a photo</p>
                 )}
-                {v.status === 'INVITED' && currentCheckpoints.length > 0 && (
+                {showInspect && (
                   <div className="w-full space-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
-                    <p className="text-xs font-semibold text-slate-700">Checkpoint inspection</p>{checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false&&<p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">Admissions are disabled at this gate.</p>}
-                    <select className="input !py-2 text-sm" value={activeGateId} onChange={e => { setActiveGateId(e.target.value); setWithheldItems(''); setAllowedItems(''); clearEvidenceRack(); setParticularsChecked(false); }}>
+                    <p className="text-xs font-semibold text-slate-700">{v.status === 'ARRIVED' ? 'Exit checkpoint' : 'Checkpoint inspection'}</p>
+                    {openItems.length > 0 && v.status === 'ARRIVED' && (
+                      <p className="rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] font-medium text-rose-800">Return, seize or resolve withheld items before the final exit.</p>
+                    )}
+                    <select className="input !py-2 text-sm" value={activeGateId} onChange={e => setActiveGateId(e.target.value)}>
                       {currentCheckpoints.map((g: any) => <option key={g.id} value={g.id}>{g.location?.organisation?.name ? `${g.location.organisation.name} · ` : ''}{g.location?.name} · {g.sequence + 1}. {g.name}</option>)}
                     </select>
                     <div className="overflow-hidden rounded-xl border border-rose-100 bg-rose-50/40">
-                      <button type="button" onClick={() => setShowWithheld((open) => !open)} className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-rose-800">Withheld <span className="font-medium normal-case tracking-normal text-rose-600">{showWithheld ? 'Hide' : withheldItems.trim() ? 'Edit' : 'Add'}</span></button>
-                      <Collapse open={showWithheld}><div className="px-3 pb-3"><textarea rows={2} value={withheldItems} onChange={e=>setWithheldItems(e.target.value)} className="input !border-rose-100 !bg-white !py-2 font-sans text-sm" placeholder="One item per line"/></div></Collapse>
+                      <button type="button" onClick={() => setShowWithheld((c) => ({ ...c, [v.id]: !c[v.id] }))} className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-rose-800">Withheld <span className="font-medium normal-case tracking-normal text-rose-600">{showWithheld[v.id] ? 'Hide' : (withheldItems[v.id] || '').trim() ? 'Edit' : 'Add'}</span></button>
+                      <Collapse open={!!showWithheld[v.id]}><div className="px-3 pb-3"><textarea rows={2} value={withheldItems[v.id] || ''} onChange={e=>setWithheldItems((c)=>({...c,[v.id]:e.target.value}))} className="input !border-rose-100 !bg-white !py-2 font-sans text-sm" placeholder="One item per line"/></div></Collapse>
                     </div>
                     <div className="overflow-hidden rounded-xl border border-emerald-100 bg-emerald-50/40">
-                      <button type="button" onClick={() => setShowAllowed((open) => !open)} className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-emerald-800">Allowed <span className="font-medium normal-case tracking-normal text-emerald-700">{showAllowed ? 'Hide' : allowedItems.trim() ? 'Edit' : 'Add'}</span></button>
-                      <Collapse open={showAllowed}><div className="px-3 pb-3"><textarea rows={2} value={allowedItems} onChange={e=>setAllowedItems(e.target.value)} className="input !border-emerald-100 !bg-white !py-2 font-sans text-sm" placeholder="One item per line"/></div></Collapse>
+                      <button type="button" onClick={() => setShowAllowed((c) => ({ ...c, [v.id]: !c[v.id] }))} className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-emerald-800">Allowed <span className="font-medium normal-case tracking-normal text-emerald-700">{showAllowed[v.id] ? 'Hide' : (allowedItems[v.id] || '').trim() ? 'Edit' : 'Add'}</span></button>
+                      <Collapse open={!!showAllowed[v.id]}><div className="px-3 pb-3"><textarea rows={2} value={allowedItems[v.id] || ''} onChange={e=>setAllowedItems((c)=>({...c,[v.id]:e.target.value}))} className="input !border-emerald-100 !bg-white !py-2 font-sans text-sm" placeholder="One item per line"/></div></Collapse>
                     </div>
                     <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-                      <div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-slate-700">Checkpoint photo evidence</p></div><button type="button" onClick={evidenceCameraOpen ? stopEvidenceCamera : startEvidenceCamera} className="btn-ghost !py-2 !px-3 text-xs"><Camera size={14}/>{evidenceCameraOpen ? 'Close camera' : 'Open camera'}</button></div>
-                      {evidenceCameraOpen && <div className="overflow-hidden rounded-xl bg-black"><video ref={evidenceVideoRef} autoPlay muted playsInline className="aspect-video w-full object-cover"/><div className="flex justify-center p-3"><button type="button" onClick={captureEvidencePhoto} disabled={evidencePhotos.length >= 10} className="btn-primary !rounded-full !px-6 !py-2"><Camera size={16}/> Capture photo</button></div></div>}
-                      {evidenceCameraError && <p className="text-[11px] text-rose-600">{evidenceCameraError}</p>}
-                      {evidencePhotos.length > 0 && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">{evidencePhotos.map((item, index) => <div key={item.preview} className="relative overflow-hidden rounded-lg border border-slate-200"><button type="button" onClick={() => setGallery({ images: evidencePhotos.map((photo, i) => ({ src: photo.preview, alt: `Capture ${i + 1}` })), index })} className="block w-full"><img src={item.preview} alt={`Checkpoint evidence ${index + 1}`} className="aspect-square w-full object-cover"/></button><button type="button" onClick={() => removeEvidencePhoto(index)} aria-label={`Remove photo ${index + 1}`} className="absolute right-1 top-1 rounded-full bg-slate-950/80 p-1.5 text-white shadow"><X size={13}/></button><span className="pointer-events-none absolute bottom-1 left-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[9px] text-white">{index + 1}</span></div>)}</div>}
+                      <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">Checkpoint photo evidence</p><button type="button" onClick={() => evidenceCameraOpen && evidenceGuestId === v.id ? stopEvidenceCamera() : startEvidenceCamera(v.id)} className="btn-ghost !py-2 !px-3 text-xs"><Camera size={14}/>{evidenceCameraOpen && evidenceGuestId === v.id ? 'Close camera' : 'Open camera'}</button></div>
+                      {evidenceCameraOpen && evidenceGuestId === v.id && <div className="overflow-hidden rounded-xl bg-black"><video ref={evidenceVideoRef} autoPlay muted playsInline className="aspect-video w-full object-cover"/><div className="flex justify-center p-3"><button type="button" onClick={captureEvidencePhoto} disabled={draftPhotos.length >= 10} className="btn-primary !rounded-full !px-6 !py-2"><Camera size={16}/> Capture photo</button></div></div>}
+                      {evidenceCameraError && evidenceGuestId === v.id && <p className="text-[11px] text-rose-600">{evidenceCameraError}</p>}
+                      {draftPhotos.length > 0 && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">{draftPhotos.map((item, index) => <div key={item.preview} className="relative overflow-hidden rounded-lg border border-slate-200"><button type="button" onClick={() => setGallery({ images: draftPhotos.map((photo, i) => ({ src: photo.preview, alt: `Capture ${i + 1}` })), index })} className="block w-full"><img src={item.preview} alt={`Checkpoint evidence ${index + 1}`} className="aspect-square w-full object-cover"/></button><button type="button" onClick={() => removeEvidencePhoto(v.id, index)} aria-label={`Remove photo ${index + 1}`} className="absolute right-1 top-1 rounded-full bg-slate-950/80 p-1.5 text-white shadow"><X size={13}/></button></div>)}</div>}
                     </div>
-                    {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={particularsChecked} onChange={e=>setParticularsChecked(e.target.checked)}/> I have completed the particulars check (including confirming there are no items to record).</label>}
+                    {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={!!particularsChecked[v.id]} onChange={e=>setParticularsChecked((c)=>({...c,[v.id]:e.target.checked}))}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false || (checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false && !particularsChecked)} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…':'Pass checkpoint'}</button>
-                      <button type="button" onClick={() => { setDenyFor(denyFor===v.id?null:v.id); setDenyReason(''); }} disabled={!!actionLoading} className="btn-danger !px-4"><Ban size={17}/></button>
+                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || (v.status!=='ARRIVED' && checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false) || (checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false && !particularsChecked[v.id])} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…': v.status==='ARRIVED' ? 'Pass exit checkpoint' : 'Pass checkpoint'}</button>
+                      <button type="button" onClick={() => { setDenyFor(denyFor===v.id?null:v.id); }} disabled={!!actionLoading} className="btn-danger !px-4"><Ban size={17}/></button>
                     </div>
-                    <Collapse open={denyFor === v.id}><textarea value={denyReason} onChange={e=>setDenyReason(e.target.value)} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!denyReason.trim()||(checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&!particularsChecked)} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
+                    <Collapse open={denyFor === v.id}><textarea value={denyReasons[v.id] || ''} onChange={e=>setDenyReasons((c)=>({...c,[v.id]:e.target.value}))} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!(denyReasons[v.id]||'').trim()||(checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&!particularsChecked[v.id])} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
                   </div>
                 )}
                 {v.status === 'INVITED' && currentCheckpoints.length === 0 && ['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
                   <Notice tone="warn">No checkpoint is assigned to your account for this agency or destination. Contact an administrator.</Notice>
                 )}
                 {v.status === 'INVITED' && currentCheckpoints.length === 0 && !['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
-                  <div className="flex w-full flex-col gap-2">
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => doEntry(v.id)} disabled={!!actionLoading || !v.photoPath} aria-label="Permit entry" className="btn-success flex-1 !py-3">
-                        {actionLoading === v.id + '-in' ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <LogIn size={19} />}
-                        Permit entry
-                      </button>
-                      <Tooltip content="Decline entry">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDenyFor(denyFor === v.id ? null : v.id);
-                            setDenyReason('');
-                          }}
-                          disabled={!!actionLoading}
-                          aria-label="Decline entry"
-                          className="btn shrink-0 border border-rose-200 bg-gradient-to-br from-rose-50 to-white !px-4 text-rose-700 hover:border-rose-300 hover:from-rose-100"
-                        >
-                          <Ban size={19} />
-                        </button>
-                      </Tooltip>
-                    </div>
-                    <Collapse open={denyFor === v.id}>
-                      <div className="w-full rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-white p-3">
-                        <label className="mb-1 block text-xs font-semibold text-rose-800">Reason (required)</label>
-                        <textarea value={denyReason} onChange={(e) => setDenyReason(e.target.value)} rows={2} placeholder="Reason for declining entry…" className="input !py-2 text-sm focus:!border-rose-300 focus:!ring-rose-100" />
-                        <div className="mt-2 flex gap-2">
-                          <button type="button" onClick={() => setDenyFor(null)} className="btn-ghost flex-1 !py-2">
-                            Cancel
-                          </button>
-                          <button type="button" onClick={() => doDeny(v.id)} disabled={!!actionLoading || !denyReason.trim()} className="btn-danger flex-1 !py-2">
-                            {actionLoading === v.id + '-deny' ? '…' : 'Confirm decline'}
-                          </button>
-                        </div>
-                      </div>
-                    </Collapse>
+                  <div className="flex w-full gap-2">
+                    <button type="button" onClick={() => doEntry(v.id)} disabled={!!actionLoading || !v.photoPath} className="btn-success flex-1 !py-3">Permit entry</button>
                   </div>
                 )}
                 {v.status === 'DENIED' && (
                   <Notice tone="error">Entry declined{v.deniedReason ? `: ${v.deniedReason}` : ''}</Notice>
                 )}
-                {v.status === 'ARRIVED' && (
-                  <button onClick={() => doExit(v.id)} disabled={!!actionLoading} className="btn w-full bg-gradient-to-br from-amber-400 to-amber-600 !py-3 text-white shadow-[0_10px_24px_-10px_rgb(217_119_6/0.6)] hover:brightness-105">
+                {v.status === 'ARRIVED' && currentCheckpoints.length === 0 && (
+                  <button onClick={() => doExit(v.id)} disabled={!!actionLoading || openItems.length > 0} className="btn w-full bg-gradient-to-br from-amber-400 to-amber-600 !py-3 text-white">
                     <LogOut size={18} />
-                    {actionLoading === v.id + '-out' ? '…' : 'Record exit'}
+                    {openItems.length > 0 ? 'Resolve withheld items first' : actionLoading === v.id + '-out' ? '…' : 'Record exit'}
                   </button>
                 )}
                 {v.status === 'EXITED' && <p className="tile-muted !py-2 text-center text-sm text-slate-500">Already signed out</p>}
               </div>
+              </Collapse>
             </div>
-          ))}
+          );})}
         </div>
       )}
 

@@ -11,8 +11,10 @@ import { MailService } from '../mail/mail.service';
 import { EntryMode, VisitStatus } from '@prisma/client';
 import { EntryDto } from './dto/entry.dto';
 import { parseGateCode } from '../../common/utils/qr';
+import { linkSameDayVisits, visitorsForPassToken } from '../../common/utils/visitor-pass';
 import { currentAttendanceDay, localDayKey, attendanceTimeZone } from '../../common/utils/attendance-day';
 import { roleLabel } from '../../common/utils/role-labels';
+import { ContractorsService } from '../contractors/contractors.service';
 
 @Injectable()
 export class GateService {
@@ -21,34 +23,46 @@ export class GateService {
     private audit: AuditService,
     private notifications: NotificationsService,
     private mail: MailService,
+    private contractors: ContractorsService,
   ) {}
 
   async lookup(passphraseOrQr: string, actor?: any) {
-    // Accept every form a QR / officer can produce: QR JSON, /visitor/<token> URL,
-    // bare token or visitor id, passphrase in any case / spacing, or staff QR {"s":...}.
     const parsed = parseGateCode(passphraseOrQr);
+    if (parsed.contractorToken) {
+      const found = await this.contractors.lookup(parsed.contractorToken, actor);
+      if (!found) throw new NotFoundException('No matching contractor found');
+      return found;
+    }
     if (parsed.staffToken) {
       return this.scanStaffAttendance(parsed.staffToken, actor);
     }
-    if (!parsed.passphrase && !parsed.token && !parsed.visitorId) {
+    if (!parsed.passphrase && !parsed.token && !parsed.visitorId && !parsed.passToken) {
       throw new BadRequestException('Scan a QR code or enter a passphrase');
     }
 
     const include = {
-      visitors: { include: { gateVisits: { include: { gate: { select: { name: true, sequence: true } }, officer: { select: { fullName: true } }, particulars: true }, orderBy: { occurredAt: 'asc' } } } },
+      visitors: { include: { gateVisits: { include: { gate: { select: { name: true, sequence: true, locationId: true } }, officer: { select: { fullName: true } }, particulars: true }, orderBy: { occurredAt: 'asc' } }, transfers: { orderBy: { createdAt: 'asc' } } } },
       host: { select: { id: true, fullName: true, email: true, phone: true } },
-      organisation: { select: { id: true, name: true } },
+      organisation: { select: { id: true, name: true, code: true } },
     } as const;
 
     let invite: any = null;
     let scannedVisitorId: string | null = null;
+    let seedVisitorId: string | null = null;
+
+    if (parsed.passToken) {
+      const pack = await visitorsForPassToken(this.prisma, parsed.passToken);
+      if (pack.visitors.length) {
+        seedVisitorId = pack.visitors[0].id;
+        invite = await this.prisma.invite.findUnique({ where: { id: pack.visitors[0].inviteId }, include });
+      }
+    }
 
     if (parsed.passphrase) {
-      invite = await this.prisma.invite.findFirst({
+      invite = invite || await this.prisma.invite.findFirst({
         where: { passphrase: parsed.passphrase },
         include,
       });
-      // Legacy/raw value (e.g. stored with unusual characters) — exact match as typed
       if (!invite && typeof passphraseOrQr === 'string') {
         invite = await this.prisma.invite.findFirst({
           where: { passphrase: passphraseOrQr.trim().toUpperCase() },
@@ -73,15 +87,50 @@ export class GateService {
       }
       if (invite?.visitors?.some((v: any) => v.id === parsed.visitorId)) {
         scannedVisitorId = parsed.visitorId;
+        seedVisitorId = parsed.visitorId;
       }
     }
 
     if (!invite) throw new NotFoundException('No matching invite found');
     const globalAccess = actor && ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
     if (actor?.role === 'GLOBAL_ADMIN' && !(actor.permissions || []).includes('visits.view')) throw new ForbiddenException('Cross-agency visitor access is not enabled for your account');
-    if (actor && !globalAccess && actor.role !== 'GLOBAL_ADMIN' && invite.organisationId !== actor.orgId) throw new NotFoundException('No matching invite found');
+
+    const seed = seedVisitorId || scannedVisitorId || invite.visitors[0]?.id;
+    const linked = seed ? await linkSameDayVisits(this.prisma, seed) : { visitors: invite.visitors, visitorIds: invite.visitors.map((v: any) => v.id), passToken: null, day: null };
+    const appointments = this.groupAppointments(linked.visitors?.length ? linked.visitors : invite.visitors);
+    if (actor && !globalAccess && actor.role !== 'GLOBAL_ADMIN') {
+      const mine = appointments.find((a: any) => a.organisationId === actor.orgId) || (invite.organisationId === actor.orgId ? invite : null);
+      if (!mine) throw new NotFoundException('No matching invite found');
+      if (mine && mine.inviteId && mine.inviteId !== invite.id) {
+        const alt = await this.prisma.invite.findUnique({ where: { id: mine.inviteId }, include });
+        if (alt) invite = alt;
+      }
+    }
+
+    const presentVisitor = (v: any) => ({
+      id: v.id,
+      fullName: v.fullName,
+      email: v.email,
+      phone: v.phone,
+      photoPath: v.photoPath,
+      status: v.status,
+      hostAvailabilityStatus: v.hostAvailabilityStatus,
+      hostWaitUntil: v.hostWaitUntil,
+      hostRespondedAt: v.hostRespondedAt,
+      lastHostPromptAt: v.lastHostPromptAt,
+      entryMode: v.entryMode,
+      enteredAt: v.enteredAt,
+      exitedAt: v.exitedAt,
+      deniedAt: v.deniedAt,
+      deniedReason: v.deniedReason,
+      passToken: v.passToken,
+      gateVisits: v.gateVisits || [],
+      transfers: v.transfers || [],
+      inviteId: v.inviteId,
+    });
 
     return {
+      kind: 'visitor',
       inviteId: invite.id,
       scannedVisitorId,
       purpose: invite.purpose,
@@ -90,26 +139,48 @@ export class GateService {
       organisation: invite.organisation,
       organisationId: invite.organisationId,
       locationId: invite.locationId,
-      visitors: invite.visitors.map((v: any) => ({
-        id: v.id,
-        fullName: v.fullName,
-        photoPath: v.photoPath,
-        status: v.status,
-        hostAvailabilityStatus: (v as any).hostAvailabilityStatus,
-        hostWaitUntil: (v as any).hostWaitUntil,
-        hostRespondedAt: (v as any).hostRespondedAt,
-        lastHostPromptAt: (v as any).lastHostPromptAt,
-        entryMode: v.entryMode,
-        enteredAt: v.enteredAt,
-        exitedAt: v.exitedAt,
-        deniedAt: (v as any).deniedAt,
-        deniedReason: (v as any).deniedReason,
-        gateVisits: (v as any).gateVisits || [],
-      })),
+      passToken: linked.passToken,
+      appointments,
+      visitors: (linked.visitors?.length ? linked.visitors.filter((v: any) => v.inviteId === invite.id) : invite.visitors).map(presentVisitor),
     };
   }
 
-
+  private groupAppointments(visitors: any[]) {
+    const byInvite = new Map<string, any>();
+    for (const v of visitors || []) {
+      const inv = v.invite || {};
+      const id = v.inviteId || inv.id;
+      if (!id) continue;
+      if (!byInvite.has(id)) {
+        byInvite.set(id, {
+          inviteId: id,
+          purpose: inv.purpose,
+          expectedAt: inv.expectedAt,
+          organisation: inv.organisation,
+          organisationId: inv.organisationId,
+          locationId: inv.locationId,
+          host: inv.host,
+          visitors: [],
+        });
+      }
+      byInvite.get(id).visitors.push({
+        id: v.id,
+        fullName: v.fullName,
+        email: v.email,
+        phone: v.phone,
+        photoPath: v.photoPath,
+        status: v.status,
+        enteredAt: v.enteredAt,
+        exitedAt: v.exitedAt,
+        deniedAt: v.deniedAt,
+        deniedReason: v.deniedReason,
+        hostAvailabilityStatus: v.hostAvailabilityStatus,
+        gateVisits: v.gateVisits || [],
+        transfers: v.transfers || [],
+      });
+    }
+    return [...byInvite.values()];
+  }
 
   async listCheckpoints(actor: any) {
     if (actor.role === 'GLOBAL_ADMIN' && !(actor.permissions || []).includes('gates.manage')) throw new ForbiddenException('Gate oversight permission is required');
@@ -141,12 +212,23 @@ export class GateService {
     if (['GATE', 'GLOBAL_GATE'].includes(actor.role) && !gate.assignments.some(a => a.userId === actor.id)) throw new BadRequestException('You are not assigned to this checkpoint');
     if (visitor.status === VisitStatus.EXITED || visitor.status === VisitStatus.CANCELLED) throw new BadRequestException('This visit is already closed');
     if (visitor.status === VisitStatus.DENIED) throw new BadRequestException('This visitor has already been denied');
-    const currentEvent = await this.prisma.gateVisit.findFirst({ where: { visitorId, gateId }, orderBy: { occurredAt: 'desc' } });
+    const direction = String(body.direction || '').toUpperCase() === 'EXIT' || visitor.status === VisitStatus.ARRIVED ? 'EXIT' : 'ENTRY';
+    if (direction === 'EXIT' && visitor.status !== VisitStatus.ARRIVED) throw new BadRequestException('Exit checkpoints start after the visitor has arrived');
+    if (direction === 'EXIT' && decision === 'PASSED') await this.assertParticularsResolved(visitorId, direction === 'EXIT');
+    const currentEvent = await this.prisma.gateVisit.findFirst({ where: { visitorId, gateId, direction }, orderBy: { occurredAt: 'desc' } });
     if (currentEvent?.decision === 'PASSED') throw new BadRequestException('Visitor has already passed this checkpoint');
-    const earlier = await this.prisma.gate.findMany({ where: { locationId: gate.locationId, isActive: true, sequence: { lt: gate.sequence } }, orderBy: { sequence: 'asc' } });
-    for (const prior of earlier) {
-      const event = await this.prisma.gateVisit.findFirst({ where: { visitorId, gateId: prior.id }, orderBy: { occurredAt: 'desc' } });
-      if (!event || event.decision !== 'PASSED') throw new BadRequestException(`Visitor must pass ${prior.name} before this checkpoint`);
+    if (direction === 'ENTRY') {
+      const earlier = await this.prisma.gate.findMany({ where: { locationId: gate.locationId, isActive: true, sequence: { lt: gate.sequence } }, orderBy: { sequence: 'asc' } });
+      for (const prior of earlier) {
+        const event = await this.prisma.gateVisit.findFirst({ where: { visitorId, gateId: prior.id, direction: 'ENTRY' }, orderBy: { occurredAt: 'desc' } });
+        if (!event || event.decision !== 'PASSED') throw new BadRequestException(`Visitor must pass ${prior.name} before this checkpoint`);
+      }
+    } else {
+      const later = await this.prisma.gate.findMany({ where: { locationId: gate.locationId, isActive: true, sequence: { gt: gate.sequence } }, orderBy: { sequence: 'desc' } });
+      for (const prior of later) {
+        const event = await this.prisma.gateVisit.findFirst({ where: { visitorId, gateId: prior.id, direction: 'EXIT' }, orderBy: { occurredAt: 'desc' } });
+        if (!event || event.decision !== 'PASSED') throw new BadRequestException(`Visitor must pass ${prior.name} before this exit checkpoint`);
+      }
     }
     const particulars = Array.isArray(body.particulars) ? body.particulars : [];
     for (const item of particulars) {
@@ -157,16 +239,21 @@ export class GateService {
     if (evidencePhotos.length > 10) throw new BadRequestException('A checkpoint can have at most 10 evidence photos');
     if (evidencePhotos.some((p: string) => !/^\/visitors\/particulars\/[a-f0-9-]+\.webp$/i.test(p))) throw new BadRequestException('All checkpoint photos must be uploaded WebP evidence images');
     const event = await this.prisma.$transaction(async tx => {
-      const created = await tx.gateVisit.create({ data: { visitorId, gateId, officerId: actor.id, decision, particularsChecked: body.particularsChecked === true, evidencePhotos, notes: body.notes ? String(body.notes).slice(0, 2000) : null } });
+      const created = await tx.gateVisit.create({ data: { visitorId, gateId, officerId: actor.id, decision, direction, particularsChecked: body.particularsChecked === true, evidencePhotos, notes: body.notes ? String(body.notes).slice(0, 2000) : null } });
       if (particulars.length) await tx.gateParticular.createMany({ data: particulars.map(item => ({ gateVisitId: created.id, kind: String(item.kind).toUpperCase(), description: String(item.description).trim().slice(0, 500), quantity: Math.max(1, Math.min(1000, Number(item.quantity) || 1)), imagePath: item.imagePath ? String(item.imagePath).slice(0, 1000) : null, createdById: actor.id })) });
-      if (decision === 'DENIED') await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.DENIED, deniedAt: new Date(), deniedReason: String(body.notes || 'Denied at checkpoint').slice(0, 1000), entryById: actor.id } });
-      else {
+      if (decision === 'DENIED' && direction === 'ENTRY') await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.DENIED, deniedAt: new Date(), deniedReason: String(body.notes || 'Denied at checkpoint').slice(0, 1000), entryById: actor.id } });
+      else if (decision === 'PASSED' && direction === 'ENTRY') {
         const remaining = await tx.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { gt: gate.sequence } } });
         if (remaining === 0) await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.ARRIVED, hostAvailabilityStatus: 'PENDING', hostWaitUntil: null, hostRespondedAt: null, lastHostPromptAt: new Date(), enteredAt: visitor.enteredAt || new Date(), entryById: actor.id, gateId, entryMode: Object.values(EntryMode).includes(body.entryMode) ? body.entryMode : EntryMode.PEDESTRIAN } });
+      } else if (decision === 'PASSED' && direction === 'EXIT') {
+        await this.assertParticularsResolved(visitorId);
+        const remaining = await tx.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { lt: gate.sequence } } });
+        if (remaining === 0) await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.EXITED, exitedAt: new Date(), exitById: actor.id } });
       }
       return tx.gateVisit.findUnique({ where: { id: created.id }, include: { gate: { include: { location: true } }, officer: { select: { id: true, fullName: true } }, particulars: true } });
     });
-    await this.audit.log({ action: `CHECKPOINT_${decision}`, entity: 'Visitor', entityId: visitorId, userId: actor.id, details: { gateId, gateName: gate.name, particulars: particulars.length } });
+    await this.audit.log({ action: `CHECKPOINT_${decision}`, entity: 'Visitor', entityId: visitorId, userId: actor.id, details: { gateId, gateName: gate.name, particulars: particulars.length, direction } });
+    await this.mirrorCheckpointToLinked(visitorId, gate, { decision, direction, actorId: actor.id, particularsChecked: body.particularsChecked === true, evidencePhotos, notes: body.notes ? String(body.notes).slice(0, 2000) : null, entryMode: body.entryMode });
     if (decision === 'DENIED') {
       await this.notifications.create({ userId: visitor.invite.hostId, title: 'Visitor entry declined', body: `${visitor.fullName} was declined at ${gate.name}: ${String(body.notes).trim()}`, meta: { visitorId, inviteId: visitor.inviteId, type: 'ENTRY_DENIED' }, channels: ['in_app'] });
       const host = await this.prisma.user.findUnique({ where: { id: visitor.invite.hostId }, select: { email: true, fullName: true } });
@@ -230,8 +317,36 @@ export class GateService {
     const global = ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
     if (!global && gate.location.organisationId !== actor.orgId) throw new NotFoundException('Particular record not found');
     if (['GATE', 'GLOBAL_GATE'].includes(actor.role) && !gate.assignments.some(a => a.userId === actor.id)) throw new ForbiddenException('You are not assigned to this checkpoint');
-    const updated = await this.prisma.gateParticular.update({ where: { id: particularId }, data: { returnedAt: new Date(), returnedById: actor.id } });
-    await this.audit.log({ action: 'WITHHELD_ITEM_RETURNED', entity: 'GateParticular', entityId: particularId, userId: actor.id, details: { gateId: gate.id, visitorId: item.gateVisit.visitorId } });
+    return this.resolveParticular(particularId, actor, { resolution: 'RETURNED' });
+  }
+
+  async resolveParticular(particularId: string, actor: any, body: { resolution: string; note?: string }) {
+    if (actor.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Super Admin II accounts provide oversight, not custody operations');
+    const item = await this.prisma.gateParticular.findUnique({ where: { id: particularId }, include: { gateVisit: { include: { gate: { include: { location: true, assignments: true } } } } } });
+    if (!item) throw new NotFoundException('Particular record not found');
+    if (item.kind !== 'WITHHELD') throw new BadRequestException('Only withheld items can be resolved');
+    if (item.resolvedAt || item.returnedAt) throw new BadRequestException('This item has already been resolved');
+    const resolution = String(body.resolution || '').toUpperCase();
+    if (!['RETURNED', 'SEIZED', 'OTHER'].includes(resolution)) throw new BadRequestException('Mark the item as returned, seized, or other');
+    const note = String(body.note || '').trim();
+    if (resolution === 'OTHER' && note.length < 2) throw new BadRequestException('Add a short note when resolving as other');
+    const gate = item.gateVisit.gate;
+    const global = ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
+    if (!global && gate.location.organisationId !== actor.orgId) throw new NotFoundException('Particular record not found');
+    if (['GATE', 'GLOBAL_GATE'].includes(actor.role) && !gate.assignments.some((a: any) => a.userId === actor.id)) throw new ForbiddenException('You are not assigned to this checkpoint');
+    const now = new Date();
+    const updated = await this.prisma.gateParticular.update({
+      where: { id: particularId },
+      data: {
+        resolution,
+        resolutionNote: note ? note.slice(0, 500) : null,
+        resolvedAt: now,
+        resolvedById: actor.id,
+        returnedAt: resolution === 'RETURNED' ? now : item.returnedAt,
+        returnedById: resolution === 'RETURNED' ? actor.id : item.returnedById,
+      },
+    });
+    await this.audit.log({ action: `WITHHELD_ITEM_${resolution}`, entity: 'GateParticular', entityId: particularId, userId: actor.id, details: { gateId: gate.id, visitorId: item.gateVisit.visitorId, note } });
     return updated;
   }
 
@@ -337,6 +452,8 @@ export class GateService {
     if (visitor.status !== VisitStatus.ARRIVED) {
       throw new BadRequestException('Visitor is not currently on premises');
     }
+    await this.assertParticularsResolved(visitorId);
+    await this.assertExitCheckpointsComplete(visitor);
 
     const updated = await this.prisma.visitor.update({
       where: { id: visitorId },
@@ -609,5 +726,59 @@ export class GateService {
     };
   }
 
-}
+  private async assertParticularsResolved(visitorId: string, finalExit = true) {
+    const open = await this.prisma.gateParticular.findFirst({
+      where: {
+        kind: 'WITHHELD',
+        resolvedAt: null,
+        returnedAt: null,
+        gateVisit: { visitorId },
+      },
+      include: { gateVisit: { include: { gate: { select: { name: true } } } } },
+    });
+    if (open) {
+      throw new BadRequestException(`Cannot exit yet: "${open.description}" is still withheld at ${open.gateVisit.gate?.name || 'a checkpoint'}. Mark it returned, seized, or otherwise resolved.`);
+    }
+  }
 
+  private async assertExitCheckpointsComplete(visitor: { id: string; invite: { locationId?: string | null } }) {
+    const locationId = visitor.invite.locationId;
+    if (!locationId) return;
+    const gates = await this.prisma.gate.findMany({ where: { locationId, isActive: true }, orderBy: { sequence: 'desc' } });
+    if (!gates.length) return;
+    for (const g of gates) {
+      const ev = await this.prisma.gateVisit.findFirst({ where: { visitorId: visitor.id, gateId: g.id, direction: 'EXIT' }, orderBy: { occurredAt: 'desc' } });
+      if (!ev || ev.decision !== 'PASSED') {
+        throw new BadRequestException(`Exit must pass through checkpoints. ${g.name} has not been cleared for exit.`);
+      }
+    }
+  }
+
+  private async mirrorCheckpointToLinked(visitorId: string, gate: any, opts: { decision: string; direction: string; actorId: string; particularsChecked: boolean; evidencePhotos: string[]; notes: string | null; entryMode?: any }) {
+    const linked = await linkSameDayVisits(this.prisma, visitorId);
+    const others = (linked.visitors || []).filter((v: any) => v.id !== visitorId && v.invite?.organisationId === gate.location.organisationId);
+    for (const other of others) {
+      if (other.status === 'EXITED' || other.status === 'CANCELLED' || other.status === 'DENIED') continue;
+      if (opts.direction === 'EXIT' && other.status !== 'ARRIVED') continue;
+      const existing = await this.prisma.gateVisit.findFirst({ where: { visitorId: other.id, gateId: gate.id, direction: opts.direction }, orderBy: { occurredAt: 'desc' } });
+      if (existing?.decision === 'PASSED') continue;
+      await this.prisma.gateVisit.create({
+        data: { visitorId: other.id, gateId: gate.id, officerId: opts.actorId, decision: opts.decision, direction: opts.direction, particularsChecked: opts.particularsChecked, evidencePhotos: opts.evidencePhotos, notes: opts.notes },
+      });
+      if (opts.decision === 'DENIED' && opts.direction === 'ENTRY') {
+        await this.prisma.visitor.update({ where: { id: other.id }, data: { status: VisitStatus.DENIED, deniedAt: new Date(), deniedReason: (opts.notes || 'Denied at checkpoint').slice(0, 1000) } });
+      } else if (opts.decision === 'PASSED' && opts.direction === 'ENTRY') {
+        const remaining = await this.prisma.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { gt: gate.sequence } } });
+        if (remaining === 0) await this.prisma.visitor.update({ where: { id: other.id }, data: { status: VisitStatus.ARRIVED, enteredAt: other.enteredAt || new Date(), entryById: opts.actorId, gateId: gate.id } });
+      } else if (opts.decision === 'PASSED' && opts.direction === 'EXIT') {
+        const remaining = await this.prisma.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { lt: gate.sequence } } });
+        if (remaining === 0) {
+          try { await this.assertParticularsResolved(other.id); } catch { continue; }
+          await this.prisma.visitor.update({ where: { id: other.id }, data: { status: VisitStatus.EXITED, exitedAt: new Date(), exitById: opts.actorId } });
+        }
+      }
+    }
+  }
+
+
+}

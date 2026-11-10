@@ -126,6 +126,8 @@ export class AnalyticsController {
       status,
       page: int(q.page, 1, 10000),
       pageSize: int(q.pageSize, 10, 100),
+      type: typeof q.type === 'string' ? q.type : undefined,
+      view: typeof q.view === 'string' ? q.view : undefined,
     };
   }
 
