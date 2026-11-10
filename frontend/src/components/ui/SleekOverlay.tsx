@@ -91,7 +91,7 @@ export default function SleekOverlay({
             <div className="relative p-5 sm:p-6">
               <div className="mb-4 flex items-start gap-3">
                 {icon && (
-                  <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${toneIcon[tone]} text-white shadow-lg`}>
+                  <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${toneIcon[tone]} ${tone === 'brand' ? 'text-on-brand on-brand-fill' : 'text-white shadow-lg'}`}>
                     {icon}
                   </span>
                 )}

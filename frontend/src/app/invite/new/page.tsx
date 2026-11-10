@@ -272,11 +272,11 @@ export default function NewInvitePage() {
     return (
       <div className="page">
         <div className="hero animate-in mb-4" style={waiting ? { backgroundImage: 'linear-gradient(135deg, #fbbf24, #f59e0b 50%, #ea580c)', boxShadow: '0 14px 34px -12px rgb(217 119 6 / 0.6)' } : undefined}>
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 ring-1 ring-white/30 backdrop-blur">
+          <span className={`flex h-12 w-12 items-center justify-center rounded-2xl backdrop-blur ${waiting ? 'bg-white/20 ring-1 ring-white/30' : 'bg-on-brand/20 ring-1 ring-on-brand/30'}`}>
             {waiting ? <Clock size={24} /> : <Check size={26} />}
           </span>
           <h1 className="mt-3 text-2xl font-bold">{waiting ? 'Request submitted' : 'Invite created'}</h1>
-          <p className="mt-1 text-sm text-white/80">
+          <p className={`mt-1 text-sm ${waiting ? 'text-white/80' : 'text-on-brand/80'}`}>
             {result.awaitingApproval
               ? 'An administrator will review it. Guests are emailed as soon as it is approved.'
               : result.isOffline
@@ -418,7 +418,7 @@ export default function NewInvitePage() {
                 <div key={i} className={`card transition ${open ? '!border-brand-200 shadow-lift' : ''}`}>
                   <button type="button" onClick={() => toggleGuest(i)} className="group flex w-full items-center gap-2.5 px-3.5 py-3 text-left">
                     {g.fullName ? <Avatar name={g.fullName} size={30} /> : (
-                      <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-700 text-xs font-bold text-white">{i + 1}</span>
+                      <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-700 text-xs font-bold text-on-brand on-brand-fill">{i + 1}</span>
                     )}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{summary}</span>
                     {g.email && <Mail size={14} className="text-emerald-500" />}

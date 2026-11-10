@@ -64,9 +64,11 @@ model Organisation {
   code            String          @unique
   // White-label
   logoUrl         String?
-  primaryColor    String?         @default("#2563eb")
-  secondaryColor  String?         @default("#1e40af")
-  emailIconBg     String?         @default("#ffffff")
+  primaryColor      String?         @default("#2563eb")
+  secondaryColor    String?         @default("#1e40af")
+  // Text colour on primary/brand surfaces; null = auto (white or dark for contrast)
+  primaryTextColor  String?
+  emailIconBg       String?         @default("#ffffff")
   customDomain    String?
   // Settings
   requireApproval Boolean         @default(false)

@@ -11,6 +11,7 @@ const BRANDING_SELECT = {
   logoUrl: true,
   primaryColor: true,
   secondaryColor: true,
+  primaryTextColor: true,
   emailIconBg: true,
   customDomain: true,
   requireApproval: true,
@@ -57,6 +58,9 @@ export class BrandingService {
       logoUrl: org.logoUrl || platform?.logoUrl || null,
       primaryColor: org.primaryColor && org.primaryColor.toLowerCase() !== '#2563eb' ? org.primaryColor : platform?.primaryColor || org.primaryColor || '#2563eb',
       secondaryColor: org.secondaryColor && org.secondaryColor.toLowerCase() !== '#1e40af' ? org.secondaryColor : platform?.secondaryColor || org.secondaryColor || '#1e40af',
+      // Inherit platform text colour only when the agency also inherits the platform primary.
+      primaryTextColor: org.primaryTextColor
+        || (!(org.primaryColor && org.primaryColor.toLowerCase() !== '#2563eb') ? platform?.primaryTextColor || null : null),
       emailIconBg: org.emailIconBg && org.emailIconBg.toLowerCase() !== '#ffffff' ? org.emailIconBg : platform?.emailIconBg || org.emailIconBg || '#ffffff',
     };
   }
@@ -78,6 +82,7 @@ export class BrandingService {
       logoUrl: org?.logoUrl || null,
       primaryColor: org?.primaryColor || '#2563eb',
       secondaryColor: org?.secondaryColor || '#1e40af',
+      primaryTextColor: org?.primaryTextColor || null,
       emailIconBg: org?.emailIconBg || '#ffffff',
       updatedAt: org?.updatedAt || null,
     };
@@ -103,6 +108,14 @@ export class BrandingService {
     if (body.primaryColor !== undefined) data.primaryColor = normHex(body.primaryColor, 'Primary colour');
     if (body.secondaryColor !== undefined)
       data.secondaryColor = normHex(body.secondaryColor, 'Secondary colour');
+    if (body.primaryTextColor !== undefined) {
+      const raw = body.primaryTextColor;
+      if (raw === null || raw === '' || String(raw).trim().toLowerCase() === 'auto') {
+        data.primaryTextColor = null;
+      } else {
+        data.primaryTextColor = normHex(raw, 'Theme text colour');
+      }
+    }
     if (body.emailIconBg !== undefined) data.emailIconBg = normHex(body.emailIconBg, 'Email icon background');
     if (body.customDomain !== undefined) {
       const d = String(body.customDomain || '')

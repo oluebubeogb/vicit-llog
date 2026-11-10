@@ -6,6 +6,7 @@ export type MailBrand = {
   appName: string;
   color: string;
   color2: string;
+  onColor: string;
   url: string;
   iconBg: string;
   logoPath: string;
@@ -39,6 +40,53 @@ function tint(hex: string, amount: number) {
   const c = m.slice(1).map((x) => parseInt(x, 16));
   const out = c.map((v) => Math.round(v + (255 - v) * amount));
   return '#' + out.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+function mailHexRgb(hex?: string | null): [number, number, number] | null {
+  if (!hex) return null;
+  let h = String(hex).trim().replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (!/^[0-9a-f]{6}$/i.test(h)) return null;
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function mailLum(rgb: [number, number, number]) {
+  const lin = rgb.map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+function mailContrast(a: [number, number, number], b: [number, number, number]) {
+  const l1 = mailLum(a);
+  const l2 = mailLum(b);
+  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** White or slate-900, whichever contrasts better with the brand background. */
+function autoOnPrimary(bg?: string | null): string {
+  const rgb = mailHexRgb(bg) || [37, 99, 235];
+  const white = mailContrast(rgb, [255, 255, 255]);
+  const dark = mailContrast(rgb, [15, 23, 42]);
+  return white >= dark ? '#ffffff' : '#0f172a';
+}
+
+function resolveOnColor(bg?: string | null, explicit?: string | null): string {
+  const rgb = mailHexRgb(explicit);
+  if (rgb) return '#' + rgb.map((v) => v.toString(16).padStart(2, '0')).join('');
+  return autoOnPrimary(bg);
+}
+
+function rgba(hex: string, a: number) {
+  const rgb = mailHexRgb(hex) || [255, 255, 255];
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
+}
+
+function isLightBrand(hex?: string | null) {
+  const rgb = mailHexRgb(hex);
+  return rgb ? mailLum(rgb) >= 0.82 : false;
 }
 
 const FONT =
@@ -79,11 +127,15 @@ export class MailService {
     let logo = org?.logoUrl || platform?.logoUrl || '';
     if (logo && !/^https?:\/\//i.test(logo)) logo = api ? `${api}${logo}` : (process.env.EMAIL_LOGO_URL || '');
     if (!logo) logo = process.env.EMAIL_LOGO_URL || (frontend ? `${frontend}/icon-192.png` : '');
+    const color = org?.primaryColor && String(org.primaryColor).toLowerCase() !== '#2563eb' ? org.primaryColor : platform?.primaryColor || org?.primaryColor || process.env.EMAIL_BRAND_COLOR || '#2563eb';
+    const inheritsPrimary = !(org?.primaryColor && String(org.primaryColor).toLowerCase() !== '#2563eb');
+    const explicitOn = org?.primaryTextColor || (inheritsPrimary ? platform?.primaryTextColor : null);
     return {
       name: org?.name || platform?.name || process.env.ORGANIZATION || process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
       appName: process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog',
-      color: org?.primaryColor && String(org.primaryColor).toLowerCase() !== '#2563eb' ? org.primaryColor : platform?.primaryColor || org?.primaryColor || process.env.EMAIL_BRAND_COLOR || '#2563eb',
+      color,
       color2: org?.secondaryColor && String(org.secondaryColor).toLowerCase() !== '#1e40af' ? org.secondaryColor : platform?.secondaryColor || org?.secondaryColor || process.env.EMAIL_BRAND_COLOR_2 || '#1e40af',
+      onColor: resolveOnColor(color, explicitOn),
       url: frontend,
       iconBg: org?.emailIconBg && String(org.emailIconBg).toLowerCase() !== '#ffffff' ? org.emailIconBg : platform?.emailIconBg || org?.emailIconBg || process.env.EMAIL_ICON_BG || '#ffffff',
       logoPath: logo,
@@ -118,10 +170,10 @@ export class MailService {
     style="background:#eef2f7;background-image:linear-gradient(180deg,${soft} 0%,#eef2f7 55%,#f8fafc 100%);padding:36px 12px;">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
-        <tr><td bgcolor="${b.color}" style="background:${b.color};background-image:linear-gradient(135deg,${b.color} 0%,${b.color2} 100%);border-radius:24px 24px 0 0;padding:34px 32px 30px;text-align:center;">
+        <tr><td bgcolor="${b.color}" style="background:${b.color};background-image:linear-gradient(135deg,${b.color} 0%,${b.color2} 100%);border-radius:24px 24px 0 0;padding:34px 32px 30px;text-align:center;${isLightBrand(b.color) ? 'border:1px solid #cbd5e1;' : ''}">
           ${logoBlock}
-          <div style="font-size:21px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">${esc(b.name)}</div>
-          <div style="font-size:12px;color:rgba(255,255,255,0.82);margin-top:6px;letter-spacing:0.14em;text-transform:uppercase;">Visitor Access</div>
+          <div style="font-size:21px;font-weight:700;color:${b.onColor};letter-spacing:-0.01em;">${esc(b.name)}</div>
+          <div style="font-size:12px;color:${rgba(b.onColor, 0.82)};margin-top:6px;letter-spacing:0.14em;text-transform:uppercase;">Visitor Access</div>
         </td></tr>
         <tr><td bgcolor="#ffffff" class="px" style="background:#ffffff;padding:34px 36px 30px;color:#0f172a;font-size:15px;line-height:1.65;border-left:1px solid #e6ebf2;border-right:1px solid #e6ebf2;">
           ${bodyHtml}
@@ -143,9 +195,11 @@ export class MailService {
   }
 
   private btn(b: MailBrand, href: string, label: string) {
+    const light = isLightBrand(b.color);
+    const btnShadow = light ? '0 0 0 1px #cbd5e1, 0 8px 20px rgba(15,23,42,0.14)' : `0 8px 20px ${tint(b.color, 0.55)}`;
     return `<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:26px auto 10px;">
-      <tr><td bgcolor="${b.color}" style="background:${b.color};background-image:linear-gradient(135deg,${b.color} 0%,${b.color2} 100%);border-radius:14px;box-shadow:0 8px 20px ${tint(b.color, 0.55)};">
-        <a href="${esc(href)}" style="display:inline-block;padding:15px 30px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;font-family:${FONT};">${esc(label)} &rarr;</a>
+      <tr><td bgcolor="${b.color}" style="background:${b.color};background-image:linear-gradient(135deg,${b.color} 0%,${b.color2} 100%);border-radius:14px;box-shadow:${btnShadow};">
+        <a href="${esc(href)}" style="display:inline-block;padding:15px 30px;color:${b.onColor};text-decoration:none;font-weight:600;font-size:15px;font-family:${FONT};">${esc(label)} &rarr;</a>
       </td></tr>
     </table>`;
   }

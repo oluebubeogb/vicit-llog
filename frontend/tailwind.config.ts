@@ -26,6 +26,8 @@ const config: Config = {
       colors: {
         brand: v('brand'),
         accent: v('accent'),
+        // Foreground on primary/brand-filled surfaces (theme text colour)
+        'on-brand': 'rgb(var(--brand-on-primary) / <alpha-value>)',
       },
       fontFamily: {
         sans: [

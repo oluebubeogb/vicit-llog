@@ -70,6 +70,7 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
           logoUrl: agency?.logoUrl || null,
           primaryColor: agency?.primaryColor || DEFAULT_BRANDING.primaryColor,
           secondaryColor: agency?.secondaryColor || DEFAULT_BRANDING.secondaryColor,
+          primaryTextColor: agency?.primaryTextColor ?? DEFAULT_BRANDING.primaryTextColor,
           emailIconBg: agency?.emailIconBg || DEFAULT_BRANDING.emailIconBg,
         }, identityScope());
       } else {

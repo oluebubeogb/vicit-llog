@@ -92,14 +92,14 @@ export default function InstallBanner({ variant = 'profile', className = '' }: P
         <div
           className={
             isLogin
-              ? 'group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white backdrop-blur-md transition hover:bg-white/15'
+              ? 'group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-on-brand/20 bg-on-brand/10 px-4 py-3 text-on-brand backdrop-blur-md transition hover:bg-on-brand/15'
               : 'card card-art group relative flex w-full items-center gap-3 !overflow-visible px-4 py-3.5 text-slate-800'
           }
         >
           <div
             className={
               isLogin
-                ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20 ring-1 ring-white/25 transition group-hover:scale-110'
+                ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-on-brand/20 ring-1 ring-on-brand/25 transition group-hover:scale-110'
                 : 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 text-brand-700 transition group-hover:scale-110'
             }
           >
@@ -107,8 +107,8 @@ export default function InstallBanner({ variant = 'profile', className = '' }: P
           </div>
 
           <div className="min-w-0 flex-1">
-            <p className={`text-sm font-semibold ${isLogin ? 'text-white' : 'text-slate-900'}`}>Install {appName}</p>
-            <p className={`text-xs ${isLogin ? 'text-white/70' : 'text-slate-500'}`}>
+            <p className={`text-sm font-semibold ${isLogin ? 'text-on-brand' : 'text-slate-900'}`}>Install {appName}</p>
+            <p className={`text-xs ${isLogin ? 'text-on-brand/70' : 'text-slate-500'}`}>
               {isIos && !canInstall ? 'Add to Home Screen for quick access' : 'One tap, works offline'}
             </p>
           </div>
@@ -127,7 +127,7 @@ export default function InstallBanner({ variant = 'profile', className = '' }: P
             aria-label="Dismiss"
             className={
               isLogin
-                ? 'absolute right-1 top-1 rounded-full p-1 text-white/60 transition hover:bg-black/20 hover:text-white'
+                ? 'absolute right-1 top-1 rounded-full p-1 text-on-brand/60 transition hover:bg-black/20 hover:text-on-brand'
                 : 'absolute -right-1.5 -top-1.5 rounded-full border border-slate-200 bg-white p-1 text-slate-400 shadow-sm transition hover:text-slate-600'
             }
           >
@@ -157,7 +157,7 @@ export default function InstallBanner({ variant = 'profile', className = '' }: P
         <ol className="stagger space-y-2.5">
           {steps.map((st, i) => (
             <li key={i} className="tile flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-700 text-sm font-bold text-white shadow-glow">{i + 1}</span>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-700 text-sm font-bold text-on-brand on-brand-fill">{i + 1}</span>
               <div className="min-w-0 flex-1 pt-0.5">
                 <p className="text-sm font-semibold text-slate-900">{st.t}</p>
                 <p className="mt-0.5 text-xs leading-6 text-slate-500">{st.d}</p>

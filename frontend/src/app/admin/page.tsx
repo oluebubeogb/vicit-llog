@@ -325,7 +325,7 @@ export default function AdminPage() {
             <button key={t.k} type="button" data-active={tab === t.k} onClick={() => setTab(t.k)} className="!flex items-center justify-center gap-1 !px-1.5">
               <t.icon size={14} className="hidden min-[400px]:block" /> {t.l}
               {t.n ? (
-                <span className={`rounded-full px-1.5 text-[10px] font-bold ${tab === t.k ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-700'}`}>{t.n}</span>
+                <span className={`rounded-full px-1.5 text-[10px] font-bold ${tab === t.k ? 'bg-on-brand/25 text-on-brand' : 'bg-amber-100 text-amber-700'}`}>{t.n}</span>
               ) : null}
             </button>
           ))}

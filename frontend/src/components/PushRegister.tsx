@@ -76,7 +76,7 @@ export default function PushRegister() {
               }}
               className="flex min-w-0 flex-1 items-start gap-3 text-left"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-700 text-white shadow-glow">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-700 text-on-brand on-brand-fill">
                 <Bell className="h-4 w-4" />
               </span>
               <span className="min-w-0">

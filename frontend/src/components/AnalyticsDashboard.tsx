@@ -973,7 +973,7 @@ export default function AnalyticsDashboard({
                   onClick={exportDrill}
                   disabled={exporting || listLoading || !res || res.total === 0}
                   aria-label="Download CSV"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-700 text-white shadow-glow transition hover:-translate-y-0.5 hover:shadow-lg disabled:translate-y-0 disabled:opacity-40"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-700 text-on-brand on-brand-fill transition hover:-translate-y-0.5 hover:shadow-lg disabled:translate-y-0 disabled:opacity-40"
                 >
                   {exporting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Download size={16} />}
                 </button>

@@ -33,6 +33,9 @@
   --accent-800: 21 45 122;
   --accent-900: 17 36 98;
   --accent-950: 11 24 67;
+  --brand-on-primary: 255 255 255;
+  --brand-surface-shadow: 0 10px 30px -8px rgb(var(--brand-600) / 0.45);
+  --brand-surface-shadow-hover: 0 14px 34px -10px rgb(var(--brand-600) / 0.6);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --nav-height: 4.5rem;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -234,14 +237,16 @@ body {
     transform: scale(0.97);
   }
   .btn-primary {
-    @apply btn text-white shadow-glow;
+    @apply btn;
+    color: rgb(var(--brand-on-primary));
+    box-shadow: var(--brand-surface-shadow);
     background-image: linear-gradient(135deg, rgb(var(--brand-500)), rgb(var(--brand-700)) 55%, rgb(var(--accent-700)));
     background-size: 160% 160%;
     background-position: 0% 50%;
   }
   .btn-primary:hover:not(:disabled) {
     background-position: 100% 50%;
-    box-shadow: 0 14px 34px -10px rgb(var(--brand-600) / 0.6);
+    box-shadow: var(--brand-surface-shadow-hover);
   }
   .btn-primary::after {
     content: '';
@@ -290,13 +295,16 @@ body {
     @apply whitespace-nowrap rounded-xl px-3.5 py-1.5 text-sm font-medium text-slate-500 transition duration-200 hover:bg-brand-50 hover:text-brand-700;
   }
   .segmented > button[data-active='true'] {
-    @apply text-white shadow-glow;
+    color: rgb(var(--brand-on-primary));
+    box-shadow: var(--brand-surface-shadow);
     background-image: linear-gradient(135deg, rgb(var(--brand-500)), rgb(var(--brand-700)));
   }
 
   /* ---------- hero header (gradient + artwork) ---------- */
   .hero {
-    @apply relative isolate overflow-hidden rounded-3xl p-5 text-white shadow-glow;
+    @apply relative isolate overflow-hidden rounded-3xl p-5;
+    color: rgb(var(--brand-on-primary));
+    box-shadow: var(--brand-surface-shadow);
     background-image:
       radial-gradient(120% 140% at 100% 0%, rgb(var(--accent-400) / 0.55), transparent 55%),
       linear-gradient(135deg, rgb(var(--brand-600)), rgb(var(--brand-800)) 60%, rgb(var(--accent-900)));
@@ -306,10 +314,17 @@ body {
   .hero::before {
     content: '';
     @apply pointer-events-none absolute inset-0 -z-10;
-    background: white;
+    background: rgb(var(--brand-on-primary));
     opacity: 0.085;
     -webkit-mask: var(--art-lines) center / cover no-repeat;
     mask: var(--art-lines) center / cover no-repeat;
+  }
+
+
+  /* Foreground + visible edge on brand-filled tiles (white primaries stay readable) */
+  .on-brand-fill {
+    color: rgb(var(--brand-on-primary));
+    box-shadow: var(--brand-surface-shadow);
   }
 
   /* ---------- dotted artwork overlay ---------- */

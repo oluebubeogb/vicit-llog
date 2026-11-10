@@ -52,6 +52,7 @@ export class AuthService {
           code: user.organisation.code,
           logoUrl: user.organisation.logoUrl,
           primaryColor: user.organisation.primaryColor,
+          primaryTextColor: user.organisation.primaryTextColor,
         },
       },
     };

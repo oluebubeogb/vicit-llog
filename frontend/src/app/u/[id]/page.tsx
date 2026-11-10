@@ -110,20 +110,20 @@ export default function PublicUserPage() {
 
       <div className="hero animate-in !pb-6 text-center">
         <Tooltip content={avatar ? 'Tap to enlarge' : 'No photo'}>
-          <button type="button" onClick={() => avatar && setPhotoPreview(true)} className="mx-auto mb-3 block rounded-full ring-4 ring-white/30 transition hover:ring-white/60">
+          <button type="button" onClick={() => avatar && setPhotoPreview(true)} className="mx-auto mb-3 block rounded-full ring-4 ring-on-brand/30 transition hover:ring-on-brand/60">
             <Avatar name={profile.fullName} src={avatar} size={96} ring={false} className="!text-2xl" />
           </button>
         </Tooltip>
         <h1 className="text-2xl font-bold">{profile.fullName}</h1>
-        {profile.organisationName && <p className="mt-0.5 text-sm text-white/75">{profile.organisationName}</p>}
+        {profile.organisationName && <p className="mt-0.5 text-sm text-on-brand/75">{profile.organisationName}</p>}
         <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs">
           {profile.portfolio && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 ring-1 ring-on-brand/20 backdrop-blur">
               <Briefcase size={12} /> {profile.portfolio}
             </span>
           )}
           {profile.phone && (
-            <a href={`tel:${profile.phone}`} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur transition hover:bg-white/25">
+            <a href={`tel:${profile.phone}`} className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 ring-1 ring-on-brand/20 backdrop-blur transition hover:bg-on-brand/25">
               <Phone size={12} /> {profile.phone}
             </a>
           )}

@@ -19,7 +19,14 @@ import PageHeader from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/Tooltip';
 import { Notice, SkeletonList } from '@/components/ui/Bits';
 import { useBrand } from '@/components/BrandProvider';
-import { applyBranding, logoSrc } from '@/lib/brand';
+import {
+  applyBranding,
+  autoOnPrimaryColor,
+  contrastRatio,
+  CONTRAST_MIN,
+  logoSrc,
+  resolveOnPrimaryColor,
+} from '@/lib/brand';
 
 const PRESETS = [
   ['#2563eb', '#1e40af'],
@@ -28,6 +35,7 @@ const PRESETS = [
   ['#be123c', '#881337'],
   ['#b45309', '#78350f'],
   ['#0f172a', '#334155'],
+  ['#ffffff', '#e2e8f0'],
 ];
 
 function Section({ icon, title, info, applies, children }: { icon: ReactNode; title: string; info: string; applies: string[]; children: ReactNode }) {
@@ -72,6 +80,70 @@ function ColorField({ label, value, onChange, tip }: { label: string; value: str
   );
 }
 
+function ThemeTextColorField({
+  primary,
+  value,
+  onChange,
+}: {
+  primary: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const auto = autoOnPrimaryColor(primary);
+  const isAuto = !value;
+  const current = value || auto;
+  const ratio = contrastRatio(primary, current);
+  const poor = ratio < CONTRAST_MIN;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <ColorField
+            label="Theme text colour"
+            value={current}
+            onChange={(v) => onChange(v)}
+            tip="Colour of text, icons and chips that sit on the theme/brand background (buttons, heroes, theme cards). Other page text is unchanged."
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className={`mb-0.5 shrink-0 rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${
+            isAuto ? 'border-brand-300 bg-brand-50 text-brand-800 ring-2 ring-brand-200' : 'border-slate-200 bg-white text-slate-600 hover:border-brand-200'
+          }`}
+        >
+          Auto (contrast)
+        </button>
+      </div>
+      <div
+        className="overflow-hidden rounded-2xl"
+        style={{
+          background: `linear-gradient(135deg, ${primary}, ${primary})`,
+          color: current,
+          boxShadow: primary.toLowerCase() === '#ffffff' || ratio < 1.5 ? '0 0 0 1px rgb(15 23 42 / 0.16), 0 8px 24px -10px rgb(15 23 42 / 0.18)' : undefined,
+        }}
+      >
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ opacity: 0.75 }}>
+              Theme card preview
+            </p>
+            <p className="truncate text-sm font-bold">Your brand, your text</p>
+          </div>
+          <span className="rounded-lg px-2 py-1 text-[10px] font-semibold" style={{ background: current, color: primary, opacity: 0.95 }}>
+            {isAuto ? 'Auto' : current.toUpperCase()}
+          </span>
+        </div>
+      </div>
+      {poor && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Contrast is {ratio.toFixed(2)}:1 — below the 4.5:1 WCAG threshold. Text may be hard to read on this background.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function BrandingPage() {
   const { brand, refresh } = useBrand();
   const viewer = getUser();
@@ -83,6 +155,7 @@ export default function BrandingPage() {
     logoUrl: '',
     primaryColor: '#2563eb',
     secondaryColor: '#1e40af',
+    primaryTextColor: '',
     emailIconBg: '#ffffff',
     customDomain: '',
     requireApproval: false,
@@ -104,6 +177,7 @@ export default function BrandingPage() {
           logoUrl: b.logoUrl || '',
           primaryColor: b.primaryColor || '#2563eb',
           secondaryColor: b.secondaryColor || '#1e40af',
+          primaryTextColor: b.primaryTextColor || '',
           emailIconBg: b.emailIconBg || '#ffffff',
           customDomain: b.customDomain || '',
           requireApproval: !!b.requireApproval,
@@ -123,9 +197,14 @@ export default function BrandingPage() {
   useEffect(() => {
     if (loading) return;
     if (valid(form.primaryColor) && valid(form.secondaryColor)) {
-      applyBranding({ ...brandRef.current, primaryColor: form.primaryColor, secondaryColor: form.secondaryColor });
+      applyBranding({
+        ...brandRef.current,
+        primaryColor: form.primaryColor,
+        secondaryColor: form.secondaryColor,
+        primaryTextColor: form.primaryTextColor || null,
+      });
     }
-  }, [form.primaryColor, form.secondaryColor, loading]);
+  }, [form.primaryColor, form.secondaryColor, form.primaryTextColor, loading]);
 
   const dirty = initial && JSON.stringify(initial) !== JSON.stringify(form);
 
@@ -137,6 +216,7 @@ export default function BrandingPage() {
       await api.updateBranding({
         name: form.name,
         primaryColor: form.primaryColor,
+        primaryTextColor: form.primaryTextColor || null,
         emailIconBg: form.emailIconBg,
         secondaryColor: form.secondaryColor,
         customDomain: form.customDomain,
@@ -200,16 +280,22 @@ export default function BrandingPage() {
             </span>
             <div className="min-w-0">
               <p className="truncate text-sm font-bold">{form.name || 'Organisation'}</p>
-              <p className="text-[11px] text-white/70">Live preview</p>
+              <p className="text-[11px] text-on-brand/70">Live preview</p>
             </div>
           </div>
           <div className="mt-3 flex gap-1.5">
-            <span className="rounded-lg bg-white/20 px-2 py-1 text-[10px] font-semibold">Primary</span>
+            <span className="rounded-lg bg-on-brand/20 px-2 py-1 text-[10px] font-semibold">Primary</span>
             <span className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-brand-700">Button</span>
           </div>
         </div>
         <div className="w-[110px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-          <div className="flex h-9 items-center justify-center" style={{ background: `linear-gradient(135deg, ${form.primaryColor}, ${form.secondaryColor})` }}>
+          <div
+            className="flex h-9 items-center justify-center"
+            style={{
+              background: `linear-gradient(135deg, ${form.primaryColor}, ${form.secondaryColor})`,
+              boxShadow: form.primaryColor && form.primaryColor.toLowerCase() === '#ffffff' ? 'inset 0 0 0 1px rgb(15 23 42 / 0.14)' : undefined,
+            }}
+          >
             <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-md p-0.5" style={{ background: form.emailIconBg }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={logo || '/icon-192.png'} alt="" className="h-full w-full object-contain" />
@@ -218,7 +304,16 @@ export default function BrandingPage() {
           <div className="space-y-1 p-2">
             <span className="block h-1.5 w-3/4 rounded bg-slate-200" />
             <span className="block h-1.5 w-1/2 rounded bg-slate-100" />
-            <span className="mt-1.5 block h-3.5 w-14 rounded" style={{ background: form.primaryColor }} />
+            <span
+              className="mt-1.5 flex h-3.5 w-14 items-center justify-center rounded text-[7px] font-bold"
+              style={{
+                background: form.primaryColor,
+                color: resolveOnPrimaryColor(form.primaryColor, form.primaryTextColor || null),
+                boxShadow: form.primaryColor && form.primaryColor.toLowerCase() === '#ffffff' ? '0 0 0 1px rgb(15 23 42 / 0.16)' : undefined,
+              }}
+            >
+              Go
+            </span>
             <p className="flex items-center gap-1 pt-0.5 text-[9px] text-slate-400">
               <Mail size={9} /> Email
             </p>
@@ -265,7 +360,7 @@ export default function BrandingPage() {
                 style={{ background: `linear-gradient(135deg, ${p}, ${s})` }}
                 aria-label={`Use ${p}`}
               >
-                {form.primaryColor === p && <Check size={14} className="absolute inset-0 m-auto text-white" />}
+                {form.primaryColor === p && <Check size={14} className="absolute inset-0 m-auto" style={{ color: autoOnPrimaryColor(p) }} />}
               </button>
             ))}
           </div>
@@ -273,6 +368,11 @@ export default function BrandingPage() {
             <ColorField label="Primary" value={form.primaryColor} onChange={(v) => setForm({ ...form, primaryColor: v })} tip="Main brand colour — buttons, highlights, navigation" />
             <ColorField label="Secondary" value={form.secondaryColor} onChange={(v) => setForm({ ...form, secondaryColor: v })} tip="Accent colour — gradient ends, depth and splash background" />
           </div>
+          <ThemeTextColorField
+            primary={form.primaryColor}
+            value={form.primaryTextColor}
+            onChange={(v) => setForm({ ...form, primaryTextColor: v })}
+          />
           <div className="flex h-3 overflow-hidden rounded-full">
             {[50, 100, 200, 300, 400, 500, 600, 700, 800, 900].map((s) => (
               <span key={s} className="flex-1" style={{ background: `rgb(var(--brand-${s}))` }} />

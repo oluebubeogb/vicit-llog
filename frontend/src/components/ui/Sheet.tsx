@@ -129,7 +129,7 @@ export default function Sheet({
                 {c.leading ? (
                   <div className="shrink-0">{c.leading}</div>
                 ) : c.icon ? (
-                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-white ${toneIcon[tone]}`}>
+                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${tone === 'brand' ? 'text-on-brand on-brand-fill' : 'text-white'} ${toneIcon[tone]}`}>
                     {c.icon}
                   </div>
                 ) : null}

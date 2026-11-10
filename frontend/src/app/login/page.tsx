@@ -54,10 +54,10 @@ export default function LoginPage() {
             <BrandMark size={84} className="animate-float" />
           </div>
           <h1 className="mt-5 text-[26px] font-bold tracking-tight">{brand.name}</h1>
-          <p className="mt-1 text-sm text-white/70">Visitor access & exit control</p>
+          <p className="mt-1 text-sm text-on-brand/70">Visitor access & exit control</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="animate-in relative overflow-hidden rounded-[28px] border border-white/60 bg-white/95 p-6 text-slate-900 shadow-[0_30px_80px_-30px_rgb(2_6_23/0.7)] backdrop-blur-xl">
+        <form onSubmit={handleSubmit} className="animate-in relative overflow-hidden rounded-[28px] border border-white/60 bg-white/95 p-6 text-slate-900 shadow-[0_30px_80px_-30px_rgb(2_6_23/0.7)] ring-1 ring-slate-200/80 backdrop-blur-xl">
           <div className="art-dots !opacity-[0.04]" />
           <h2 className="text-lg font-bold">Welcome back</h2>
           <p className="mb-5 text-sm text-slate-500">Sign in to continue</p>
@@ -87,7 +87,7 @@ export default function LoginPage() {
             <button type="submit" disabled={loading} className="btn-primary w-full !py-3.5 text-base">
               {loading ? (
                 <>
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Signing in…
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-on-brand/40 border-t-on-brand" /> Signing in…
                 </>
               ) : (
                 'Sign in'
@@ -95,7 +95,7 @@ export default function LoginPage() {
             </button>
           </div>
         </form>
-        <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-white/60">
+        <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-on-brand/60">
           <ShieldCheck size={13} /> Secured, encrypted access
         </p>
       </div>

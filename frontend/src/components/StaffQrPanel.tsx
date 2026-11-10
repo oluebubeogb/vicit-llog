@@ -255,7 +255,7 @@ export default function StaffQrPanel({ fullName, organisationName }: { fullName:
   return (
     <div className="surface space-y-3 p-4">
       <div className="flex items-start gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-accent-600 text-white shadow">
+        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-accent-600 text-on-brand on-brand-fill">
           <QrCode size={20} />
         </span>
         <div className="min-w-0 flex-1">

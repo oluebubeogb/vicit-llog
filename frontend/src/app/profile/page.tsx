@@ -223,7 +223,7 @@ export default function ProfilePage() {
                 setCamError('');
                 setCameraOn(false);
               }}
-              className="group relative shrink-0 rounded-full ring-4 ring-white/25 transition hover:ring-white/50"
+              className="group relative shrink-0 rounded-full ring-4 ring-on-brand/25 transition hover:ring-on-brand/50"
             >
               <Avatar name={user?.fullName} src={avatarUrl} size={72} ring={false} className="!text-xl" />
               <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-white p-1.5 text-brand-600 shadow-lg transition group-hover:scale-110">
@@ -233,10 +233,10 @@ export default function ProfilePage() {
           </Tooltip>
           <div className="min-w-0">
             <p className="truncate text-xl font-bold">{user?.fullName}</p>
-            <p className="truncate text-sm text-white/75">{user?.email}</p>
+            <p className="truncate text-sm text-on-brand/75">{user?.email}</p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {user?.role && <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold ring-1 ring-white/25">{roleLabel(user.role)}</span>}
-              {user?.organisation?.name && <span className="truncate text-[11px] text-white/70">{user.organisation.name}</span>}
+              {user?.role && <span className="rounded-full bg-on-brand/20 px-2 py-0.5 text-[11px] font-semibold ring-1 ring-on-brand/25">{roleLabel(user.role)}</span>}
+              {user?.organisation?.name && <span className="truncate text-[11px] text-on-brand/70">{user.organisation.name}</span>}
             </div>
           </div>
         </div>

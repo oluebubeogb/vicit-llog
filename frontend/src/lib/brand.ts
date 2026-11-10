@@ -6,6 +6,8 @@ export type PublicBranding = {
   logoUrl?: string | null;
   primaryColor?: string | null;
   secondaryColor?: string | null;
+  /** Text on primary/brand surfaces. Null/unset = auto (white or dark for contrast). */
+  primaryTextColor?: string | null;
   emailIconBg?: string | null;
   updatedAt?: string | null;
 };
@@ -16,8 +18,14 @@ export const DEFAULT_BRANDING: PublicBranding = {
   logoUrl: null,
   primaryColor: '#2563eb',
   secondaryColor: '#1e40af',
+  primaryTextColor: null,
   emailIconBg: '#ffffff',
 };
+
+export const AUTO_ON_PRIMARY_LIGHT = '#ffffff';
+export const AUTO_ON_PRIMARY_DARK = '#0f172a';
+export const CONTRAST_MIN = 4.5;
+export const LIGHT_BRAND_LUMA = 0.82;
 
 const STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const;
 // mix ratios relative to the base colour (which sits at 600)
@@ -43,6 +51,40 @@ export function hexToRgb(hex?: string | null): [number, number, number] | null {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
+function channelLin(c: number) {
+  const s = c / 255;
+  return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+
+export function relativeLuminance(hex?: string | null): number {
+  const rgb = hexToRgb(hex) || [37, 99, 235];
+  return 0.2126 * channelLin(rgb[0]) + 0.7152 * channelLin(rgb[1]) + 0.0722 * channelLin(rgb[2]);
+}
+
+export function contrastRatio(a?: string | null, b?: string | null): number {
+  const l1 = relativeLuminance(a);
+  const l2 = relativeLuminance(b);
+  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** White or slate-900, whichever contrasts better against the brand background. */
+export function autoOnPrimaryColor(bg?: string | null): string {
+  const white = contrastRatio(bg, AUTO_ON_PRIMARY_LIGHT);
+  const dark = contrastRatio(bg, AUTO_ON_PRIMARY_DARK);
+  return white >= dark ? AUTO_ON_PRIMARY_LIGHT : AUTO_ON_PRIMARY_DARK;
+}
+
+export function resolveOnPrimaryColor(bg?: string | null, explicit?: string | null): string {
+  const rgb = hexToRgb(explicit);
+  if (rgb) return '#' + rgb.map((v) => v.toString(16).padStart(2, '0')).join('');
+  return autoOnPrimaryColor(bg);
+}
+
+export function isLightBrand(hex?: string | null): boolean {
+  return relativeLuminance(hex) >= LIGHT_BRAND_LUMA;
+}
+
 export function scale(hex: string): Record<number, [number, number, number]> {
   const base = hexToRgb(hex) || [37, 99, 235];
   const out: Record<number, [number, number, number]> = {};
@@ -57,12 +99,23 @@ export function scale(hex: string): Record<number, [number, number, number]> {
 
 export function brandCssVars(b: PublicBranding): Record<string, string> {
   const vars: Record<string, string> = {};
-  const p = scale(b.primaryColor || DEFAULT_BRANDING.primaryColor!);
+  const primary = b.primaryColor || DEFAULT_BRANDING.primaryColor!;
+  const p = scale(primary);
   const a = scale(b.secondaryColor || DEFAULT_BRANDING.secondaryColor!);
   for (const s of STEPS) {
     vars[`--brand-${s}`] = p[s].join(' ');
     vars[`--accent-${s}`] = a[s].join(' ');
   }
+  const on = resolveOnPrimaryColor(primary, b.primaryTextColor);
+  const onRgb = hexToRgb(on) || [255, 255, 255];
+  vars['--brand-on-primary'] = onRgb.join(' ');
+  const light = isLightBrand(primary) || relativeLuminance('#' + p[600].map((v) => v.toString(16).padStart(2, '0')).join('')) >= LIGHT_BRAND_LUMA;
+  vars['--brand-surface-shadow'] = light
+    ? '0 0 0 1px rgb(15 23 42 / 0.16), 0 8px 24px -10px rgb(15 23 42 / 0.18)'
+    : '0 10px 30px -8px rgb(var(--brand-600) / 0.45)';
+  vars['--brand-surface-shadow-hover'] = light
+    ? '0 0 0 1px rgb(15 23 42 / 0.2), 0 14px 34px -10px rgb(15 23 42 / 0.22)'
+    : '0 14px 34px -10px rgb(var(--brand-600) / 0.6)';
   return vars;
 }
 

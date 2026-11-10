@@ -98,7 +98,7 @@ function StatusBadge({
           done
             ? 'bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-[0_6px_14px_-4px_rgb(16_185_129/0.6)]'
             : active
-              ? 'bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-glow'
+              ? 'bg-gradient-to-br from-brand-400 to-brand-600 text-on-brand on-brand-fill'
               : 'bg-slate-100 text-slate-300 ring-1 ring-slate-200'
         }`}
       >
@@ -339,7 +339,7 @@ export default function VisitorPage() {
           <BrandMark size={38} />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{invite.organisation?.name || brand.name}</p>
-            <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-white/70">
+            <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-on-brand/70">
               <ShieldCheck size={12} /> Visitor registration
             </p>
           </div>
@@ -347,12 +347,12 @@ export default function VisitorPage() {
         <h1 className="text-2xl font-bold leading-tight">{invite.purpose}</h1>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           {invite.host?.fullName && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 ring-1 ring-on-brand/20 backdrop-blur">
               <User size={12} /> Host: {invite.host.fullName}
             </span>
           )}
           {invite.expectedAt && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 ring-1 ring-white/20 backdrop-blur">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 ring-1 ring-on-brand/20 backdrop-blur">
               <Calendar size={12} /> {fmt(invite.expectedAt)}
             </span>
           )}
@@ -376,7 +376,7 @@ export default function VisitorPage() {
                   }}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition duration-200 hover:-translate-y-0.5 ${
                     selectedId === v.id
-                      ? 'border-transparent bg-gradient-to-r from-brand-500 to-brand-700 text-white shadow-glow'
+                      ? 'border-transparent bg-gradient-to-r from-brand-500 to-brand-700 text-on-brand on-brand-fill'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-brand-200 hover:bg-brand-50'
                   }`}
                 >
@@ -392,7 +392,7 @@ export default function VisitorPage() {
         {selected && (
           <div className="card card-art animate-in p-4">
             <div className="mb-4 flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-accent-700 text-sm font-bold text-white shadow-glow">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-accent-700 text-sm font-bold text-on-brand on-brand-fill">
                 {selected.fullName.split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase()}
               </span>
               <div className="min-w-0 flex-1">

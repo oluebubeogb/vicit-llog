@@ -59,9 +59,9 @@ export default function ChangePasswordPage() {
         <BrandMark size={52} />
         <div>
           <h1 className="text-xl font-bold">Set your password</h1>
-          <p className="flex items-center gap-1 text-sm text-white/75">
+          <p className="flex items-center gap-1 text-sm text-on-brand/75">
             One quick step before you continue
-            <InfoTip text="You signed in with a temporary password. Choose a new one — don’t reuse the temporary password." className="!text-white/80" />
+            <InfoTip text="You signed in with a temporary password. Choose a new one — don’t reuse the temporary password." className="!text-on-brand/80" />
           </p>
         </div>
       </div>

@@ -33,7 +33,7 @@ export default function PageHeader({
         </Tooltip>
       )}
       {icon && (
-        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-accent-700 text-white shadow-glow">
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-accent-700 text-on-brand on-brand-fill">
           <span className="absolute inset-0 rounded-2xl bg-gradient-to-t from-transparent to-white/25" />
           {icon}
         </div>

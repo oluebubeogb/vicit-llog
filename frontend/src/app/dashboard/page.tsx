@@ -82,37 +82,40 @@ function StatCard({
     tone === 'brand'
       ? {
           bg: 'from-brand-500 via-brand-600 to-accent-800',
-          stroke: 'rgba(255,255,255,0.95)',
-          fill: 'rgba(255,255,255,0.6)',
-          glow: 'shadow-glow',
+          stroke: 'rgb(var(--brand-on-primary) / 0.95)',
+          fill: 'rgb(var(--brand-on-primary) / 0.6)',
+          glow: 'on-brand-fill',
+          ink: 'text-on-brand',
         }
       : {
           bg: 'from-amber-400 via-amber-500 to-orange-600',
           stroke: 'rgba(255,255,255,0.95)',
           fill: 'rgba(255,255,255,0.6)',
           glow: 'shadow-[0_14px_34px_-12px_rgb(217_119_6/0.6)]',
+          ink: 'text-white',
         };
+  const brandCard = tone === 'brand';
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`group relative isolate overflow-hidden rounded-3xl bg-gradient-to-br ${styles.bg} p-4 text-left text-white ${styles.glow} transition duration-300 hover:-translate-y-1 hover:shadow-lift active:scale-[0.98]`}
+      className={`group relative isolate overflow-hidden rounded-3xl bg-gradient-to-br ${styles.bg} p-4 text-left ${styles.ink} ${styles.glow} transition duration-300 hover:-translate-y-1 hover:shadow-lift active:scale-[0.98]`}
     >
-      <LineArt className="-z-10 text-white transition duration-700 group-hover:scale-110" opacity={0.09} />
+      <LineArt className={`-z-10 ${styles.ink} transition duration-700 group-hover:scale-110`} opacity={0.09} />
       <div className="flex items-center justify-between">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 ring-1 ring-white/30 backdrop-blur transition group-hover:scale-110">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${brandCard ? 'bg-on-brand/20 ring-1 ring-on-brand/30' : 'bg-white/20 ring-1 ring-white/30'} backdrop-blur transition group-hover:scale-110`}>
           {icon}
         </span>
         <span onClick={(e) => e.stopPropagation()}>
-          <InfoTip text={info} className="!text-white/80 hover:!text-white" />
+          <InfoTip text={info} className={brandCard ? '!text-on-brand/80 hover:!text-on-brand' : '!text-white/80 hover:!text-white'} />
         </span>
       </div>
       <p className="mt-3 text-[32px] font-bold leading-none tracking-tight">{value}</p>
-      <p className="mt-1 text-xs font-medium text-white/85">{title}</p>
+      <p className={`mt-1 text-xs font-medium ${brandCard ? 'text-on-brand/85' : 'text-white/85'}`}>{title}</p>
       <Sparkline data={data} width={140} height={30} stroke={styles.stroke} fill={styles.fill} className="mt-2 w-full" />
       <div className="mt-1 flex items-center justify-between text-[11px]">
         <Tooltip content={`${cur} new in the last ${WINDOW} days vs ${prev} in the ${WINDOW} days before`}>
-          <span className="inline-flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 font-semibold">
+          <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 font-semibold ${brandCard ? 'bg-on-brand/20' : 'bg-white/20'}`}>
             {prev === 0 && cur > 0 ? (
               'New'
             ) : (
@@ -123,15 +126,15 @@ function StatCard({
             )}
           </span>
         </Tooltip>
-        <span className="flex items-center gap-0.5 text-white/80 transition group-hover:translate-x-0.5">
+        <span className={`flex items-center gap-0.5 transition group-hover:translate-x-0.5 ${brandCard ? 'text-on-brand/80' : 'text-white/80'}`}>
           Details <ChevronRight size={12} />
         </span>
       </div>
-      <div className="mt-3 flex gap-1.5 border-t border-white/20 pt-2.5">
+      <div className={`mt-3 flex gap-1.5 border-t pt-2.5 ${brandCard ? 'border-on-brand/20' : 'border-white/20'}`}>
         {breakdown.map((b) => (
-          <span key={b.label} className="flex-1 rounded-lg bg-white/10 px-1.5 py-1 text-center">
+          <span key={b.label} className={`flex-1 rounded-lg px-1.5 py-1 text-center ${brandCard ? 'bg-on-brand/10' : 'bg-white/10'}`}>
             <span className="block text-sm font-bold">{b.value}</span>
-            <span className="block truncate text-[10px] text-white/75">{b.label}</span>
+            <span className={`block truncate text-[10px] ${brandCard ? 'text-on-brand/75' : 'text-white/75'}`}>{b.label}</span>
           </span>
         ))}
       </div>
@@ -313,16 +316,16 @@ export default function DashboardPage() {
       <header className="hero animate-in mb-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-xs font-medium text-white/75">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-on-brand/75">
               <Sparkles size={13} /> {greeting(now)}
             </p>
             <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{user?.fullName || '…'}</h1>
-            <p className="mt-0.5 truncate text-sm text-white/75">
+            <p className="mt-0.5 truncate text-sm text-on-brand/75">
               {[user?.organisation?.name, user?.role && titleCase(user.role === 'GATE' ? 'Gate officer' : user.role)].filter(Boolean).join(' · ')}
             </p>
           </div>
-          <span className="rounded-2xl bg-white/15 px-3 py-2 text-center ring-1 ring-white/25 backdrop-blur">
-            <span className="block text-[10px] uppercase tracking-wider text-white/70">
+          <span className="rounded-2xl bg-on-brand/15 px-3 py-2 text-center ring-1 ring-on-brand/25 backdrop-blur">
+            <span className="block text-[10px] uppercase tracking-wider text-on-brand/70">
               {now ? now.toLocaleDateString(undefined, { weekday: 'short' }) : '\u00a0'}
             </span>
             <span className="block text-xl font-bold leading-none">{now ? now.getDate() : '\u00a0'}</span>
@@ -330,12 +333,12 @@ export default function DashboardPage() {
         </div>
         <div className="mt-4 flex flex-wrap gap-2 text-xs">
           <Tooltip content="Your guests currently checked in at the gate">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 font-medium ring-1 ring-white/20 backdrop-blur">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 font-medium ring-1 ring-on-brand/20 backdrop-blur">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" /> {plural(s.onSite, 'guest')} on site
             </span>
           </Tooltip>
           <Tooltip content="Invites with an expected arrival today">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 font-medium ring-1 ring-white/20 backdrop-blur">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 font-medium ring-1 ring-on-brand/20 backdrop-blur">
               <CalendarDays size={12} /> {s.expectedToday} expected today
             </span>
           </Tooltip>

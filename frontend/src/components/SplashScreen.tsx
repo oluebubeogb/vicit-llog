@@ -51,7 +51,7 @@ export default function SplashScreen() {
       {show && (
         <motion.div
           key="splash"
-          className="fixed inset-0 z-[300] flex flex-col items-center justify-center overflow-hidden text-white"
+          className="fixed inset-0 z-[300] flex flex-col items-center justify-center overflow-hidden text-on-brand"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, scale: 1.04, filter: 'blur(6px)' }}
           transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
@@ -60,7 +60,7 @@ export default function SplashScreen() {
               'radial-gradient(120% 80% at 100% 0%, rgb(var(--accent-400) / 0.6), transparent 55%), radial-gradient(90% 60% at 0% 100%, rgb(var(--brand-300) / 0.35), transparent 60%), linear-gradient(160deg, rgb(var(--brand-600)), rgb(var(--brand-900)) 70%, rgb(var(--accent-950)))',
           }}
         >
-          <LineArt className="text-white" opacity={0.08} />
+          <LineArt className="text-on-brand" opacity={0.08} />
           <motion.div
             initial={{ scale: 0.7, opacity: 0, y: 12 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -86,9 +86,9 @@ export default function SplashScreen() {
           >
             Visitor Access
           </motion.p>
-          <div className="mt-10 h-1 w-28 overflow-hidden rounded-full bg-white/20">
+          <div className="mt-10 h-1 w-28 overflow-hidden rounded-full bg-on-brand/20">
             <motion.div
-              className="h-full w-1/2 rounded-full bg-white/90"
+              className="h-full w-1/2 rounded-full bg-on-brand/90"
               initial={{ x: '-100%' }}
               animate={{ x: '220%' }}
               transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }}
