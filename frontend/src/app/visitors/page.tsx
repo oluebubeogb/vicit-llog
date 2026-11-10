@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, getUser } from '@/lib/api';
+import { platformHome } from '@/lib/navLinks';
 import Link from 'next/link';
 import { Loader2, RotateCcw, Search, Sparkles, UserPlus, Users, X } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
@@ -99,7 +100,7 @@ export default function VisitorsPage() {
   return (
     <div className="page">
       <PageHeader
-        back={role === 'GATE' ? '/gate' : '/dashboard'}
+        back={platformHome(role)}
         icon={<Users size={20} />}
         title={role === 'ADMIN' ? 'All visitors' : 'My visitors'}
         subtitle={loading ? 'Loading…' : `${invites.length} invites`}

@@ -3,34 +3,10 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import {
-  Home,
-  UserPlus,
-  Users,
-  Bell,
-  User,
-  ScanLine,
-  LayoutDashboard,
-} from 'lucide-react';
 import { getUser, api } from '@/lib/api';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
-
-const staffLinks = [
-  { href: '/dashboard', icon: Home, label: 'Home' },
-  { href: '/invite/new', icon: UserPlus, label: 'Invite' },
-  { href: '/visitors', icon: Users, label: 'Visitors' },
-  { href: '/notifications', icon: Bell, label: 'Alerts', badge: true },
-  { href: '/profile', icon: User, label: 'Profile' },
-];
-
-const gateLinks = [
-  { href: '/gate', icon: ScanLine, label: 'Scan', exact: true },
-  { href: '/invite/new', icon: UserPlus, label: 'Invite' },
-  { href: '/gate/visits', icon: LayoutDashboard, label: 'Visits' },
-  { href: '/notifications', icon: Bell, label: 'Alerts', badge: true },
-  { href: '/profile', icon: User, label: 'Profile' },
-];
+import { buildNavLinks, isBarePath } from '@/lib/navLinks';
 
 export default function BottomNav() {
   const pathname = usePathname();
@@ -77,27 +53,12 @@ export default function BottomNav() {
 
   if (!mounted) return null;
 
-  if (
-    pathname?.startsWith('/visitor/') ||
-    pathname?.startsWith('/u/') ||
-    pathname === '/login' ||
-    pathname === '/' ||
-    pathname === '/change-password'
-  ) {
+  if (isBarePath(pathname)) {
     return null;
   }
 
   const isGate = role === 'GATE' || role === 'GLOBAL_GATE';
-  const canSeeGlobalVisits = role === 'SUPER_ADMIN' || (getUser()?.permissions || []).includes('visits.view');
-  const links = (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN')
-    ? [
-        { href: '/platform', icon: LayoutDashboard, label: 'Platform' },
-        { href: '/invite/new', icon: UserPlus, label: 'Invite' },
-        ...(canSeeGlobalVisits ? [{ href: '/gate/visits', icon: Users, label: 'Visits' }] : []),
-        ...(role === 'SUPER_ADMIN' ? [{ href: '/gate', icon: ScanLine, label: 'Gate' }] : []),
-        { href: '/profile', icon: User, label: 'Profile' },
-      ]
-    : isGate ? gateLinks : staffLinks;
+  const links = buildNavLinks(role, getUser()?.permissions || []);
 
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 bottom-nav">

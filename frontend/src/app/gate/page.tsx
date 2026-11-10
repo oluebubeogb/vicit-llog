@@ -82,6 +82,10 @@ export default function GatePage() {
   const scanTimer = useRef<number | null>(null);
   const scanSession = useRef(0);
   const cameraIdx = useRef(-1);
+  const lastScanValue = useRef('');
+  const lastScanAt = useRef(0);
+  const autoScan = useRef(true);
+  const lookupBusy = useRef(false);
 
   useEffect(() => {
     const u = getUser();
@@ -340,15 +344,24 @@ export default function GatePage() {
   function onDecoded(raw: string) {
     const value = normalizeScannedCode(raw);
     if (!value) return;
+    const now = Date.now();
+    // Ignore the same code for 8s so a held frame does not retrigger lookup.
+    if (value === lastScanValue.current && now - lastScanAt.current < 8000) return;
+    if (lookupBusy.current) return;
+    lastScanValue.current = value;
+    lastScanAt.current = now;
     try {
       navigator.vibrate?.(60);
     } catch {
       /* iOS has no vibrate */
     }
-    stopScanner();
+    // Keep the camera running for hands-free continuous scanning.
     setScanError('');
     setCode(displayCode(value));
-    lookup(value);
+    lookupBusy.current = true;
+    Promise.resolve(lookup(value)).finally(() => {
+      lookupBusy.current = false;
+    });
   }
 
   async function startScanner(deviceId?: string) {
@@ -491,18 +504,29 @@ export default function GatePage() {
       setScanError('Could not read that image. Try again or type the passphrase.');
     } finally {
       setPhotoDecoding(false);
+      if (autoScan.current) startScanner();
     }
   }
 
   useEffect(() => {
-    // iOS freezes/kills the camera when the app is backgrounded — release it cleanly.
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') stopScanner();
+    // Open the rear camera on arrival so a code can be scanned without a tap.
+    // iOS may still require a user gesture; startScanner surfaces that in scanError
+    // and the Scan button remains as a fallback.
+    autoScan.current = true;
+    startScanner();
+
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') {
+        stopScanner();
+      } else if (autoScan.current) {
+        startScanner();
+      }
     };
-    document.addEventListener('visibilitychange', onHide);
+    document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', stopScanner);
     return () => {
-      document.removeEventListener('visibilitychange', onHide);
+      autoScan.current = false;
+      document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pagehide', stopScanner);
       stopScanner();
     };
@@ -524,8 +548,8 @@ export default function GatePage() {
       <PageHeader
         icon={<ScanLine size={20} />}
         title="Gate control"
-        subtitle="Scan a QR code or type the passphrase"
-        info="The camera works on iPhone, Android and desktop. If the live camera is unavailable, use “Scan from photo”."
+        subtitle="Camera opens automatically — or type a passphrase"
+        info="The rear camera opens as soon as this page loads. Hold a code in view to scan hands-free. If the camera is blocked, use Scan, Scan from photo, or type the passphrase."
       />
 
       <div className="surface animate-in mb-4 !p-3">
@@ -550,7 +574,7 @@ export default function GatePage() {
           <Tooltip content={scanning ? 'Stop camera' : 'Scan QR with camera'}>
             <button
               type="button"
-              onClick={() => (scanning ? stopScanner() : startScanner())}
+              onClick={() => { if (scanning) { autoScan.current = false; stopScanner(); } else { autoScan.current = true; startScanner(); } }}
               className={`${scanning ? 'btn-danger' : 'btn-success'} shrink-0 !px-3.5`}
               aria-label={scanning ? 'Stop camera' : 'Scan QR code'}
             >
@@ -818,7 +842,7 @@ export default function GatePage() {
             </span>
           </div>
           <p className="font-semibold text-slate-700">Ready to scan</p>
-          <p className="mt-1 max-w-[260px] text-sm text-slate-500">Enter a passphrase, tap the camera, or scan from a photo.</p>
+          <p className="mt-1 max-w-[260px] text-sm text-slate-500">Point the open camera at a QR code, or use Scan, Scan from photo, or type a passphrase.</p>
         </div>
       )}
 

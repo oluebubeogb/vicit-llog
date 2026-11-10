@@ -12,9 +12,10 @@ import Avatar from '@/components/ui/Avatar';
 import StatusPill from '@/components/ui/StatusPill';
 import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
-import { titleCase } from '@/lib/format';
 import InstallBanner from '@/components/InstallBanner';
 import StaffQrPanel from '@/components/StaffQrPanel';
+import { roleLabel } from '@/lib/roleLabels';
+import { platformHome } from '@/lib/navLinks';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -210,7 +211,7 @@ export default function ProfilePage() {
 
   return (
     <div className="page">
-      <PageHeader back={user?.role === 'GATE' ? '/gate' : '/dashboard'} icon={<User size={20} />} title="Profile" subtitle="Your account and app" />
+      <PageHeader back={platformHome(user?.role)} icon={<User size={20} />} title="Profile" subtitle="Your account and app" />
 
       <div className="hero animate-in mb-5">
         <div className="flex items-center gap-4">
@@ -234,7 +235,7 @@ export default function ProfilePage() {
             <p className="truncate text-xl font-bold">{user?.fullName}</p>
             <p className="truncate text-sm text-white/75">{user?.email}</p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {user?.role && <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold ring-1 ring-white/25">{user.role === 'GATE' ? 'Gate officer' : titleCase(user.role)}</span>}
+              {user?.role && <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold ring-1 ring-white/25">{roleLabel(user.role)}</span>}
               {user?.organisation?.name && <span className="truncate text-[11px] text-white/70">{user.organisation.name}</span>}
             </div>
           </div>
@@ -271,10 +272,10 @@ export default function ProfilePage() {
         </button>
       </form>
 
-      {(user?.role === 'ADMIN' || user?.role === 'STAFF' || user?.role === 'GATE') && (
+      {user && (
         <div className="mb-4">
           <StaffQrPanel fullName={user?.fullName || form.fullName} organisationName={user?.organisation?.name || user?.orgName} />
-      <InstallBanner variant="profile" />
+          <InstallBanner variant="profile" />
         </div>
       )}
 

@@ -65,12 +65,15 @@ export class AnalyticsController {
     return this.analytics.platformDashboard(d, from, to);
   }
 
-  private orgForDrill(user: any, f: DrillFilter) {
+  private canPlatform(user: any) {
+    return user.role === Role.SUPER_ADMIN || (user.role === Role.GLOBAL_ADMIN && (user.permissions || []).includes('visits.view'));
+  }
+
+  /** Agency admins are scoped to their org; platform roles may pass organisationId or omit it for all agencies. */
+  private orgForDrill(user: any, f: DrillFilter): string | null {
     if (user.role === Role.ADMIN) return user.orgId;
-    const platform = user.role === Role.SUPER_ADMIN || (user.role === Role.GLOBAL_ADMIN && (user.permissions || []).includes('visits.view'));
-    if (!platform) throw new ForbiddenException();
-    if (!f.organisationId) throw new BadRequestException('Choose an agency to drill into');
-    return f.organisationId;
+    if (!this.canPlatform(user)) throw new ForbiddenException();
+    return f.organisationId || null;
   }
 
   @Get('drill')
@@ -124,16 +127,19 @@ export class AnalyticsController {
   }
 
   @Get('dashboard')
-  @ApiOperation({ summary: 'Admin analytics dashboard' })
+  @ApiOperation({ summary: 'Analytics dashboard (agency-scoped for ADMIN; all agencies or one for Super Admin / Super Admin II)' })
   dashboard(
     @CurrentUser() user: any,
     @Query('days') days?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('organisationId') organisationId?: string,
   ) {
-    if (user.role !== Role.ADMIN) throw new ForbiddenException();
     const d = Math.min(366, Math.max(1, days ? parseInt(days, 10) || 30 : 30));
-    return this.analytics.dashboard(user.orgId, d, from, to);
+    if (user.role === Role.ADMIN) return this.analytics.dashboard(user.orgId, d, from, to);
+    if (!this.canPlatform(user)) throw new ForbiddenException();
+    const org = organisationId && /^[0-9a-f-]{36}$/i.test(organisationId) ? organisationId : null;
+    return this.analytics.dashboard(org, d, from, to);
   }
 
   /** Legacy drill-down (kept for older clients): same records as /drill, rows only. */
@@ -144,6 +150,6 @@ export class AnalyticsController {
     if (user.role !== Role.ADMIN && user.role !== Role.SUPER_ADMIN) throw new ForbiddenException();
     const f = parseDrill(q);
     if (f.metric && !['total', 'arrived', 'exited', 'denied', 'activeNow'].includes(f.metric)) f.metric = 'total';
-    return (await this.drill.list(user.orgId, f)).rows;
+    return (await this.drill.list(this.orgForDrill(user, f), f)).rows;
   }
 }

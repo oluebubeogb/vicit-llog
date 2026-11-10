@@ -102,7 +102,7 @@ export class AnalyticsDrillService {
     return 'createdAt';
   }
 
-  private visitorWhere(orgId: string, f: DrillFilter) {
+  private visitorWhere(orgId: string | null, f: DrillFilter) {
     const metric = f.metric || 'total';
     const { from, to } = resolveRange(f.days, f.from, f.to);
     let win: any = { gte: from, lte: to };
@@ -110,7 +110,7 @@ export class AnalyticsDrillService {
       const d = new Date(`${f.day}T00:00:00`);
       win = { gte: startOfDay(d) > from ? startOfDay(d) : from, lte: endOfDay(d) < to ? endOfDay(d) : to };
     }
-    const where: any = { invite: { organisationId: orgId } };
+    const where: any = { invite: { ...(orgId ? { organisationId: orgId } : {}) } };
     const field = this.dateField(metric);
     if (metric === 'activeNow') where.status = 'ARRIVED';
     else where[field] = win;
@@ -163,7 +163,7 @@ export class AnalyticsDrillService {
    * returning / blacklisted visitors) are applied to a light id+timestamp scan — the same
    * maths the dashboard uses — and the result is an ordered id list.
    */
-  private async scanIds(orgId: string, f: DrillFilter, where: any, field: string): Promise<string[]> {
+  private async scanIds(orgId: string | null, f: DrillFilter, where: any, field: string): Promise<string[]> {
     const rows = await this.prisma.visitor.findMany({
       where,
       select: { id: true, fullName: true, phone: true, idNumber: true, createdAt: true, enteredAt: true, exitedAt: true, deniedAt: true },
@@ -195,7 +195,7 @@ export class AnalyticsDrillService {
     }
     if (f.metric === 'blacklist') {
       const bl = await this.prisma.blacklistEntry.findMany({
-        where: { OR: [{ organisationId: orgId }, { isGlobal: true }], isActive: true },
+        where: { OR: [...(orgId ? [{ organisationId: orgId }] : []), { isGlobal: true }], isActive: true },
         select: { fullName: true, phone: true, idNumber: true },
       });
       out = out.filter((v) =>
@@ -225,11 +225,11 @@ export class AnalyticsDrillService {
     },
   } as const;
 
-  private async lookups(orgId: string) {
+  private async lookups(orgId: string | null) {
     const [locations, gates, users] = await Promise.all([
-      this.prisma.location.findMany({ where: { organisationId: orgId }, select: { id: true, name: true } }),
-      this.prisma.gate.findMany({ where: { location: { organisationId: orgId } }, select: { id: true, name: true, location: { select: { name: true } } } }),
-      this.prisma.user.findMany({ where: { organisationId: orgId }, select: { id: true, fullName: true } }),
+      this.prisma.location.findMany({ where: orgId ? { organisationId: orgId } : {}, select: { id: true, name: true } }),
+      this.prisma.gate.findMany({ where: orgId ? { location: { organisationId: orgId } } : {}, select: { id: true, name: true, location: { select: { name: true } } } }),
+      this.prisma.user.findMany({ where: orgId ? { organisationId: orgId } : {}, select: { id: true, fullName: true } }),
     ]);
     return {
       loc: new Map(locations.map((l) => [l.id, l.name])),
@@ -249,9 +249,9 @@ export class AnalyticsDrillService {
     }));
   }
 
-  private inviteWhere(orgId: string, f: DrillFilter) {
+  private inviteWhere(orgId: string | null, f: DrillFilter) {
     const { from, to } = resolveRange(f.days, f.from, f.to);
-    const where: any = { organisationId: orgId, createdAt: { gte: from, lte: to } };
+    const where: any = { ...(orgId ? { organisationId: orgId } : {}), createdAt: { gte: from, lte: to } };
     if (f.metric === 'approvals') where.approvedById = { not: null };
     if (f.category) where.category = f.category;
     if (f.inviteStatus) where.status = f.inviteStatus;
@@ -260,7 +260,7 @@ export class AnalyticsDrillService {
   }
 
   /** Newest 100 records behind a number, plus the true total. */
-  async list(orgId: string, f: DrillFilter) {
+  async list(orgId: string | null, f: DrillFilter) {
     const entity = this.entity(f);
     if (entity === 'invites') {
       const where = this.inviteWhere(orgId, f);
@@ -301,7 +301,7 @@ export class AnalyticsDrillService {
   }
 
   /** Breakdowns for the current filter: location → gate → officer → host, plus status, stay, peak hour and withheld items. */
-  private async facets(orgId: string, where: any) {
+  private async facets(orgId: string | null, where: any) {
     const [rows, parts, L] = await Promise.all([
       this.prisma.visitor.findMany({
         where,
@@ -385,7 +385,7 @@ export class AnalyticsDrillService {
    * fetched and written in batches of 500 so memory stays flat. When the cap is hit, the
    * X-Export-Truncated / X-Export-Total headers tell the client to narrow the date range.
    */
-  async exportCsv(orgId: string, f: DrillFilter, res: Response, name = 'vicit-export') {
+  async exportCsv(orgId: string | null, f: DrillFilter, res: Response, name = 'vicit-export') {
     const entity = this.entity(f);
     const stamp = new Date().toISOString().slice(0, 10);
     const filename = `${name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase() || 'vicit-export'}_${stamp}.csv`;

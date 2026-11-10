@@ -29,7 +29,7 @@ export class AnalyticsService {
     return { totals, agencies };
   }
 
-  async dashboard(orgId: string, days = 30, fromIso?: string, toIso?: string) {
+  async dashboard(orgId: string | null, days = 30, fromIso?: string, toIso?: string) {
     const to = toIso ? endOfDay(new Date(toIso)) : new Date();
     let from: Date;
     if (fromIso) from = startOfDay(new Date(fromIso));
@@ -51,7 +51,7 @@ export class AnalyticsService {
     const [visitors, invites, activeNow, blacklist, locations, gates] = await Promise.all([
       this.prisma.visitor.findMany({
         where: {
-          invite: { organisationId: orgId },
+          invite: { ...(orgId ? { organisationId: orgId } : {}) },
           OR: [
             { createdAt: { gte: prevFrom, lte: to } },
             { enteredAt: { gte: prevFrom, lte: to } },
@@ -79,6 +79,8 @@ export class AnalyticsService {
               purpose: true,
               category: true,
               locationId: true,
+              organisationId: true,
+              organisation: { select: { id: true, name: true, code: true } },
               host: { select: { id: true, fullName: true, portfolio: true } },
             },
           },
@@ -86,18 +88,18 @@ export class AnalyticsService {
         take: 20000,
       }),
       this.prisma.invite.findMany({
-        where: { organisationId: orgId, createdAt: { gte: prevFrom, lte: to } },
+        where: { ...(orgId ? { organisationId: orgId } : {}), createdAt: { gte: prevFrom, lte: to } },
         select: { id: true, status: true, createdAt: true, isOffline: true, approvedById: true },
         take: 20000,
       }),
-      this.prisma.visitor.count({ where: { invite: { organisationId: orgId }, status: 'ARRIVED' } }),
+      this.prisma.visitor.count({ where: { invite: { ...(orgId ? { organisationId: orgId } : {}) }, status: 'ARRIVED' } }),
       this.prisma.blacklistEntry.findMany({
-        where: { OR: [{ organisationId: orgId }, { isGlobal: true }], isActive: true },
+        where: { OR: [...(orgId ? [{ organisationId: orgId }] : []), { isGlobal: true }], isActive: true },
         select: { id: true, fullName: true, phone: true, idNumber: true, reason: true },
       }),
-      this.prisma.location.findMany({ where: { OR: [{ organisationId: orgId }, { isShared: true }] }, select: { id: true, name: true } }),
+      this.prisma.location.findMany({ where: orgId ? { OR: [{ organisationId: orgId }, { isShared: true }] } : {}, select: { id: true, name: true, organisationId: true, organisation: { select: { name: true } } } }),
       this.prisma.gate.findMany({
-        where: { location: { OR: [{ organisationId: orgId }, { isShared: true }] } },
+        where: orgId ? { location: { OR: [{ organisationId: orgId }, { isShared: true }] } } : {},
         select: { id: true, name: true, location: { select: { name: true } } },
       }),
     ]);
@@ -273,6 +275,11 @@ export class AnalyticsService {
 
     const peakHours = [...hourly].sort((a, b) => b.count - a.count).filter((h) => h.count > 0).slice(0, 5);
 
+    const byAgency = countBy(cur.registered, (v) => v.invite?.organisationId || 'none').map(([id, count]) => {
+      const sample = cur.registered.find((x) => x.invite?.organisationId === id);
+      return { id, organisation: sample?.invite?.organisation?.name || id, count };
+    });
+
     return {
       range: { from: from.toISOString(), to: to.toISOString(), prevFrom: prevFrom.toISOString(), prevTo: prevTo.toISOString() },
       periodDays,
@@ -300,6 +307,9 @@ export class AnalyticsService {
       durationBuckets: buckets.map(({ label, count }) => ({ label, count })),
       blacklistHits: hits.slice(0, 20),
       inviteStatus,
+      scope: orgId ? 'agency' : 'platform',
+      organisationId: orgId,
+      byAgency,
     };
   }
 

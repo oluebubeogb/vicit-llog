@@ -375,3 +375,15 @@ model StaffAttendance {
   @@index([organisationId, day])
   @@index([day])
 }
+
+/// Tracks rows created (or attendance written) by the demo seed so `--reset` can
+/// remove only demo data, including attendance on pre-existing officers.
+model DemoSeedRecord {
+  id        String   @id @default(uuid())
+  model     String
+  recordId  String
+  createdAt DateTime @default(now())
+
+  @@unique([model, recordId])
+  @@index([model])
+}

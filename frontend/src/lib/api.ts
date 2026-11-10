@@ -156,10 +156,12 @@ export const api = {
   createUser: (data: any) =>
     request('/users', { method: 'POST', body: JSON.stringify(data) }),
   audit: () => request('/audit'),
-  analytics: (days = 30, from?: string, to?: string) => {
-    const q = new URLSearchParams({ days: String(days) });
+  analytics: (days = 30, from?: string, to?: string, organisationId?: string) => {
+    const q = new URLSearchParams();
+    if (days) q.set('days', String(days));
     if (from) q.set('from', from);
     if (to) q.set('to', to);
+    if (organisationId) q.set('organisationId', organisationId);
     return request(`/analytics/dashboard?${q.toString()}`);
   },
   analyticsVisitors: (params: {
