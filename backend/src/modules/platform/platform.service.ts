@@ -197,7 +197,7 @@ export class PlatformService {
   }
 
   async createGlobalAdmin(actor: any, input: any) {
-    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can appoint Global Admins');
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can appoint Super Admin II accounts');
     const fullName = String(input.fullName || '').trim();
     const email = String(input.email || '').trim().toLowerCase();
     const phone = String(input.phone || '').trim();

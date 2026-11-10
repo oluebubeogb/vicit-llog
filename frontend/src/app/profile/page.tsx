@@ -14,6 +14,7 @@ import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
 import { titleCase } from '@/lib/format';
 import InstallBanner from '@/components/InstallBanner';
+import StaffQrPanel from '@/components/StaffQrPanel';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -272,7 +273,8 @@ export default function ProfilePage() {
 
       {(user?.role === 'ADMIN' || user?.role === 'STAFF' || user?.role === 'GATE') && (
         <div className="mb-4">
-          <InstallBanner variant="profile" />
+          <StaffQrPanel fullName={user?.fullName || form.fullName} organisationName={user?.organisation?.name || user?.orgName} />
+      <InstallBanner variant="profile" />
         </div>
       )}
 

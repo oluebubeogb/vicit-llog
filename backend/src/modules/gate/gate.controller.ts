@@ -89,7 +89,7 @@ export class GateController {
     @Body('notes') notes: string,
     @CurrentUser() user: any,
   ) {
-    if (user.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Global Admin accounts provide oversight, not gate operations');
+    if (user.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Super Admin II accounts provide oversight, not gate operations');
     return this.gateService.recordExit(visitorId, user, notes);
   }
 

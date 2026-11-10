@@ -16,7 +16,7 @@ export class InvitesController {
   @Post()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
   @ApiOperation({ summary: 'Create visitor invite' })
   create(@Body() dto: CreateInviteDto, @CurrentUser() user: any) {
     return this.invitesService.create(dto, user.id, user.orgId, user.role);
@@ -25,7 +25,7 @@ export class InvitesController {
   @Get('mine')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
   @ApiOperation({ summary: 'List my invites' })
   mine(@CurrentUser() user: any) {
     return this.invitesService.findMyInvites(user.id);
@@ -34,7 +34,7 @@ export class InvitesController {
   @Get('search')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
   @ApiOperation({ summary: 'Ranked multi-word search across invites and their visitors' })
   search(
     @CurrentUser() user: any,
@@ -68,7 +68,7 @@ export class InvitesController {
   @Post(':id/revive')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.STAFF, Role.GATE)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
   @ApiOperation({ summary: 'Revive an expired invite (new 60-min window)' })
   revive(@Param('id') id: string, @CurrentUser() user: any) {
     return this.invitesService.revive(id, user.id, user.orgId);

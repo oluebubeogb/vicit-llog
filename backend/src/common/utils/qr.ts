@@ -44,6 +44,8 @@ export type ParsedGateCode = {
   visitorId?: string;
   /** First 8 chars of invite token from QR JSON "t" */
   tokenPrefix?: string;
+  /** Permanent staff attendance QR token (JSON "s" or /staff/<token>) */
+  staffToken?: string;
 };
 
 function normPassphrase(s: string): string {
@@ -82,12 +84,16 @@ export function parseGateCode(rawInput: unknown): ParsedGateCode {
       if (typeof lower.p === 'string' && lower.p.trim()) out.passphrase = normPassphrase(lower.p);
       if (typeof lower.v === 'string' && UUID_RE.test(lower.v)) out.visitorId = lower.v.toLowerCase();
       if (typeof lower.t === 'string' && lower.t.trim()) out.tokenPrefix = lower.t.trim().toLowerCase();
+      if (typeof lower.s === 'string' && lower.s.trim().length >= 16) out.staffToken = lower.s.trim();
+      if (out.staffToken) return out;
       if (out.passphrase || out.visitorId) return out;
     } catch {
       // fall through — maybe a mangled payload; try the other strategies
     }
     const pm = quoteFixed.match(/"p"\s*:\s*"([^"]+)"/i);
     const vm = quoteFixed.match(/"v"\s*:\s*"([^"]+)"/i);
+    const sm = quoteFixed.match(/"s"\s*:\s*"([^"]+)"/i);
+    if (sm && sm[1].trim().length >= 16) return { staffToken: sm[1].trim() };
     if (pm || vm) {
       return {
         passphrase: pm ? normPassphrase(pm[1]) : undefined,
@@ -96,12 +102,17 @@ export function parseGateCode(rawInput: unknown): ParsedGateCode {
     }
   }
 
-  // 2) URL (absolute or relative) to the visitor page or gate deep link
-  if (/^(https?:\/\/|www\.|\/)/i.test(raw) || /\/visitor\//i.test(raw)) {
+  // 2) URL (absolute or relative) to the visitor page, staff badge, or gate deep link
+  if (/^(https?:\/\/|www\.|\/)/i.test(raw) || /\/visitor\//i.test(raw) || /\/staff\//i.test(raw)) {
     try {
       const url = new URL(raw, 'http://placeholder.local');
       const code = url.searchParams.get('code');
       if (code) return parseGateCode(code);
+      const staff = url.pathname.match(/\/staff\/([^/?#]+)/i);
+      if (staff) {
+        const tok = decodeURIComponent(staff[1]).trim();
+        if (tok.length >= 16) return { staffToken: tok };
+      }
       const m = url.pathname.match(/\/visitor\/([^/?#]+)/i);
       if (m) {
         const tok = decodeURIComponent(m[1]).trim();
@@ -122,6 +133,13 @@ export function parseGateCode(rawInput: unknown): ParsedGateCode {
     return { token: id, visitorId: id };
   }
 
-  // 4) Passphrase
+  // 4) Bare staff token (32+ hex/base64url chars, no spaces)
+  if (/^[A-Za-z0-9_-]{32,128}$/.test(raw) && !/[-]/.test(raw.replace(/-/g, ''))) {
+    // Prefer treating long opaque tokens as staff QR when they are not UUIDs
+    if (raw.length >= 32 && !UUID_RE.test(raw)) return { staffToken: raw };
+  }
+  if (/^[a-f0-9]{32,128}$/i.test(raw)) return { staffToken: raw };
+
+  // 5) Passphrase
   return { passphrase: normPassphrase(raw) };
 }

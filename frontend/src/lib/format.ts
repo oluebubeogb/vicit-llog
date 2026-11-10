@@ -80,3 +80,5 @@ export function inviteStatus(inv: { status: string; expiresAt?: string | null })
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 export const photoUrl = (p?: string | null) => (p ? `${API_URL}/visitors/photo/${p}` : null);
 export const avatarUrl = (p?: string | null) => (p ? `${API_URL}/users/avatar/${p}` : null);
+
+export const staffBadgeUrl = (p?: string | null) => (p ? `${API_URL}/users/staff-badge/${p}` : null);

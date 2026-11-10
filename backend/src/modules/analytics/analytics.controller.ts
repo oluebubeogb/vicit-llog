@@ -90,6 +90,39 @@ export class AnalyticsController {
     await this.drill.exportCsv(this.orgForDrill(user, f), f, res, name);
   }
 
+  
+  @Get('attendance')
+  @ApiOperation({ summary: 'Staff attendance insights (agency-scoped for ADMIN; platform for Super Admin / Super Admin II)' })
+  attendance(@CurrentUser() user: any, @Query('days') days?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('organisationId') organisationId?: string) {
+    const d = Math.min(366, Math.max(1, days ? parseInt(days, 10) || 30 : 30));
+    if (user.role === Role.ADMIN) return this.analytics.attendanceInsights(user.orgId, d, from, to);
+    if (user.role === Role.SUPER_ADMIN || (user.role === Role.GLOBAL_ADMIN && (user.permissions || []).includes('visits.view'))) {
+      return this.analytics.attendanceInsights(organisationId || null, d, from, to);
+    }
+    throw new ForbiddenException();
+  }
+
+  @Get('attendance/drill')
+  @RateLimit(60, 60)
+  @ApiOperation({ summary: 'Staff attendance drill-down rows' })
+  attendanceDrill(
+    @CurrentUser() user: any,
+    @Query('days') days?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('organisationId') organisationId?: string,
+    @Query('staffId') staffId?: string,
+    @Query('day') day?: string,
+  ) {
+    const d = Math.min(366, Math.max(1, days ? parseInt(days, 10) || 30 : 30));
+    const opts = { days: d, from, to, staffId, day };
+    if (user.role === Role.ADMIN) return this.analytics.attendanceDrill(user.orgId, opts);
+    if (user.role === Role.SUPER_ADMIN || (user.role === Role.GLOBAL_ADMIN && (user.permissions || []).includes('visits.view'))) {
+      return this.analytics.attendanceDrill(organisationId || null, opts);
+    }
+    throw new ForbiddenException();
+  }
+
   @Get('dashboard')
   @ApiOperation({ summary: 'Admin analytics dashboard' })
   dashboard(

@@ -172,6 +172,73 @@ export class UsersController {
     );
   }
 
+
+  @Get('me/staff-qr/status')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Staff QR / PIN status for the signed-in user' })
+  staffQrStatus(@CurrentUser() user: any) {
+    return this.usersService.staffQrStatus(user.id);
+  }
+
+  @Post('me/staff-qr/pin')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Set 4-digit staff QR PIN (first time)' })
+  setStaffPin(@Body() body: { pin: string; confirmPin: string }, @CurrentUser() user: any) {
+    return this.usersService.setStaffPin(user.id, body.pin, body.confirmPin);
+  }
+
+  @Post('me/staff-qr/unlock')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Verify PIN and return staff QR payload (required every access)' })
+  unlockStaffQr(@Body() body: { pin: string }, @CurrentUser() user: any) {
+    return this.usersService.verifyStaffPin(user.id, body.pin);
+  }
+
+  @Post('me/staff-qr/reset-pin')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Reset staff PIN with account password (optionally set a new PIN)' })
+  resetStaffPin(
+    @Body() body: { password: string; newPin?: string; confirmPin?: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.usersService.resetStaffPinWithPassword(user.id, body.password, body.newPin, body.confirmPin);
+  }
+
+  @Post('me/staff-qr/badge-photo')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      storage: memoryStorage(),
+      limits: { fileSize: 4 * 1024 * 1024 },
+    }),
+  )
+  @ApiOperation({ summary: 'Upload live camera snap for the printable staff badge' })
+  uploadBadgePhoto(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: any) {
+    return this.usersService.uploadStaffBadgePhoto(user.id, file);
+  }
+
+  @Get('staff-badge/:filename')
+  @ApiOperation({ summary: 'Serve staff badge camera photo' })
+  getBadgePhoto(@Param('filename') filename: string, @Res() res: Response) {
+    const filepath = this.usersService.getStaffBadgePath(filename);
+    res.sendFile(filepath);
+  }
+
+  @Post(':id/clear-staff-pin')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Admin: clear a user staff QR PIN so they can set a new one' })
+  clearStaffPin(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.usersService.adminClearStaffPin(id, user.orgId, user.role);
+  }
+
   @Get(':id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

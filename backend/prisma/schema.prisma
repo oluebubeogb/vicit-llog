@@ -78,6 +78,7 @@ model Organisation {
   users           User[]
   invites         Invite[]
   locations       Location[]
+  staffAttendances StaffAttendance[]
   blacklist       BlacklistEntry[]
   workflows       ApprovalWorkflow[]
 }
@@ -138,6 +139,15 @@ model User {
   gateAssignments GateOfficerAssignment[]
   gateVisits      GateVisit[]
   createdParticulars GateParticular[]
+  /// Permanent non-guessable token encoded in the staff attendance QR
+  staffQrToken         String?   @unique
+  staffPinHash         String?
+  staffPinFailCount    Int       @default(0)
+  staffPinLockedUntil  DateTime?
+  /// Live camera snap used on the printable staff badge (not the profile avatar)
+  staffBadgePhotoPath  String?
+  staffAttendances     StaffAttendance[] @relation("StaffAttendanceSubject")
+  scannedAttendances   StaffAttendance[] @relation("StaffAttendanceScanner")
 }
 
 model Invite {
@@ -344,3 +354,24 @@ model GateParticular {
   @@index([gateVisitId])
 }
 
+/// One attendance row per staff member per calendar day (APP_TIMEZONE / Africa/Lagos).
+/// First scan of the day = arrival; later scans set/refresh exit time.
+model StaffAttendance {
+  id             String       @id @default(uuid())
+  userId         String
+  organisationId String
+  day            DateTime     /// Calendar date at 00:00 in the attendance timezone (stored as DateTime)
+  arrivedAt      DateTime
+  exitedAt       DateTime?
+  arrivalGateId  String?
+  exitGateId     String?
+  scannedById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation("StaffAttendanceSubject", fields: [userId], references: [id], onDelete: Cascade)
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  scannedBy      User?        @relation("StaffAttendanceScanner", fields: [scannedById], references: [id], onDelete: SetNull)
+  @@unique([userId, day])
+  @@index([organisationId, day])
+  @@index([day])
+}

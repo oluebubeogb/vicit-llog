@@ -26,8 +26,8 @@ const staffLinks = [
 
 const gateLinks = [
   { href: '/gate', icon: ScanLine, label: 'Scan', exact: true },
+  { href: '/invite/new', icon: UserPlus, label: 'Invite' },
   { href: '/gate/visits', icon: LayoutDashboard, label: 'Visits' },
-  { href: '/visitors', icon: Users, label: 'Visitors' },
   { href: '/notifications', icon: Bell, label: 'Alerts', badge: true },
   { href: '/profile', icon: User, label: 'Profile' },
 ];
@@ -90,7 +90,13 @@ export default function BottomNav() {
   const isGate = role === 'GATE' || role === 'GLOBAL_GATE';
   const canSeeGlobalVisits = role === 'SUPER_ADMIN' || (getUser()?.permissions || []).includes('visits.view');
   const links = (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN')
-    ? [{ href: '/platform', icon: LayoutDashboard, label: 'Platform' }, ...(canSeeGlobalVisits ? [{ href: '/gate/visits', icon: Users, label: 'Visits' }] : []), ...(role === 'SUPER_ADMIN' ? [{ href: '/gate', icon: ScanLine, label: 'Gate' }] : []), { href: '/profile', icon: User, label: 'Profile' }]
+    ? [
+        { href: '/platform', icon: LayoutDashboard, label: 'Platform' },
+        { href: '/invite/new', icon: UserPlus, label: 'Invite' },
+        ...(canSeeGlobalVisits ? [{ href: '/gate/visits', icon: Users, label: 'Visits' }] : []),
+        ...(role === 'SUPER_ADMIN' ? [{ href: '/gate', icon: ScanLine, label: 'Gate' }] : []),
+        { href: '/profile', icon: User, label: 'Profile' },
+      ]
     : isGate ? gateLinks : staffLinks;
 
   return (

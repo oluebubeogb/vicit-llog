@@ -3,7 +3,11 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -29,6 +33,7 @@ const userSelect = {
   mustChangePassword: true,
   createdAt: true,
   organisationId: true,
+  staffBadgePhotoPath: true,
 } as const;
 
 function showTempInAdmin(): boolean {
@@ -92,10 +97,23 @@ export class UsersService {
   async findById(id: string, orgId?: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, ...(orgId ? { organisationId: orgId } : {}) },
-      select: { ...userSelect, organisationId: true },
+      select: {
+        ...userSelect,
+        organisationId: true,
+        organisation: { select: { id: true, name: true, code: true } },
+        staffPinHash: true,
+        staffQrToken: true,
+        staffPinLockedUntil: true,
+      },
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    const { staffPinHash, staffQrToken, ...safe } = user as any;
+    return {
+      ...safe,
+      hasStaffPin: Boolean(staffPinHash),
+      hasStaffQr: Boolean(staffQrToken),
+      staffPinLockedUntil: user.staffPinLockedUntil,
+    };
   }
 
   async resetPassword(userId: string, orgId: string) {
@@ -557,6 +575,174 @@ export class UsersService {
     if (!fs.existsSync(filepath)) {
       throw new NotFoundException('Avatar not found');
     }
+    return filepath;
+  }
+
+
+  private async ensureStaffQrToken(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { staffQrToken: true } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.staffQrToken) return user.staffQrToken;
+    for (let i = 0; i < 5; i++) {
+      const token = crypto.randomBytes(32).toString('hex');
+      try {
+        await this.prisma.user.update({ where: { id: userId }, data: { staffQrToken: token } });
+        return token;
+      } catch {
+        // unique collision — retry
+      }
+    }
+    throw new BadRequestException('Could not allocate a staff QR token');
+  }
+
+  private assertPinFormat(pin: string) {
+    if (!/^\d{4}$/.test(String(pin || ''))) throw new BadRequestException('PIN must be exactly 4 digits');
+  }
+
+  private async assertPinUnlocked(user: { staffPinLockedUntil?: Date | null; staffPinFailCount?: number }) {
+    if (user.staffPinLockedUntil && user.staffPinLockedUntil.getTime() > Date.now()) {
+      const secs = Math.ceil((user.staffPinLockedUntil.getTime() - Date.now()) / 1000);
+      throw new HttpException(`PIN locked. Try again in ${secs}s`, HttpStatus.TOO_MANY_REQUESTS);
+    }
+  }
+
+  async staffQrStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        staffPinHash: true,
+        staffPinLockedUntil: true,
+        staffBadgePhotoPath: true,
+        staffQrToken: true,
+        fullName: true,
+        organisation: { select: { name: true, code: true } },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return {
+      hasStaffPin: Boolean(user.staffPinHash),
+      hasBadgePhoto: Boolean(user.staffBadgePhotoPath),
+      hasStaffQr: Boolean(user.staffQrToken),
+      lockedUntil: user.staffPinLockedUntil,
+      organisationName: user.organisation?.name,
+    };
+  }
+
+  async setStaffPin(userId: string, pin: string, confirmPin: string) {
+    this.assertPinFormat(pin);
+    if (pin !== confirmPin) throw new BadRequestException('PIN confirmation does not match');
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { staffPinHash: true } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.staffPinHash) throw new BadRequestException('PIN is already set. Reset it with your password first.');
+    const staffPinHash = await bcrypt.hash(pin, 12);
+    await this.ensureStaffQrToken(userId);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { staffPinHash, staffPinFailCount: 0, staffPinLockedUntil: null },
+    });
+    return { ok: true, hasStaffPin: true };
+  }
+
+  async verifyStaffPin(userId: string, pin: string) {
+    this.assertPinFormat(pin);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        staffPinHash: true,
+        staffPinFailCount: true,
+        staffPinLockedUntil: true,
+        staffQrToken: true,
+        staffBadgePhotoPath: true,
+        fullName: true,
+        avatarPath: true,
+        organisation: { select: { id: true, name: true, code: true } },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (!user.staffPinHash) throw new BadRequestException('Set a PIN first');
+    await this.assertPinUnlocked(user);
+    const ok = await bcrypt.compare(pin, user.staffPinHash);
+    if (!ok) {
+      const fails = (user.staffPinFailCount || 0) + 1;
+      const lock = fails >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null;
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { staffPinFailCount: fails, staffPinLockedUntil: lock },
+      });
+      if (lock) throw new HttpException('Too many wrong PIN attempts. Locked for 15 minutes.', HttpStatus.TOO_MANY_REQUESTS);
+      throw new ForbiddenException(`Incorrect PIN (${5 - fails} attempts left)`);
+    }
+    const token = await this.ensureStaffQrToken(userId);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { staffPinFailCount: 0, staffPinLockedUntil: null },
+    });
+    return {
+      ok: true,
+      qrPayload: JSON.stringify({ s: token }),
+      staffBadgePhotoPath: user.staffBadgePhotoPath,
+      fullName: user.fullName,
+      organisation: user.organisation,
+      avatarPath: user.avatarPath,
+    };
+  }
+
+  async resetStaffPinWithPassword(userId: string, password: string, newPin?: string, confirmPin?: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+    if (!user) throw new NotFoundException('User not found');
+    const valid = await bcrypt.compare(password || '', user.passwordHash);
+    if (!valid) throw new ForbiddenException('Password is incorrect');
+    if (newPin) {
+      this.assertPinFormat(newPin);
+      if (newPin !== confirmPin) throw new BadRequestException('PIN confirmation does not match');
+      const staffPinHash = await bcrypt.hash(newPin, 12);
+      await this.ensureStaffQrToken(userId);
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { staffPinHash, staffPinFailCount: 0, staffPinLockedUntil: null },
+      });
+      return { ok: true, hasStaffPin: true };
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { staffPinHash: null, staffPinFailCount: 0, staffPinLockedUntil: null },
+    });
+    return { ok: true, hasStaffPin: false };
+  }
+
+  async adminClearStaffPin(targetUserId: string, actorOrgId: string, actorRole: string) {
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(actorRole)) throw new ForbiddenException();
+    const where: any = { id: targetUserId };
+    if (actorRole === 'ADMIN') where.organisationId = actorOrgId;
+    const user = await this.prisma.user.findFirst({ where });
+    if (!user) throw new NotFoundException('User not found');
+    await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { staffPinHash: null, staffPinFailCount: 0, staffPinLockedUntil: null },
+    });
+    return { ok: true };
+  }
+
+  async uploadStaffBadgePhoto(userId: string, file: Express.Multer.File) {
+    if (!file?.buffer?.length) throw new BadRequestException('No image provided');
+    // Must be a camera snap (client enforces); accept jpeg/png/webp
+    const mime = (file.mimetype || '').toLowerCase();
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/jpg'].includes(mime)) {
+      throw new BadRequestException('Badge photo must be a camera image (JPEG/PNG/WebP)');
+    }
+    const dir = path.join(process.env.PHOTO_STORAGE_PATH || '/data/photos', 'staff-badges');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const ext = mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg';
+    const filename = `badge-${userId.slice(0, 8)}-${uuidv4()}${ext}`;
+    fs.writeFileSync(path.join(dir, filename), file.buffer);
+    await this.prisma.user.update({ where: { id: userId }, data: { staffBadgePhotoPath: filename } });
+    return { staffBadgePhotoPath: filename };
+  }
+
+  getStaffBadgePath(filename: string) {
+    const safe = path.basename(filename);
+    const filepath = path.join(process.env.PHOTO_STORAGE_PATH || '/data/photos', 'staff-badges', safe);
+    if (!fs.existsSync(filepath)) throw new NotFoundException('Badge photo not found');
     return filepath;
   }
 

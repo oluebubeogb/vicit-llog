@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { dayDateFromKey, localDayKey, attendanceTimeZone } from '../../common/utils/attendance-day';
+import { roleLabel } from '../../common/utils/role-labels';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 @Injectable()
@@ -298,6 +300,149 @@ export class AnalyticsService {
       durationBuckets: buckets.map(({ label, count }) => ({ label, count })),
       blacklistHits: hits.slice(0, 20),
       inviteStatus,
+    };
+  }
+
+
+  /**
+   * Staff attendance insights for an agency (or all agencies when organisationId is omitted for platform roles).
+   * Late = arrived after 09:00 local; absent = active staff with no row that day (only computed for single-day ranges).
+   */
+  async attendanceInsights(orgId: string | null, days = 30, from?: string, to?: string) {
+    const periodDays = Math.min(366, Math.max(1, days || 30));
+    let rangeTo = to ? new Date(to) : new Date();
+    let rangeFrom = from ? new Date(from) : new Date(rangeTo.getTime() - (periodDays - 1) * 86400000);
+    if (isNaN(+rangeFrom) || isNaN(+rangeTo)) throw new Error('Invalid date range');
+    // Expand to full days in attendance TZ via day keys
+    const fromKey = localDayKey(rangeFrom);
+    const toKey = localDayKey(rangeTo);
+    const dayFrom = dayDateFromKey(fromKey);
+    const dayTo = dayDateFromKey(toKey);
+
+    const where: any = { day: { gte: dayFrom, lte: dayTo } };
+    if (orgId) where.organisationId = orgId;
+
+    const rows = await this.prisma.staffAttendance.findMany({
+      where,
+      include: {
+        user: { select: { id: true, fullName: true, role: true, organisationId: true } },
+        organisation: { select: { id: true, name: true, code: true } },
+      },
+      orderBy: [{ day: 'desc' }, { arrivedAt: 'desc' }],
+      take: 5000,
+    });
+
+    const byDayMap = new Map<string, { day: string; arrivals: number; exits: number; totalMinutes: number; timed: number }>();
+    const byStaffMap = new Map<string, { id: string; name: string; role: string; roleLabel: string; organisationId: string; organisationName: string; days: number; late: number; totalMinutes: number; timed: number }>();
+    let lateCount = 0;
+    let withExit = 0;
+    let totalMinutes = 0;
+
+    for (const r of rows) {
+      const key = localDayKey(r.day);
+      const dayBucket = byDayMap.get(key) || { day: key, arrivals: 0, exits: 0, totalMinutes: 0, timed: 0 };
+      dayBucket.arrivals += 1;
+      if (r.exitedAt) {
+        dayBucket.exits += 1;
+        withExit += 1;
+        const mins = Math.max(0, (r.exitedAt.getTime() - r.arrivedAt.getTime()) / 60000);
+        dayBucket.totalMinutes += mins;
+        dayBucket.timed += 1;
+        totalMinutes += mins;
+      }
+      byDayMap.set(key, dayBucket);
+
+      // Late if local arrival hour >= 9
+      const hourStr = new Intl.DateTimeFormat('en-GB', { timeZone: attendanceTimeZone(), hour: '2-digit', hour12: false }).format(r.arrivedAt);
+      const hour = parseInt(hourStr, 10);
+      const late = Number.isFinite(hour) && hour >= 9;
+      if (late) lateCount += 1;
+
+      const sid = r.userId;
+      const staff = byStaffMap.get(sid) || {
+        id: sid,
+        name: r.user.fullName,
+        role: r.user.role,
+        roleLabel: roleLabel(r.user.role),
+        organisationId: r.organisationId,
+        organisationName: r.organisation?.name || '',
+        days: 0,
+        late: 0,
+        totalMinutes: 0,
+        timed: 0,
+      };
+      staff.days += 1;
+      if (late) staff.late += 1;
+      if (r.exitedAt) {
+        const mins = Math.max(0, (r.exitedAt.getTime() - r.arrivedAt.getTime()) / 60000);
+        staff.totalMinutes += mins;
+        staff.timed += 1;
+      }
+      byStaffMap.set(sid, staff);
+    }
+
+    const byDay = [...byDayMap.values()].sort((a, b) => a.day.localeCompare(b.day));
+    const byStaff = [...byStaffMap.values()]
+      .map((s) => ({
+        ...s,
+        avgMinutes: s.timed ? Math.round(s.totalMinutes / s.timed) : null,
+      }))
+      .sort((a, b) => b.days - a.days);
+
+    return {
+      timezone: attendanceTimeZone(),
+      range: { from: fromKey, to: toKey },
+      kpis: {
+        arrivals: rows.length,
+        completed: withExit,
+        stillIn: rows.length - withExit,
+        late: lateCount,
+        avgStayMinutes: withExit ? Math.round(totalMinutes / withExit) : null,
+        uniqueStaff: byStaffMap.size,
+      },
+      byDay,
+      byStaff: byStaff.slice(0, 100),
+    };
+  }
+
+  async attendanceDrill(orgId: string | null, opts: { staffId?: string; day?: string; days?: number; from?: string; to?: string }) {
+    const insights = await this.attendanceInsights(orgId, opts.days || 30, opts.from, opts.to);
+    let rows = await this.prisma.staffAttendance.findMany({
+      where: {
+        ...(orgId ? { organisationId: orgId } : {}),
+        ...(opts.staffId ? { userId: opts.staffId } : {}),
+        ...(opts.day ? { day: dayDateFromKey(opts.day) } : {
+          day: { gte: dayDateFromKey(insights.range.from), lte: dayDateFromKey(insights.range.to) },
+        }),
+      },
+      include: {
+        user: { select: { id: true, fullName: true, role: true } },
+        organisation: { select: { id: true, name: true, code: true } },
+        scannedBy: { select: { id: true, fullName: true } },
+      },
+      orderBy: [{ day: 'desc' }, { arrivedAt: 'desc' }],
+      take: 200,
+    });
+
+    return {
+      timezone: attendanceTimeZone(),
+      total: rows.length,
+      rows: rows.map((r) => {
+        const mins = r.exitedAt ? Math.max(0, Math.round((r.exitedAt.getTime() - r.arrivedAt.getTime()) / 60000)) : null;
+        const hourStr = new Intl.DateTimeFormat('en-GB', { timeZone: attendanceTimeZone(), hour: '2-digit', hour12: false }).format(r.arrivedAt);
+        const hour = parseInt(hourStr, 10);
+        return {
+          id: r.id,
+          day: localDayKey(r.day),
+          arrivedAt: r.arrivedAt,
+          exitedAt: r.exitedAt,
+          durationMinutes: mins,
+          late: Number.isFinite(hour) && hour >= 9,
+          staff: { id: r.user.id, fullName: r.user.fullName, role: r.user.role, roleLabel: roleLabel(r.user.role) },
+          organisation: r.organisation,
+          scannedBy: r.scannedBy,
+        };
+      }),
     };
   }
 

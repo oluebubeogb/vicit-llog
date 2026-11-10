@@ -255,6 +255,30 @@ export const api = {
   gates: () => request('/locations/gates/all'),
   assignGateOfficer: (gateId: string, userId: string) => request(`/locations/gates/${gateId}/officers/${userId}`, { method: 'POST' }),
   unassignGateOfficer: (gateId: string, userId: string) => request(`/locations/gates/${gateId}/officers/${userId}`, { method: 'DELETE' }),
+
+  staffQrStatus: () => request('/users/me/staff-qr/status'),
+  setStaffPin: (pin: string, confirmPin: string) => request('/users/me/staff-qr/pin', { method: 'POST', body: JSON.stringify({ pin, confirmPin }) }),
+  unlockStaffQr: (pin: string) => request('/users/me/staff-qr/unlock', { method: 'POST', body: JSON.stringify({ pin }) }),
+  resetStaffPin: (password: string, newPin?: string, confirmPin?: string) => request('/users/me/staff-qr/reset-pin', { method: 'POST', body: JSON.stringify({ password, newPin, confirmPin }) }),
+  uploadStaffBadgePhoto: async (blob: Blob, filename = 'badge.jpg') => {
+    const form = new FormData();
+    form.append('photo', blob, filename);
+    return request('/users/me/staff-qr/badge-photo', { method: 'POST', body: form });
+  },
+  clearStaffPin: (userId: string) => request(`/users/${userId}/clear-staff-pin`, { method: 'POST' }),
+  attendanceAnalytics: (days?: number, from?: string, to?: string, organisationId?: string) => {
+    const q = new URLSearchParams();
+    if (days) q.set('days', String(days));
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    if (organisationId) q.set('organisationId', organisationId);
+    return request(`/analytics/attendance?${q.toString()}`);
+  },
+  attendanceDrill: (params: Record<string, string | number | undefined>) => {
+    const q = new URLSearchParams();
+    Object.entries(params || {}).forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)); });
+    return request(`/analytics/attendance/drill?${q.toString()}`);
+  },
   reorderGate: (gateId: string, sequence: number) => request(`/locations/gates/${gateId}/order`, { method: 'PATCH', body: JSON.stringify({ sequence }) }),
   checkpoints: () => request('/gate/checkpoints'),
   uploadParticularImage: async (file: File) => { const form = new FormData(); form.append('image', file); return request('/gate/particular-image', { method: 'POST', body: form }); },

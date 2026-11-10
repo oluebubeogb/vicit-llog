@@ -11,6 +11,8 @@ import { MailService } from '../mail/mail.service';
 import { EntryMode, VisitStatus } from '@prisma/client';
 import { EntryDto } from './dto/entry.dto';
 import { parseGateCode } from '../../common/utils/qr';
+import { currentAttendanceDay, localDayKey, attendanceTimeZone } from '../../common/utils/attendance-day';
+import { roleLabel } from '../../common/utils/role-labels';
 
 @Injectable()
 export class GateService {
@@ -23,8 +25,11 @@ export class GateService {
 
   async lookup(passphraseOrQr: string, actor?: any) {
     // Accept every form a QR / officer can produce: QR JSON, /visitor/<token> URL,
-    // bare token or visitor id, passphrase in any case / spacing.
+    // bare token or visitor id, passphrase in any case / spacing, or staff QR {"s":...}.
     const parsed = parseGateCode(passphraseOrQr);
+    if (parsed.staffToken) {
+      return this.scanStaffAttendance(parsed.staffToken, actor);
+    }
     if (!parsed.passphrase && !parsed.token && !parsed.visitorId) {
       throw new BadRequestException('Scan a QR code or enter a passphrase');
     }
@@ -115,7 +120,7 @@ export class GateService {
   }
 
   async recordCheckpoint(body: any, actor: any) {
-    if (actor.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Global Admin accounts provide oversight, not checkpoint operations');
+    if (actor.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Super Admin II accounts provide oversight, not checkpoint operations');
     const visitorId = String(body.visitorId || '');
     const gateId = String(body.gateId || '');
     const decision = String(body.decision || '').toUpperCase();
@@ -216,7 +221,7 @@ export class GateService {
   }
 
   async returnParticular(particularId: string, actor: any) {
-    if (actor.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Global Admin accounts provide oversight, not custody operations');
+    if (actor.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Super Admin II accounts provide oversight, not custody operations');
     const item = await this.prisma.gateParticular.findUnique({ where: { id: particularId }, include: { gateVisit: { include: { gate: { include: { location: true, assignments: true } } } } } });
     if (!item) throw new NotFoundException('Particular record not found');
     if (item.kind !== 'WITHHELD') throw new BadRequestException('Only withheld items can be marked as returned');
@@ -504,5 +509,105 @@ export class GateService {
     }
     return rows;
   }
+
+  /**
+   * Staff permanent QR attendance.
+   * Day boundary: APP_TIMEZONE (default Africa/Lagos).
+   * First scan of the day → arrival. Later scans → set/refresh exit time.
+   */
+  async scanStaffAttendance(staffToken: string, actor?: any) {
+    if (!actor) throw new ForbiddenException('Sign in required to record staff attendance');
+    if (!['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN', 'ADMIN'].includes(actor.role)) {
+      throw new ForbiddenException('Only gate officers (and Super Admin) can record staff attendance');
+    }
+    const staff = await this.prisma.user.findFirst({
+      where: { staffQrToken: staffToken, isActive: true },
+      select: {
+        id: true,
+        fullName: true,
+        role: true,
+        organisationId: true,
+        avatarPath: true,
+        staffBadgePhotoPath: true,
+        organisation: { select: { id: true, name: true, code: true } },
+      },
+    });
+    if (!staff) throw new NotFoundException('Staff QR not recognised');
+
+    const global = ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
+    if (!global && actor.role !== 'ADMIN' && staff.organisationId !== actor.orgId) {
+      throw new ForbiddenException('This staff member belongs to another agency');
+    }
+    if (actor.role === 'ADMIN' && staff.organisationId !== actor.orgId) {
+      throw new ForbiddenException('This staff member belongs to another agency');
+    }
+
+    const day = currentAttendanceDay();
+    const now = new Date();
+    const existing = await this.prisma.staffAttendance.findUnique({
+      where: { userId_day: { userId: staff.id, day } },
+    });
+
+    let attendance;
+    let action: 'ARRIVAL' | 'EXIT';
+    if (!existing) {
+      attendance = await this.prisma.staffAttendance.create({
+        data: {
+          userId: staff.id,
+          organisationId: staff.organisationId,
+          day,
+          arrivedAt: now,
+          scannedById: actor.id,
+        },
+      });
+      action = 'ARRIVAL';
+      await this.audit.log({
+        action: 'STAFF_ARRIVAL',
+        entity: 'StaffAttendance',
+        entityId: attendance.id,
+        userId: actor.id,
+        details: { staffId: staff.id, day: localDayKey(now) },
+      });
+    } else {
+      attendance = await this.prisma.staffAttendance.update({
+        where: { id: existing.id },
+        data: { exitedAt: now, scannedById: actor.id },
+      });
+      action = 'EXIT';
+      await this.audit.log({
+        action: 'STAFF_EXIT',
+        entity: 'StaffAttendance',
+        entityId: attendance.id,
+        userId: actor.id,
+        details: { staffId: staff.id, day: localDayKey(now) },
+      });
+    }
+
+    return {
+      kind: 'staff',
+      action,
+      timezone: attendanceTimeZone(),
+      day: localDayKey(now),
+      staff: {
+        id: staff.id,
+        fullName: staff.fullName,
+        role: staff.role,
+        roleLabel: roleLabel(staff.role),
+        organisation: staff.organisation,
+        avatarPath: staff.avatarPath,
+        staffBadgePhotoPath: staff.staffBadgePhotoPath,
+      },
+      attendance: {
+        id: attendance.id,
+        arrivedAt: attendance.arrivedAt,
+        exitedAt: attendance.exitedAt,
+      },
+      message:
+        action === 'ARRIVAL'
+          ? `${staff.fullName} marked arrived for ${localDayKey(now)}`
+          : `${staff.fullName} marked exited at ${now.toLocaleTimeString('en-GB', { timeZone: attendanceTimeZone(), hour: '2-digit', minute: '2-digit' })}`,
+    };
+  }
+
 }
 

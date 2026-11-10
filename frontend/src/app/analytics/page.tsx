@@ -252,6 +252,9 @@ export default function AnalyticsPage() {
   const list = res?.rows || [];
   const [listLoading, setListLoading] = useState(false);
   const [detail, setDetail] = useState<any | null>(null);
+  const [attendance, setAttendance] = useState<any>(null);
+  const [attDrill, setAttDrill] = useState<any[] | null>(null);
+  const [attTitle, setAttTitle] = useState('');
 
   const range = custom && from && to ? { from, to } : null;
 
@@ -262,6 +265,10 @@ export default function AnalyticsPage() {
       .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
+    api
+      .attendanceAnalytics(days, range?.from, range?.to)
+      .then(setAttendance)
+      .catch(() => setAttendance(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days, range?.from, range?.to]);
 
@@ -380,6 +387,76 @@ export default function AnalyticsPage() {
             <Kpi icon={<Repeat size={18} />} label="Returning visitors" value={k.returningVisitors} tone="from-brand-50 to-accent-100 text-accent-700" tip="People who visited more than once in this period" onClick={() => openDrill({ title: 'Returning visitors', params: { metric: 'returning' } })} />
             <Kpi icon={<ShieldAlert size={18} />} label="Blacklist matches" value={k.blacklistHits} tone="from-rose-50 to-amber-50 text-rose-600" tip="Registrations matching an active blacklist entry" onClick={() => openDrill({ title: 'Blacklist matches', params: { metric: 'blacklist' } })} />
           </div>
+
+
+          {attendance && (
+            <ChartCard title="Staff attendance" icon={<Clock size={16} />} info="First staff QR scan of the day = arrival; later scans update exit. Late = arrival at/after 09:00 local agency time.">
+              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {[
+                  ['Arrivals', attendance.kpis?.arrivals],
+                  ['Completed exits', attendance.kpis?.completed],
+                  ['Still in', attendance.kpis?.stillIn],
+                  ['Late arrivals', attendance.kpis?.late],
+                  ['Unique staff', attendance.kpis?.uniqueStaff],
+                  ['Avg stay', attendance.kpis?.avgStayMinutes != null ? `${attendance.kpis.avgStayMinutes}m` : '—'],
+                ].map(([l, v]) => (
+                  <div key={String(l)} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{l}</p>
+                    <p className="text-lg font-bold text-slate-800">{v ?? 0}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mb-2 text-xs font-semibold text-slate-600">Top staff by days present</p>
+              <ul className="divide-y divide-slate-100">
+                {(attendance.byStaff || []).slice(0, 8).map((s: any) => (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      className="row-link !py-2.5"
+                      onClick={async () => {
+                        setAttTitle(`${s.name} · attendance`);
+                        try {
+                          const r = await api.attendanceDrill({ days, from: range?.from, to: range?.to, staffId: s.id });
+                          setAttDrill(r.rows || []);
+                        } catch {
+                          setAttDrill([]);
+                        }
+                      }}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <b className="block truncate text-sm">{s.name}</b>
+                        <span className="text-[11px] text-slate-400">{s.roleLabel} · {s.days} day{s.days === 1 ? '' : 's'} · {s.late} late</span>
+                      </span>
+                      <span className="text-xs font-semibold text-brand-700">{s.avgMinutes != null ? `${s.avgMinutes}m avg` : '—'}</span>
+                    </button>
+                  </li>
+                ))}
+                {!(attendance.byStaff || []).length && <li className="py-4 text-center text-xs text-slate-400">No staff QR scans in this period yet.</li>}
+              </ul>
+              {attDrill && (
+                <div className="mt-3 rounded-xl border border-slate-100 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-semibold text-slate-700">{attTitle}</p>
+                    <button type="button" className="text-[11px] font-semibold text-slate-400" onClick={() => setAttDrill(null)}>Close</button>
+                  </div>
+                  <ul className="max-h-56 space-y-1 overflow-auto text-xs">
+                    {attDrill.map((r: any) => (
+                      <li key={r.id} className="flex justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1.5">
+                        <span>{r.day}{r.late ? ' · late' : ''}</span>
+                        <span className="font-medium text-slate-700">
+                          {r.arrivedAt ? new Date(r.arrivedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                          {' → '}
+                          {r.exitedAt ? new Date(r.exitedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                          {r.durationMinutes != null ? ` · ${r.durationMinutes}m` : ''}
+                        </span>
+                      </li>
+                    ))}
+                    {!attDrill.length && <li className="text-slate-400">No rows</li>}
+                  </ul>
+                </div>
+              )}
+            </ChartCard>
+          )}
 
           <ChartCard title="Traffic over time" icon={<BarChart3 size={16} />} info="Daily registrations, check-ins and check-outs. Tap a day to see its records.">
             <div className="h-52 -ml-3 cursor-pointer">

@@ -82,7 +82,7 @@ export class InvitesService {
     });
     // Branding & Settings → "Require approval for invites": non-admin invites wait for an admin
     const needsApproval =
-      !dto.isOffline && Boolean(orgSettings?.requireApproval) && creatorRole !== Role.ADMIN;
+      !dto.isOffline && Boolean(orgSettings?.requireApproval) && ![Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE].includes(creatorRole as any);
     const expiresAt = new Date(Date.now() + ttl * 60 * 1000);
     const token = uuidv4();
     const passphrase = this.generatePassphrase();

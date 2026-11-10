@@ -6,6 +6,7 @@ import { Building2, DoorOpen, MapPin, Plus, Minus, ChevronUp, ChevronDown } from
 import PageHeader from '@/components/ui/PageHeader';
 import Collapse from '@/components/ui/Collapse';
 import { Empty, SkeletonList } from '@/components/ui/Bits';
+import SleekOverlay from '@/components/ui/SleekOverlay';
 
 export default function LocationsPage() {
   const [locations, setLocations] = useState<any[]>([]);
@@ -19,6 +20,8 @@ export default function LocationsPage() {
   const [maxGates, setMaxGates] = useState(10);
   const [gateSettingsOpen, setGateSettingsOpen] = useState<string | null>(null);
   const [gateSettings, setGateSettings] = useState<any>({ admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
+  const [removeOfficer, setRemoveOfficer] = useState<{ gateId: string; gateName: string; userId: string; fullName: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   function load(silent = false) {
     if (!silent) setLoading(true);
@@ -123,15 +126,9 @@ export default function LocationsPage() {
                                 title={`Remove ${a.user?.fullName || 'officer'} from this gate`}
                                 aria-label={`Remove ${a.user?.fullName || 'officer'} from this gate`}
                                 disabled={!a.user?.id || (!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId)}
-                                onClick={async () => {
+                                onClick={() => {
                                   if (!a.user?.id) return;
-                                  if (!window.confirm(`Remove ${a.user.fullName} from ${g.name}?`)) return;
-                                  try {
-                                    await api.unassignGateOfficer(g.id, a.user.id);
-                                    await load(true);
-                                  } catch (err: any) {
-                                    window.alert(err.message || 'Could not remove officer');
-                                  }
+                                  setRemoveOfficer({ gateId: g.id, gateName: g.name, userId: a.user.id, fullName: a.user.fullName });
                                 }}
                                 className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
                               >
@@ -172,6 +169,42 @@ export default function LocationsPage() {
           ))}
         </ul>
       )}
+
+      <SleekOverlay
+        open={!!removeOfficer}
+        onClose={() => !removing && setRemoveOfficer(null)}
+        tone="rose"
+        title="Remove gate officer"
+        subtitle={removeOfficer ? `Unassign ${removeOfficer.fullName} from ${removeOfficer.gateName}?` : ''}
+        icon={<Minus size={20} />}
+        footer={
+          <>
+            <button type="button" className="btn-quiet flex-1" disabled={removing} onClick={() => setRemoveOfficer(null)}>Cancel</button>
+            <button
+              type="button"
+              className="btn-primary flex-1 !bg-rose-600 hover:!bg-rose-700"
+              disabled={removing}
+              onClick={async () => {
+                if (!removeOfficer) return;
+                setRemoving(true);
+                try {
+                  await api.unassignGateOfficer(removeOfficer.gateId, removeOfficer.userId);
+                  setRemoveOfficer(null);
+                  await load(true);
+                } catch (err: any) {
+                  window.alert(err.message || 'Could not remove officer');
+                } finally {
+                  setRemoving(false);
+                }
+              }}
+            >
+              {removing ? 'Removing…' : 'Remove'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600">They will no longer be able to record decisions at this checkpoint until reassigned.</p>
+      </SleekOverlay>
     </div>
   );
 }

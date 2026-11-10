@@ -120,7 +120,7 @@ export default function GatePage() {
   }, [evidenceCameraOpen]);
 
   useEffect(() => {
-    if (!result || !checkpoints.length) return;
+    if (!result || result.kind === 'staff' || !checkpoints.length) return;
     const relevant = checkpoints.filter((g: any) => result.locationId ? g.locationId === result.locationId : g.location?.organisationId === result.organisationId);
     const passed = new Set((result.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
     const next = relevant.sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
@@ -142,12 +142,16 @@ export default function GatePage() {
     try {
       const data = await api.gateLookup(value);
       setResult((prev: any) => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
-      if (data?.expectedMode) setEntryMode(data.expectedMode);
-      if (!opts?.silent) {
-        const relevant = checkpoints.filter((g: any) => data?.locationId ? g.locationId === data.locationId : g.location?.organisationId === data?.organisationId);
-        const passed = new Set((data?.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
-        const next = [...relevant].sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
-        if (next) setActiveGateId(next.id);
+      if (data?.kind === 'staff') {
+        // Staff attendance QR — no visitor checkpoint workflow
+      } else {
+        if (data?.expectedMode) setEntryMode(data.expectedMode);
+        if (!opts?.silent) {
+          const relevant = checkpoints.filter((g: any) => data?.locationId ? g.locationId === data.locationId : g.location?.organisationId === data?.organisationId);
+          const passed = new Set((data?.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
+          const next = [...relevant].sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
+          if (next) setActiveGateId(next.id);
+        }
       }
     } catch (err: any) {
       if (!opts?.silent) {
@@ -174,7 +178,7 @@ export default function GatePage() {
   useEffect(() => {
     const timer = window.setInterval(async () => {
       const current = resultRef.current;
-      if (!current?.visitors?.some((v: any) => v.status === 'ARRIVED')) return;
+      if (current?.kind === 'staff' || !current?.visitors?.some((v: any) => v.status === 'ARRIVED')) return;
       const codeNow = normalizeScannedCode(codeRef.current);
       if (!codeNow) return;
       const waiting = (current.visitors || []).filter((v: any) => v.status === 'ARRIVED' && v.hostAvailabilityStatus === 'WAITING' && v.hostWaitUntil && new Date(v.hostWaitUntil).getTime() <= Date.now());
@@ -596,7 +600,31 @@ export default function GatePage() {
       {scanError && <Notice tone="warn">{scanError}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
 
-      {result && (
+      {result && result.kind === 'staff' && (
+        <div className="card card-art space-y-3 p-4">
+          <div className="flex items-start gap-3">
+            <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white shadow ${result.action === 'ARRIVAL' ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' : 'bg-gradient-to-br from-sky-500 to-indigo-600'}`}>
+              <UserRound size={22} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] uppercase tracking-wider text-slate-400">Staff attendance</p>
+              <p className="text-lg font-bold text-slate-900">{result.staff?.fullName}</p>
+              <p className="text-xs text-slate-500">{result.staff?.roleLabel} · {result.staff?.organisation?.name}</p>
+            </div>
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${result.action === 'ARRIVAL' ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'}`}>
+              {result.action === 'ARRIVAL' ? 'Arrived' : 'Exited'}
+            </span>
+          </div>
+          <p className="text-sm text-slate-600">{result.message}</p>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-xl bg-slate-50 p-3"><p className="text-slate-400">Arrival</p><p className="font-semibold text-slate-800">{result.attendance?.arrivedAt ? new Date(result.attendance.arrivedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</p></div>
+            <div className="rounded-xl bg-slate-50 p-3"><p className="text-slate-400">Exit</p><p className="font-semibold text-slate-800">{result.attendance?.exitedAt ? new Date(result.attendance.exitedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</p></div>
+          </div>
+          <p className="text-[11px] text-slate-400">Day {result.day} · {result.timezone}. First scan = arrival; later scans update exit.</p>
+        </div>
+      )}
+
+      {result && result.kind !== 'staff' && (
         <div className="space-y-3">
           <div className="card card-art p-4">
             <div className="flex items-start gap-3">
