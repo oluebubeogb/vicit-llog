@@ -1,5 +1,5 @@
 /* Vicit Llog service worker — asset cache + standard Web Push (VAPID). */
-const CACHE = 'vicit-llog-1.0.1-v16';
+const CACHE = 'vicit-llog-1.0.1-v17';
 const ASSETS = ['/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {

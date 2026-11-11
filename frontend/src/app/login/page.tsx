@@ -94,7 +94,7 @@ export default function LoginPage() {
 
         <div className="stagger mb-6 flex flex-col items-center text-center">
           <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-on-brand/70">Visitor access & exit control</p>
+          <p className="mt-1 text-sm text-on-brand/70">Visitor Access & Exit Control</p>
           {headline && <p className="mt-0.5 text-xs text-on-brand/60">{headline}</p>}
         </div>
 

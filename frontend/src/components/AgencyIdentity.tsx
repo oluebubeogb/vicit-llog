@@ -41,7 +41,7 @@ export default function AgencyIdentity() {
         <BrandMark size={28} glow={false} className="rounded-lg" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-bold tracking-tight text-slate-800">{brand.name || brand.appName || 'Vicit Llog'}</p>
-          <p className="text-[9px] font-semibold uppercase tracking-[0.13em] text-slate-400">Visitor access &amp; exit control</p>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.13em] text-slate-400">Visitor Access &amp; Exit Control</p>
         </div>
         {roleName && (
           <span className="max-w-[40%] shrink-0 truncate text-right text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">
@@ -52,7 +52,7 @@ export default function AgencyIdentity() {
 
       {/* Desktop main panel: the sidebar already shows the logo and name, so this strip is only the tagline and role. */}
       <div className="mb-3 hidden items-center justify-between gap-4 px-1 pt-1 lg:flex">
-        <p className="min-w-0 text-sm font-medium tracking-tight text-slate-600">Visitor access &amp; exit control</p>
+        <p className="min-w-0 text-sm font-medium tracking-tight text-slate-600">Visitor Access &amp; Exit Control</p>
         {roleName && (
           <p className="shrink-0 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-700">
             {roleName}
