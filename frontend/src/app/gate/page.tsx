@@ -22,6 +22,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import PersonLink from '@/components/PersonLink';
+import HostSuggest, { type HostPick } from '@/components/HostSuggest';
 import PageHeader from '@/components/ui/PageHeader';
 import StatusPill from '@/components/ui/StatusPill';
 import Avatar from '@/components/ui/Avatar';
@@ -70,6 +71,7 @@ export default function GatePage() {
   const [selectedGuests, setSelectedGuests] = useState<Record<string, boolean>>({});
   const [denyReasons, setDenyReasons] = useState<Record<string, string>>({});
   const [destination, setDestination] = useState('');
+  const [hostPick, setHostPick] = useState<HostPick | null>(null);
   const [gallery, setGallery] = useState<{ images: GalleryImage[]; index: number } | null>(null);
   const [ringNote, setRingNote] = useState<Record<string, string>>({});
 
@@ -683,19 +685,21 @@ export default function GatePage() {
             {result.contractor?.photoPath ? <img src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/contractors/photo/${result.contractor.photoPath}`} alt="" className="h-16 w-16 rounded-2xl object-cover" /> : <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><UserRound size={24} /></span>}
             <div className="min-w-0 flex-1">
               <p className="font-bold text-slate-900">{result.contractor?.fullName}</p>
-              <p className="text-xs text-slate-500">{[result.contractor?.company, result.contractor?.organisation?.name].filter(Boolean).join(' · ')}</p>
-              <StatusPill tone={result.contractor?.status === 'valid' ? 'emerald' : 'rose'} className="mt-1" label={`${result.contractor?.status} through ${result.contractor?.validThrough ? new Date(result.contractor.validThrough).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}`} />
+              <p className="text-xs text-slate-500">{[result.contractor?.company, (result.contractor?.agencies || []).map((a: any) => a.shortName || a.name).join(', ') || result.contractor?.organisation?.name].filter(Boolean).join(' · ')}</p>
+              <StatusPill tone={result.contractor?.status === 'valid' ? 'emerald' : result.contractor?.status === 'terminated' ? 'rose' : 'rose'} className="mt-1" label={`${result.contractor?.status} through ${result.contractor?.validThrough ? new Date(result.contractor.validThrough).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}`} />
             </div>
           </div>
           {result.openVisit ? (
             <div className="space-y-2">
-              <p className="text-sm text-slate-600">On site · headed for <b>{result.openVisit.destination}</b></p>
+              <p className="text-sm text-slate-600">On site · headed for <b>{result.openVisit.destination || result.openVisit.host?.fullName || 'site'}</b></p>
+              {result.openVisit.host?.fullName && <p className="text-xs text-slate-500">Seeing {result.openVisit.host.fullName}</p>}
               <button type="button" className="btn w-full bg-gradient-to-br from-amber-400 to-amber-600 !py-3 text-white" disabled={!!actionLoading} onClick={async () => { setActionLoading('cout'); try { await api.contractorCheckOut({ contractorId: result.contractor.id, visitId: result.openVisit.id }); await lookup(); } catch (e: any) { setError(e.message); } finally { setActionLoading(''); } }}>Record exit</button>
             </div>
           ) : (
             <div className="space-y-2">
-              <label className="block"><span className="label">Where are they headed?</span><input className="input" value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="Office, workshop, name of host…" /></label>
-              <button type="button" className="btn-success w-full !py-3" disabled={!!actionLoading || !destination.trim()} onClick={async () => { setActionLoading('cin'); try { await api.contractorCheckIn({ contractorId: result.contractor.id, destination, gateId: activeGateId || undefined }); await lookup(); } catch (e: any) { setError(e.message); } finally { setActionLoading(''); } }}>Check in</button>
+              <HostSuggest contractorId={result.contractor?.id} value={hostPick} onChange={setHostPick} required />
+              <label className="block"><span className="label">Where are they headed? (optional)</span><input className="input" value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="Office, workshop…" /></label>
+              <button type="button" className="btn-success w-full !py-3" disabled={!!actionLoading || (!destination.trim() && !hostPick)} onClick={async () => { setActionLoading('cin'); try { await api.contractorCheckIn({ contractorId: result.contractor.id, destination: destination.trim() || hostPick?.fullName, hostId: hostPick?.id, gateId: activeGateId || undefined }); setHostPick(null); setDestination(''); await lookup(); } catch (e: any) { setError(e.message); } finally { setActionLoading(''); } }}>Check in</button>
             </div>
           )}
         </div>

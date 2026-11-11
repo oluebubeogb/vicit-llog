@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Briefcase, Camera, Download, Mail, RefreshCw } from 'lucide-react';
+import { Ban, Briefcase, Camera, Download, Mail, RefreshCw } from 'lucide-react';
+import SleekOverlay from '@/components/ui/SleekOverlay';
 import { api, getUser } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { Notice } from '@/components/ui/Bits';
@@ -21,6 +22,12 @@ export default function ContractorCardPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [cam, setCam] = useState(false);
+  const [renewOpen, setRenewOpen] = useState(false);
+  const [termOpen, setTermOpen] = useState(false);
+  const [renewMode, setRenewMode] = useState<'auto' | 'date'>('auto');
+  const [renewDate, setRenewDate] = useState('');
+  const [renewCycle, setRenewCycle] = useState('monthly');
+  const [termReason, setTermReason] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -64,7 +71,23 @@ export default function ContractorCardPage() {
   }
   async function renew() {
     setBusy('renew');
-    try { await api.renewContractor(row.id, {}); await load(); } catch (e: any) { setError(e.message); } finally { setBusy(''); }
+    try {
+      const payload = renewMode === 'auto'
+        ? { mode: 'auto', cycle: renewCycle || row.cycle }
+        : { validThrough: renewDate, cycle: renewCycle || row.cycle };
+      await api.renewContractor(row.id, payload);
+      setRenewOpen(false);
+      await load();
+    } catch (e: any) { setError(e.message); } finally { setBusy(''); }
+  }
+  async function terminate() {
+    if (termReason.trim().length < 3) { setError('Give a short reason (at least 3 characters).'); return; }
+    setBusy('term');
+    try {
+      await api.terminateContractor(row.id, { reason: termReason.trim() });
+      setTermOpen(false);
+      await load();
+    } catch (e: any) { setError(e.message); } finally { setBusy(''); }
   }
 
   async function downloadBadge() {
@@ -107,11 +130,11 @@ export default function ContractorCardPage() {
 
   return (
     <div className="page">
-      <PageHeader back="/contractors" icon={<Briefcase size={20} />} title={row.fullName} subtitle={[row.company, row.organisation?.name].filter(Boolean).join(' · ')} />
+      <PageHeader back="/contractors" icon={<Briefcase size={20} />} title={row.fullName} subtitle={[row.company, (row.agencies || []).map((a: any) => a.shortName || a.name).join(', ') || row.organisation?.name].filter(Boolean).join(' · ')} />
       {error && <Notice tone="error">{error}</Notice>}
       <div ref={cardRef} className="surface mb-4 overflow-hidden p-4">
         <div className="flex items-start justify-between gap-2">
-          <StatusPill tone={row.status === 'valid' ? 'emerald' : 'rose'} label={`${row.status === 'valid' ? 'Valid through' : row.status} ${new Date(row.validThrough).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`} />
+          <StatusPill tone={row.status === 'valid' ? 'emerald' : row.status === 'terminated' || row.status === 'expired' ? 'rose' : 'slate'} label={`${row.status === 'valid' ? 'Valid through' : row.status} ${row.validThrough ? new Date(row.validThrough).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}`} />
         </div>
         <div className="mt-4 grid items-center gap-4 sm:grid-cols-2">
           <div className="flex justify-center rounded-2xl bg-white p-3">
@@ -121,17 +144,20 @@ export default function ContractorCardPage() {
             {row.photoPath ? <img src={`${API}/contractors/photo/${row.photoPath}`} alt="" className="h-28 w-28 rounded-full object-cover ring-2 ring-brand-200" /> : <span className="flex h-28 w-28 items-center justify-center rounded-full bg-slate-100 text-slate-400"><Camera size={28} /></span>}
             <p className="mt-3 font-semibold text-slate-900">{row.fullName}</p>
             <p className="text-sm text-slate-500">{row.company || 'Contractor'}</p>
-            <p className="text-xs text-slate-400">{row.organisation?.name}</p>
+            <p className="text-xs text-slate-400">{(row.agencies || []).map((a: any) => a.shortName || a.name).join(' · ') || row.organisation?.name}</p>
           </div>
         </div>
       </div>
 
       {canManage && (
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <button type="button" className="btn-quiet !px-2 text-xs" onClick={cam ? stopCam : startCam}><Camera size={14} /> {cam ? 'Close' : 'Photo'}</button>
-          <button type="button" className="btn-quiet !px-2 text-xs" disabled={!!busy} onClick={downloadBadge}><Download size={14} /> Badge</button>
-          <button type="button" className="btn-quiet !px-2 text-xs" disabled={!!busy || !row.email} onClick={() => reprint(true)}><Mail size={14} /> Email</button>
-          <button type="button" className="btn-quiet !px-2 text-xs" disabled={!!busy} onClick={renew}><RefreshCw size={14} /> Renew</button>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button type="button" className="btn-quiet inline-flex items-center gap-1 !px-2.5 !py-2" onClick={cam ? stopCam : startCam}><Camera size={14} strokeWidth={2.25} /><b className="text-xs">{cam ? 'Close' : 'Photo'}</b></button>
+          <button type="button" className="btn-quiet inline-flex items-center gap-1 !px-2.5 !py-2" disabled={!!busy} onClick={downloadBadge}><Download size={14} strokeWidth={2.25} /><b className="text-xs">Badge</b></button>
+          <button type="button" className="btn-quiet inline-flex items-center gap-1 !px-2.5 !py-2" disabled={!!busy || !row.email} onClick={() => reprint(true)}><Mail size={14} strokeWidth={2.25} /><b className="text-xs">Email</b></button>
+          <button type="button" className="btn-quiet inline-flex items-center gap-1 !px-2.5 !py-2" disabled={!!busy} onClick={() => { setRenewCycle(row.cycle || 'monthly'); setRenewDate(row.validThrough ? String(row.validThrough).slice(0, 10) : ''); setRenewMode('auto'); setRenewOpen(true); }}><RefreshCw size={14} strokeWidth={2.25} /><b className="text-xs">Renew</b></button>
+          {row.status !== 'terminated' && (
+            <button type="button" className="btn-quiet inline-flex items-center gap-1 !px-2.5 !py-2 text-rose-700" onClick={() => setTermOpen(true)}><Ban size={14} strokeWidth={2.25} /><b className="text-xs">Terminate</b></button>
+          )}
         </div>
       )}
       {cam && (
@@ -144,16 +170,58 @@ export default function ContractorCardPage() {
       <section className="surface p-4">
         <h2 className="mb-3 text-sm font-semibold text-slate-800">History</h2>
         <ul className="space-y-2">
-          {(row.history || []).map((h: any) => (
-            <li key={h.id} className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              <b className="text-slate-800">{new Date(h.arrivedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</b>
-              {h.destination && <span> · {h.destination}</span>}
-              <span className="block text-slate-400">{h.exitedAt ? 'Out ' + new Date(h.exitedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'On site'}</span>
-            </li>
-          ))}
+          {(row.history || []).map((h: any) => {
+            const inn = h.signedInAt || h.arrivedAt;
+            const out = h.signedOutAt || h.exitedAt;
+            const fmt = (d: string) => new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+            return (
+              <li key={h.id} className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {inn && <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">In {fmt(inn)}</span>}
+                  {out ? <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700">Out {fmt(out)}</span> : <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">On site</span>}
+                </div>
+                <p className="mt-1 text-slate-500">{[h.destination, h.host?.fullName && `see ${h.host.fullName}`, h.organisation?.name || h.gate?.name].filter(Boolean).join(' · ')}</p>
+              </li>
+            );
+          })}
           {!(row.history || []).length && <li className="text-xs text-slate-400">No gate visits yet.</li>}
         </ul>
       </section>
+
+      <SleekOverlay open={renewOpen} onClose={() => setRenewOpen(false)} title="Renew pass" subtitle="Extend by the contract cycle, or pick an end date.">
+        <div className="space-y-3">
+          <label className="block">
+            <span className="label">Cycle</span>
+            <select className="input" value={renewCycle} onChange={(e) => setRenewCycle(e.target.value)}>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </label>
+          <div className="segmented">
+            <button type="button" data-active={renewMode === 'auto'} onClick={() => setRenewMode('auto')}>Auto</button>
+            <button type="button" data-active={renewMode === 'date'} onClick={() => setRenewMode('date')}>End date</button>
+          </div>
+          {renewMode === 'auto' ? (
+            <p className="text-sm text-slate-600">Adds one {renewCycle} period from the later of today and the current end date. Monthly adds one calendar month.</p>
+          ) : (
+            <label className="block"><span className="label">Valid through</span><input type="date" className="input" value={renewDate} onChange={(e) => setRenewDate(e.target.value)} required /></label>
+          )}
+          <button type="button" className="btn-primary w-full" disabled={!!busy} onClick={renew}>{busy === 'renew' ? 'Saving…' : 'Renew pass'}</button>
+        </div>
+      </SleekOverlay>
+
+      <SleekOverlay open={termOpen} onClose={() => setTermOpen(false)} title="Terminate pass" subtitle="The card will no longer be valid at any gate.">
+        <div className="space-y-3">
+          <label className="block">
+            <span className="label">Reason</span>
+            <textarea className="input min-h-[80px]" value={termReason} onChange={(e) => setTermReason(e.target.value)} placeholder="Why is this pass ending?" />
+          </label>
+          <button type="button" className="btn-danger w-full" disabled={!!busy} onClick={terminate}>{busy === 'term' ? 'Saving…' : 'Terminate pass'}</button>
+        </div>
+      </SleekOverlay>
     </div>
   );
 }

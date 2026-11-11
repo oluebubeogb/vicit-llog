@@ -6,6 +6,8 @@ import SplashScreen from '@/components/SplashScreen';
 import BackgroundArt from '@/components/BackgroundArt';
 import PushRegister from '@/components/PushRegister';
 import RingOverlay from '@/components/RingOverlay';
+import DocumentTitle from '@/components/DocumentTitle';
+import DispatchNotice from '@/components/DispatchNotice';
 import { APP_VERSION, BRAND_BOOT_SCRIPT } from '@/lib/brand';
 
 const APP = process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog';
@@ -74,7 +76,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <SplashScreen />
           <AppShell>{children}</AppShell>
           <PushRegister />
+          <DocumentTitle />
           <RingOverlay />
+          <DispatchNotice />
         </BrandProvider>
         <script
           dangerouslySetInnerHTML={{

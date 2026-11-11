@@ -64,6 +64,26 @@ export class BrandingController {
     return this.branding.updatePlatform(body);
   }
 
+  @Get('platform/agencies')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN)
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({ summary: 'Super Admin: login-grid agencies including hidden ones' })
+  loginAgencies() {
+    return this.branding.loginAgencies(true);
+  }
+
+  @Patch('platform/agencies')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Super Admin: reorder or show/hide login-grid agencies' })
+  updateLoginAgencies(@Body() body: any) {
+    const items = Array.isArray(body) ? body : body?.agencies || body?.loginAgencies || [];
+    return this.branding.updateLoginAgencies(items);
+  }
+
   @Post('login-logo')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

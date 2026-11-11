@@ -22,12 +22,36 @@ const SELECT = {
   organisationId: true,
   validFrom: true,
   validThrough: true,
+  cycle: true,
+  terminatedAt: true,
+  terminatedReason: true,
+  terminatedById: true,
   createdById: true,
   isActive: true,
   createdAt: true,
   updatedAt: true,
   organisation: { select: { id: true, name: true, code: true } },
+  agencies: { select: { organisationId: true, organisation: { select: { id: true, name: true, code: true } } } },
 } as const;
+
+const CYCLES = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'] as const;
+
+function addCycle(from: Date, cycle: string) {
+  const d = new Date(from.getTime());
+  if (cycle === 'daily') d.setDate(d.getDate() + 1);
+  else if (cycle === 'weekly') d.setDate(d.getDate() + 7);
+  else if (cycle === 'quarterly') d.setMonth(d.getMonth() + 3);
+  else if (cycle === 'yearly') d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
+  return d;
+}
+
+function agencyIdsOf(row: any): string[] {
+  const ids = new Set<string>();
+  if (row?.organisationId) ids.add(row.organisationId);
+  for (const link of row?.agencies || []) ids.add(link.organisationId || link.organisation?.id);
+  return [...ids].filter(Boolean);
+}
 
 @Injectable()
 export class ContractorsService {
@@ -73,12 +97,50 @@ export class ContractorsService {
 
   private scopeWhere(actor: any, organisationId?: string) {
     const orgId = this.orgScope(actor, organisationId);
-    return orgId ? { organisationId: orgId } : {};
+    if (!orgId) return {};
+    return { OR: [{ organisationId: orgId }, { agencies: { some: { organisationId: orgId } } }] };
+  }
+
+  private canSeeRow(actor: any, row: any) {
+    if (isPlatformRole(actor.role)) return true;
+    return agencyIdsOf(row).includes(actor.orgId);
   }
 
   private canSee(actor: any, organisationId: string) {
     if (isPlatformRole(actor.role)) return true;
     return actor.orgId === organisationId;
+  }
+
+  private async resolveOrgIds(actor: any, body: any, existing?: any): Promise<string[]> {
+    if (!isPlatformRole(actor.role)) return [actor.orgId];
+    const raw = Array.isArray(body.organisationIds)
+      ? body.organisationIds
+      : body.organisationId
+        ? [body.organisationId]
+        : existing
+          ? agencyIdsOf(existing)
+          : [];
+    const ids = [...new Set((raw as any[]).map((x: any) => String(x)).filter((x: string) => !!x))] as string[];
+    if (!ids.length) throw new BadRequestException('Choose at least one agency');
+    const orgs = await this.prisma.organisation.findMany({ where: { id: { in: ids } }, select: { id: true } });
+    if (orgs.length !== ids.length) throw new BadRequestException('One or more agencies could not be found');
+    return ids;
+  }
+
+  private async syncAgencies(contractorId: string, organisationIds: string[], primaryId: string) {
+    await this.prisma.contractorOrganisation.deleteMany({
+      where: { contractorId, organisationId: { notIn: organisationIds } },
+    });
+    for (const organisationId of organisationIds) {
+      await this.prisma.contractorOrganisation.upsert({
+        where: { contractorId_organisationId: { contractorId, organisationId } },
+        update: {},
+        create: { contractorId, organisationId },
+      });
+    }
+    if (primaryId) {
+      await this.prisma.contractor.update({ where: { id: contractorId }, data: { organisationId: primaryId } });
+    }
   }
 
   async list(actor: any, q?: { search?: string; organisationId?: string; status?: string }) {
@@ -94,9 +156,18 @@ export class ContractorsService {
       ];
     }
     const now = new Date();
-    if (q?.status === 'active') where.isActive = true, where.validThrough = { gte: now };
-    if (q?.status === 'expired') where.validThrough = { lt: now };
-    if (q?.status === 'inactive') where.isActive = false;
+    const st = (q?.status || '').toLowerCase();
+    if (st === 'terminated') where.terminatedAt = { not: null };
+    if (st === 'active' || st === 'valid') {
+      where.terminatedAt = null;
+      where.isActive = true;
+      where.validThrough = { gte: now };
+    }
+    if (st === 'expired') {
+      where.terminatedAt = null;
+      where.validThrough = { lt: now };
+    }
+    if (st === 'inactive') where.isActive = false;
     const rows = await this.prisma.contractor.findMany({
       where,
       select: { ...SELECT, visits: { orderBy: { arrivedAt: 'desc' }, take: 1, select: { id: true, arrivedAt: true, exitedAt: true, destination: true } } },
@@ -113,7 +184,7 @@ export class ContractorsService {
       where: { OR: [{ token }, { qrToken: token }, { id: token }] },
       select: SELECT,
     });
-    if (!row || !this.canSee(actor, row.organisationId)) throw new NotFoundException('Contractor not found');
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
     const visits = await this.prisma.contractorVisit.findMany({
       where: { contractorId: row.id },
       orderBy: { arrivedAt: 'desc' },
@@ -121,12 +192,22 @@ export class ContractorsService {
     });
     const gates = await this.gateMap(visits.map((v) => v.gateId));
     const officers = await this.officerMap(visits.map((v) => v.officerId));
+    const hosts = await this.officerMap(visits.map((v) => v.hostId));
+    const orgs = await this.prisma.organisation.findMany({
+      where: { id: { in: [...new Set(visits.map((v) => v.organisationId))] } },
+      select: { id: true, name: true, code: true },
+    });
+    const orgMap = new Map(orgs.map((o) => [o.id, o]));
     return {
       ...this.present(row),
       history: visits.map((v) => ({
         ...v,
         gate: v.gateId ? gates.get(v.gateId) || null : null,
         officer: v.officerId ? officers.get(v.officerId) || null : null,
+        host: v.hostId ? hosts.get(v.hostId) || null : null,
+        organisation: orgMap.get(v.organisationId) || null,
+        signedInAt: v.arrivedAt,
+        signedOutAt: v.exitedAt,
       })),
       qrPayload: buildContractorQrPayload(row.qrToken),
       minDays: await this.minDays(),
@@ -137,12 +218,11 @@ export class ContractorsService {
     this.assertManage(actor);
     const fullName = String(body.fullName || '').trim();
     if (fullName.length < 2) throw new BadRequestException('Name is required');
-    const organisationId = isPlatformRole(actor.role) ? String(body.organisationId || '') : actor.orgId;
-    if (!organisationId) throw new BadRequestException('Choose an agency');
-    const org = await this.prisma.organisation.findUnique({ where: { id: organisationId }, select: { id: true, name: true } });
-    if (!org) throw new NotFoundException('Agency not found');
+    const organisationIds = await this.resolveOrgIds(actor, body);
+    const organisationId = organisationIds[0];
+    const cycle = CYCLES.includes(body.cycle) ? body.cycle : 'monthly';
     const validFrom = body.validFrom ? new Date(body.validFrom) : new Date();
-    const validThrough = body.validThrough ? new Date(body.validThrough) : new Date(validFrom.getTime() + (await this.minDays()) * 86400000);
+    const validThrough = body.validThrough ? new Date(body.validThrough) : addCycle(validFrom, cycle);
     if (isNaN(+validFrom) || isNaN(+validThrough)) throw new BadRequestException('Valid from / through dates are invalid');
     await this.assertDuration(validFrom, validThrough);
     const row = await this.prisma.contractor.create({
@@ -154,13 +234,15 @@ export class ContractorsService {
         phone: normalizePhone(body.phone),
         email: normalizeEmail(body.email),
         organisationId,
+        cycle,
         validFrom,
         validThrough,
         createdById: actor.id,
+        agencies: { create: organisationIds.map((id) => ({ organisationId: id })) },
       },
       select: SELECT,
     });
-    await this.audit.log({ action: 'CONTRACTOR_CREATED', entity: 'Contractor', entityId: row.id, userId: actor.id, details: { organisationId, fullName } });
+    await this.audit.log({ action: 'CONTRACTOR_CREATED', entity: 'Contractor', entityId: row.id, userId: actor.id, details: { organisationIds, fullName } });
     if (row.email) await this.sendCard(row).catch(() => {});
     return { ...this.present(row), qrPayload: buildContractorQrPayload(row.qrToken), emailed: Boolean(row.email) };
   }
@@ -168,8 +250,8 @@ export class ContractorsService {
   async update(actor: any, id: string, body: any) {
     this.assertManage(actor);
     const row = await this.prisma.contractor.findUnique({ where: { id }, select: SELECT });
-    if (!row || !this.canSee(actor, row.organisationId)) throw new NotFoundException('Contractor not found');
-    if (!isPlatformRole(actor.role) && row.organisationId !== actor.orgId) throw new ForbiddenException();
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
+    if (!isPlatformRole(actor.role) && !this.canSeeRow(actor, row)) throw new ForbiddenException();
     const data: any = {};
     if (body.fullName !== undefined) {
       const n = String(body.fullName).trim();
@@ -180,6 +262,10 @@ export class ContractorsService {
     if (body.phone !== undefined) data.phone = normalizePhone(body.phone);
     if (body.email !== undefined) data.email = normalizeEmail(body.email);
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
+    if (body.cycle !== undefined) {
+      if (!CYCLES.includes(body.cycle)) throw new BadRequestException('Contract cycle must be daily, weekly, monthly, quarterly or yearly');
+      data.cycle = body.cycle;
+    }
     if (body.validFrom !== undefined || body.validThrough !== undefined) {
       const from = body.validFrom ? new Date(body.validFrom) : row.validFrom;
       const through = body.validThrough ? new Date(body.validThrough) : row.validThrough;
@@ -188,24 +274,46 @@ export class ContractorsService {
       data.validFrom = from;
       data.validThrough = through;
     }
+    if (isPlatformRole(actor.role) && (body.organisationIds || body.organisationId)) {
+      const organisationIds = await this.resolveOrgIds(actor, body, row);
+      data.organisationId = organisationIds[0];
+      await this.syncAgencies(id, organisationIds, organisationIds[0]);
+    }
     const updated = await this.prisma.contractor.update({ where: { id }, data, select: SELECT });
     await this.audit.log({ action: 'CONTRACTOR_UPDATED', entity: 'Contractor', entityId: id, userId: actor.id, details: data });
+    return this.present(updated);
+  }
+
+  async terminate(actor: any, id: string, body: any) {
+    this.assertManage(actor);
+    const row = await this.prisma.contractor.findUnique({ where: { id }, select: SELECT });
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
+    const reason = String(body?.reason || body?.comment || '').trim();
+    if (reason.length < 3) throw new BadRequestException('Give a short reason for terminating this pass');
+    if (row.terminatedAt) throw new BadRequestException('This pass has already been terminated');
+    const updated = await this.prisma.contractor.update({
+      where: { id },
+      data: { isActive: false, terminatedAt: new Date(), terminatedReason: reason.slice(0, 500), terminatedById: actor.id },
+      select: SELECT,
+    });
+    await this.audit.log({ action: 'CONTRACTOR_TERMINATED', entity: 'Contractor', entityId: id, userId: actor.id, details: { reason } });
     return this.present(updated);
   }
 
   async renew(actor: any, id: string, body: any) {
     this.assertManage(actor);
     const row = await this.prisma.contractor.findUnique({ where: { id }, select: SELECT });
-    if (!row || !this.canSee(actor, row.organisationId)) throw new NotFoundException('Contractor not found');
-    const min = await this.minDays();
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
+    const cycle = CYCLES.includes(body.cycle) ? body.cycle : (row as any).cycle || 'monthly';
     const base = new Date(Math.max(Date.now(), row.validThrough.getTime()));
-    const validFrom = row.validThrough < new Date() ? new Date() : row.validFrom;
-    const validThrough = body.validThrough ? new Date(body.validThrough) : new Date(base.getTime() + min * 86400000);
+    const validFrom = row.validThrough < new Date() || row.terminatedAt ? new Date() : row.validFrom;
+    const auto = body.auto === true || String(body.mode || '').toLowerCase() === 'auto';
+    const validThrough = auto ? addCycle(base, cycle) : body.validThrough ? new Date(body.validThrough) : addCycle(base, cycle);
     if (isNaN(+validThrough)) throw new BadRequestException('Renewal date is invalid');
     await this.assertDuration(validFrom, validThrough);
     const updated = await this.prisma.contractor.update({
       where: { id },
-      data: { validFrom, validThrough, isActive: true },
+      data: { validFrom, validThrough, isActive: true, cycle, terminatedAt: null, terminatedReason: null, terminatedById: null },
       select: SELECT,
     });
     await this.audit.log({ action: 'CONTRACTOR_RENEWED', entity: 'Contractor', entityId: id, userId: actor.id, details: { validThrough } });
@@ -216,7 +324,7 @@ export class ContractorsService {
   async uploadPhoto(actor: any, id: string, file: Express.Multer.File) {
     this.assertManage(actor);
     const row = await this.prisma.contractor.findUnique({ where: { id }, select: SELECT });
-    if (!row || !this.canSee(actor, row.organisationId)) throw new NotFoundException('Contractor not found');
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
     const ext = (path.extname(file.originalname) || '.jpg').toLowerCase().replace(/[^.a-z0-9]/g, '') || '.jpg';
     const filename = `${id.slice(0, 8)}-${uuidv4()}${ext}`;
     fs.writeFileSync(path.join(this.photoDir(), filename), file.buffer);
@@ -233,7 +341,7 @@ export class ContractorsService {
   async reprint(actor: any, id: string, sendEmail = false) {
     this.assertView(actor);
     const row = await this.prisma.contractor.findUnique({ where: { id }, select: SELECT });
-    if (!row || !this.canSee(actor, row.organisationId)) throw new NotFoundException('Contractor not found');
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
     let emailed = false;
     if (sendEmail && row.email) {
       await this.sendCard(row);
@@ -246,7 +354,7 @@ export class ContractorsService {
   async qrPng(actor: any, id: string) {
     this.assertView(actor);
     const row = await this.prisma.contractor.findUnique({ where: { id }, select: { qrToken: true, organisationId: true, fullName: true } });
-    if (!row || !this.canSee(actor, row.organisationId)) throw new NotFoundException('Contractor not found');
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
     const png = await renderQrPng(buildContractorQrPayload(row.qrToken));
     return { png, filename: `contractor-${row.fullName.replace(/\s+/g, '-').toLowerCase()}.png` };
   }
@@ -261,8 +369,7 @@ export class ContractorsService {
     const destination = String(input.destination || '').trim();
     if (!destination) throw new BadRequestException('Enter where the contractor is headed');
     const row = await this.findForScan(input.token || input.contractorId || '');
-    if (!row) throw new NotFoundException('Contractor not found');
-    if (!isPlatformRole(actor.role) && row.organisationId !== actor.orgId) throw new NotFoundException('Contractor not found');
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
     this.assertValid(row);
     const day = currentAttendanceDay();
     const open = await this.prisma.contractorVisit.findFirst({
@@ -270,11 +377,17 @@ export class ContractorsService {
       orderBy: { arrivedAt: 'desc' },
     });
     if (open) throw new BadRequestException('This contractor is already checked in. Record their exit first.');
+    const visitOrg = (!isPlatformRole(actor.role) && actor.orgId && agencyIdsOf(row).includes(actor.orgId))
+      ? actor.orgId
+      : (input as any).organisationId && agencyIdsOf(row).includes((input as any).organisationId)
+        ? (input as any).organisationId
+        : row.organisationId;
     const visit = await this.prisma.contractorVisit.create({
       data: {
         contractorId: row.id,
-        organisationId: row.organisationId,
+        organisationId: visitOrg,
         destination: destination.slice(0, 240),
+        hostId: (input as any).hostId || null,
         gateId: input.gateId || null,
         officerId: actor.id,
         day,
@@ -288,8 +401,7 @@ export class ContractorsService {
   async checkOut(actor: any, input: { token?: string; contractorId?: string; visitId?: string }) {
     if (!['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN'].includes(actor.role)) throw new ForbiddenException('Only gate officers can check contractors out');
     const row = await this.findForScan(input.token || input.contractorId || '');
-    if (!row) throw new NotFoundException('Contractor not found');
-    if (!isPlatformRole(actor.role) && row.organisationId !== actor.orgId) throw new NotFoundException('Contractor not found');
+    if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
     const visit = input.visitId
       ? await this.prisma.contractorVisit.findUnique({ where: { id: input.visitId } })
       : await this.prisma.contractorVisit.findFirst({ where: { contractorId: row.id, exitedAt: null }, orderBy: { arrivedAt: 'desc' } });
@@ -302,7 +414,7 @@ export class ContractorsService {
   async lookup(token: string, actor?: any) {
     const row = await this.findForScan(token);
     if (!row) return null;
-    if (actor && !isPlatformRole(actor.role) && actor.role !== 'GLOBAL_ADMIN' && row.organisationId !== actor.orgId) return null;
+    if (actor && !this.canSeeRow(actor, row)) return null;
     const open = await this.prisma.contractorVisit.findFirst({
       where: { contractorId: row.id, exitedAt: null },
       orderBy: { arrivedAt: 'desc' },
@@ -324,8 +436,9 @@ export class ContractorsService {
     });
   }
 
-  private assertValid(row: { isActive: boolean; validFrom: Date; validThrough: Date }) {
+  private assertValid(row: { isActive: boolean; validFrom: Date; validThrough: Date; terminatedAt?: Date | null }) {
     const now = new Date();
+    if (row.terminatedAt) throw new BadRequestException('This contractor pass has been terminated');
     if (!row.isActive) throw new BadRequestException('This contractor pass has been deactivated');
     if (now < row.validFrom) throw new BadRequestException('This contractor pass is not valid yet');
     if (now > row.validThrough) throw new BadRequestException('This contractor pass has expired. An administrator can renew it.');
@@ -334,11 +447,15 @@ export class ContractorsService {
   private present(row: any, now = new Date()) {
     const expired = row.validThrough < now;
     const upcoming = row.validFrom > now;
+    const terminated = !!row.terminatedAt;
+    const agencies = (row.agencies || []).map((l: any) => l.organisation || { id: l.organisationId });
     return {
       ...row,
+      agencies,
       expired,
       upcoming,
-      status: !row.isActive ? 'inactive' : expired ? 'expired' : upcoming ? 'upcoming' : 'valid',
+      terminated,
+      status: terminated ? 'terminated' : !row.isActive ? 'inactive' : expired ? 'expired' : upcoming ? 'upcoming' : 'valid',
     };
   }
 
@@ -385,14 +502,37 @@ export class ContractorsService {
     });
   }
 
-  async hosts(actor: any, organisationId: string) {
+  async hosts(actor: any, organisationId?: string, q?: string, contractorId?: string) {
     if (!actor?.id) throw new ForbiddenException();
-    if (!organisationId) throw new BadRequestException('Agency is required');
+    let orgIds: string[] = [];
+    if (contractorId) {
+      const row = await this.prisma.contractor.findUnique({ where: { id: contractorId }, select: SELECT });
+      if (!row || !this.canSeeRow(actor, row)) throw new NotFoundException('Contractor not found');
+      orgIds = isPlatformRole(actor.role) ? agencyIdsOf(row) : agencyIdsOf(row).filter((id) => id === actor.orgId);
+    } else if (isPlatformRole(actor.role)) {
+      orgIds = organisationId ? [organisationId] : (await this.prisma.organisation.findMany({ select: { id: true } })).map((o) => o.id);
+    } else {
+      orgIds = [actor.orgId];
+    }
+    if (!orgIds.length) return [];
+    const term = String(q || '').trim();
+    const where: any = {
+      organisationId: { in: orgIds },
+      isActive: true,
+      role: { in: ['STAFF', 'ADMIN'] },
+    };
+    if (term) {
+      where.OR = [
+        { fullName: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+        { portfolio: { contains: term, mode: 'insensitive' } },
+      ];
+    }
     return this.prisma.user.findMany({
-      where: { organisationId, isActive: true, role: { in: ['STAFF', 'ADMIN', 'SUPER_ADMIN'] } },
-      select: { id: true, fullName: true, email: true, role: true, portfolio: true },
+      where,
+      select: { id: true, fullName: true, email: true, role: true, portfolio: true, organisationId: true, organisation: { select: { id: true, name: true, code: true } } },
       orderBy: { fullName: 'asc' },
-      take: 400,
+      take: term ? 40 : 80,
     });
   }
 }

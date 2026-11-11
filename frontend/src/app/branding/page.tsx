@@ -16,7 +16,13 @@ import {
   Type,
   LogIn,
   Package,
+  ChevronUp,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  GripVertical,
 } from 'lucide-react';
+import LoginAgencyGrid from '@/components/LoginAgencyGrid';
 import PageHeader from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/Tooltip';
 import { Notice, SkeletonList } from '@/components/ui/Bits';
@@ -473,7 +479,10 @@ function SignInSettings() {
     footerCredit: "Powered by CISTECH's Vicit 1.0.1",
     footerCreditEnabled: true,
     contractorMinDurationDays: 1,
+    loginTitle: 'Defence Headquarters',
   });
+  const [agencies, setAgencies] = useState<any[]>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState('');
@@ -495,7 +504,9 @@ function SignInSettings() {
         footerCredit: b.footerCredit || "Powered by CISTECH's Vicit 1.0.1",
         footerCreditEnabled: b.footerCreditEnabled !== false,
         contractorMinDurationDays: b.contractorMinDurationDays ?? 1,
+        loginTitle: b.loginTitle || 'Defence Headquarters',
       });
+      if (Array.isArray(b.agencies)) setAgencies(b.agencies);
     }).catch(() => {});
   }, []);
 
@@ -504,7 +515,10 @@ function SignInSettings() {
     setSaving(true);
     setMsg(null);
     try {
-      await api.updatePlatformBranding(form);
+      await api.updatePlatformBranding({
+        ...form,
+        agencies: agencies.map((a, i) => ({ id: a.id, loginOrder: i, loginVisible: a.loginVisible !== false })),
+      });
       window.dispatchEvent(new Event('vicit-brand-updated'));
       setMsg({ tone: 'success', text: 'Sign-in page and footer credit are live on every device.' });
     } catch (err: any) {
@@ -536,8 +550,13 @@ function SignInSettings() {
     <form onSubmit={save} className="mt-6 space-y-4 pb-28">
       <Section icon={<LogIn size={16} />} title="Sign-in page" info="These settings are used on every login screen, regardless of the last agency that was visited." applies={['Login only']}>
         <label className="block">
+          <span className="label">Title</span>
+          <input value={form.loginTitle} onChange={(e) => setForm({ ...form, loginTitle: e.target.value })} className="input" placeholder="Defence Headquarters" maxLength={120} />
+          <p className="mt-1 text-[11px] text-slate-400">Shown as the sign-in heading and as the suffix on every browser tab.</p>
+        </label>
+        <label className="block">
           <span className="label">Headline</span>
-          <input value={form.loginHeadline} onChange={(e) => setForm({ ...form, loginHeadline: e.target.value })} className="input" placeholder="Optional — defaults to the platform name" maxLength={120} />
+          <input value={form.loginHeadline} onChange={(e) => setForm({ ...form, loginHeadline: e.target.value })} className="input" placeholder="Optional — shown under the title if different" maxLength={120} />
         </label>
         <div className="flex items-center gap-4">
           <button type="button" onClick={() => logoRef.current?.click()} className="group relative flex h-20 min-w-[5rem] items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-brand-200 bg-white px-3 transition hover:border-brand-400">
@@ -575,6 +594,55 @@ function SignInSettings() {
           <label className="block"><span className="label">Width</span><input value={form.loginWatermarkWidth} onChange={(e) => setForm({ ...form, loginWatermarkWidth: e.target.value })} className="input font-mono !px-2" placeholder="70vw" /></label>
           <label className="block"><span className="label">Height</span><input value={form.loginWatermarkHeight} onChange={(e) => setForm({ ...form, loginWatermarkHeight: e.target.value })} className="input font-mono !px-2" placeholder="70vh" /></label>
           <label className="block"><span className="label">Opacity</span><input type="number" min={0} max={1} step={0.01} value={form.loginWatermarkOpacity} onChange={(e) => setForm({ ...form, loginWatermarkOpacity: Number(e.target.value) })} className="input font-mono !px-2" /></label>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+          <p className="label mb-1">Agency logo grid</p>
+          <p className="mb-3 text-[11px] text-slate-500">Drag to reorder (or use the arrows). Hidden agencies stay off the sign-in page. The preview below updates live.</p>
+          <ul className="space-y-1.5">
+            {agencies.map((a, i) => (
+              <li
+                key={a.id}
+                draggable
+                onDragStart={() => setDragId(a.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => {
+                  if (!dragId || dragId === a.id) return;
+                  setAgencies((list) => {
+                    const from = list.findIndex((x) => x.id === dragId);
+                    const next = [...list];
+                    const [row] = next.splice(from, 1);
+                    next.splice(i, 0, row);
+                    return next;
+                  });
+                  setDragId(null);
+                }}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5"
+              >
+                <span className="cursor-grab text-slate-400" aria-hidden><GripVertical size={15} /></span>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{a.shortName || a.name}</span>
+                <button type="button" className="rounded-md p-1 text-slate-500 hover:bg-slate-100" aria-label="Move up" disabled={i === 0} onClick={() => setAgencies((list) => { const n = [...list]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })}>
+                  <ChevronUp size={15} />
+                </button>
+                <button type="button" className="rounded-md p-1 text-slate-500 hover:bg-slate-100" aria-label="Move down" disabled={i === agencies.length - 1} onClick={() => setAgencies((list) => { const n = [...list]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n; })}>
+                  <ChevronDown size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md p-1 text-slate-500 hover:bg-slate-100"
+                  aria-label={a.loginVisible === false ? 'Show on sign-in' : 'Hide from sign-in'}
+                  onClick={() => setAgencies((list) => list.map((x) => x.id === a.id ? { ...x, loginVisible: x.loginVisible === false } : x))}
+                >
+                  {a.loginVisible === false ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-white p-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Live preview</p>
+            <div className="hidden sm:block"><LoginAgencyGrid agencies={agencies} variant="preview" /></div>
+            <div className="sm:hidden"><LoginAgencyGrid agencies={agencies} variant="mobile" /></div>
+          </div>
         </div>
       </Section>
 

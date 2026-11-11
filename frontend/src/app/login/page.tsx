@@ -11,6 +11,7 @@ import Tooltip from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
 import { useBrand } from '@/components/BrandProvider';
 import { logoSrc } from '@/lib/brand';
+import LoginAgencyGrid from '@/components/LoginAgencyGrid';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,7 +26,9 @@ export default function LoginPage() {
   const logo = login.logoUrl || brand.logoUrl;
   const logoWidth = login.logoWidth || '180px';
   const watermark = login.watermarkUrl ? logoSrc(login.watermarkUrl, { fallback: false, version: brand.assetVersion }) : null;
-  const headline = login.headline || brand.name;
+  const title = login.title || brand.name || 'Defence Headquarters';
+  const headline = login.headline && login.headline !== title ? login.headline : null;
+  const agencies = brand.agencies || [];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -50,7 +53,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="hero fixed inset-0 z-10 flex flex-col items-center justify-center overflow-y-auto !rounded-none px-6 pb-16 pt-[max(2rem,env(safe-area-inset-top))]">
+    <div className="hero fixed inset-0 z-10 flex flex-col overflow-y-auto !rounded-none px-5 pb-16 pt-[max(2rem,env(safe-area-inset-top))] lg:px-12">
       {watermark && (
         <span
           aria-hidden
@@ -70,10 +73,22 @@ export default function LoginPage() {
         </span>
       )}
 
-      <div className="relative w-full max-w-sm">
+      <div className="relative mx-auto flex min-h-full w-full max-w-6xl flex-1 flex-col justify-center gap-10 py-8 lg:flex-row lg:items-center lg:justify-between lg:gap-16">
+        {agencies.length > 0 && (
+          <div className="hidden w-full max-w-lg flex-1 lg:block">
+            <LoginAgencyGrid agencies={agencies} variant="desktop" />
+          </div>
+        )}
+        <div className="relative mx-auto w-full max-w-sm lg:mx-0">
         <div className="animate-in mb-6">
           <InstallBanner variant="login" />
         </div>
+
+        {agencies.length > 0 && (
+          <div className="mb-5 lg:hidden">
+            <LoginAgencyGrid agencies={agencies} variant="mobile" />
+          </div>
+        )}
 
         <div className="stagger mb-7 flex flex-col items-center text-center">
           <div className="relative flex justify-center">
@@ -82,12 +97,13 @@ export default function LoginPage() {
               size={96}
               width={logoWidth}
               src={logoSrc(logo, { fallback: false, version: brand.assetVersion })}
-              alt={headline || 'Sign in'}
+              alt={title}
               className="animate-float !bg-white/95"
             />
           </div>
-          <h1 className="mt-5 text-[26px] font-bold tracking-tight">{headline}</h1>
+          <h1 className="mt-5 text-[26px] font-bold tracking-tight">{title}</h1>
           <p className="mt-1 text-sm text-on-brand/70">Visitor access & exit control</p>
+          {headline && <p className="mt-0.5 text-xs text-on-brand/60">{headline}</p>}
         </div>
 
         <form onSubmit={handleSubmit} className="animate-in relative overflow-hidden rounded-[28px] border border-white/60 bg-white/95 p-6 text-slate-900 shadow-[0_30px_80px_-30px_rgb(2_6_23/0.7)] ring-1 ring-slate-200/80 backdrop-blur-xl">
@@ -132,6 +148,7 @@ export default function LoginPage() {
           <ShieldCheck size={13} /> Secured, encrypted access
         </p>
         <FooterCredit light className="mt-4 !text-on-brand/55" />
+      </div>
       </div>
     </div>
   );

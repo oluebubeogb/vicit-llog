@@ -20,6 +20,9 @@ export type RegisterQuery = {
   pageSize?: number;
   type?: string; // staff | contractor | all
   view?: string; // list | sheet
+  department?: string;
+  timeFrom?: string;
+  timeTo?: string;
 };
 
 const EXPECTED_ROLES: Role[] = [Role.STAFF, Role.ADMIN, Role.GATE];
@@ -270,6 +273,19 @@ export class AttendanceRegisterService {
       combined.sort((a, b) => (a.day === b.day ? String(a.staff.fullName).localeCompare(b.staff.fullName) : b.day.localeCompare(a.day)));
     } else {
       combined = combined.filter((r: any) => r.type !== 'contractor');
+    }
+    if (q.department) {
+      const dep = q.department.toLowerCase();
+      combined = combined.filter((r: any) => String(r.department || r.staff?.portfolio || r.staff?.roleLabel || '').toLowerCase().includes(dep));
+    }
+    if (q.timeFrom || q.timeTo) {
+      combined = combined.filter((r: any) => {
+        if (!r.arrivedAt) return false;
+        const t = fmtTime(new Date(r.arrivedAt), tz);
+        if (q.timeFrom && t < q.timeFrom) return false;
+        if (q.timeTo && t > q.timeTo) return false;
+        return true;
+      });
     }
     const sheet = this.buildSheet(combined, fromKey, toKey, tz);
 
@@ -551,7 +567,7 @@ export class AttendanceRegisterService {
       const d = new Date(`${key}T12:00:00.000Z`);
       const label = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).format(d);
       return { key, label };
-    });
+    }).reverse();
     const byPerson = new Map<string, any>();
     for (const r of rows) {
       if (r.absent) continue;

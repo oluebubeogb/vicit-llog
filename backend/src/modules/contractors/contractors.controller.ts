@@ -46,8 +46,13 @@ export class ContractorsController {
 
   @Get('directory/hosts')
   @Roles(Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE, Role.ADMIN, Role.STAFF, Role.GATE)
-  hosts(@CurrentUser() user: any, @Query('organisationId') organisationId?: string) {
-    return this.contractors.hosts(user, String(organisationId || ''));
+  hosts(
+    @CurrentUser() user: any,
+    @Query('organisationId') organisationId?: string,
+    @Query('q') q?: string,
+    @Query('contractorId') contractorId?: string,
+  ) {
+    return this.contractors.hosts(user, organisationId, q, contractorId);
   }
 
   @Get('contractors')
@@ -108,6 +113,12 @@ export class ContractorsController {
   @Roles(Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.ADMIN)
   renew(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
     return this.contractors.renew(user, id, body || {});
+  }
+
+  @Post('contractors/:id/terminate')
+  @Roles(Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.ADMIN)
+  terminate(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+    return this.contractors.terminate(user, id, body || {});
   }
 
   @Patch('contractors/:id')

@@ -128,6 +128,9 @@ export class AnalyticsController {
       pageSize: int(q.pageSize, 10, 100),
       type: typeof q.type === 'string' ? q.type : undefined,
       view: typeof q.view === 'string' ? q.view : undefined,
+      department: typeof q.department === 'string' ? q.department.slice(0, 80) : undefined,
+      timeFrom: typeof q.timeFrom === 'string' && /^\d{2}:\d{2}$/.test(q.timeFrom) ? q.timeFrom : undefined,
+      timeTo: typeof q.timeTo === 'string' && /^\d{2}:\d{2}$/.test(q.timeTo) ? q.timeTo : undefined,
     };
   }
 

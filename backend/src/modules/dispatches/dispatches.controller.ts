@@ -37,6 +37,12 @@ export class DispatchesController {
     return this.dispatches.uploadPhoto(user, file);
   }
 
+  @Get('inbox')
+  @Roles(Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.ADMIN, Role.GLOBAL_GATE, Role.GATE, Role.STAFF)
+  inbox(@CurrentUser() user: any) {
+    return this.dispatches.inbox(user);
+  }
+
   @Get('photo/:filename')
   @Roles(Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.ADMIN, Role.GLOBAL_GATE, Role.GATE, Role.STAFF)
   photo(@Param('filename') filename: string, @Res() res: Response) {
@@ -47,6 +53,12 @@ export class DispatchesController {
   @Roles(Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.ADMIN, Role.GLOBAL_GATE, Role.GATE, Role.STAFF)
   one(@Param('id') id: string, @CurrentUser() user: any) {
     return this.dispatches.one(user, id);
+  }
+
+  @Post(':id/acknowledge')
+  @Roles(Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.ADMIN, Role.GLOBAL_GATE, Role.GATE, Role.STAFF)
+  acknowledge(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+    return this.dispatches.acknowledge(user, id, body || {});
   }
 
   @Post(':id/decide')

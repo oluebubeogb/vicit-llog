@@ -54,11 +54,13 @@ export class DispatchesService {
   }
 
   async one(actor: any, id: string) {
-    if (!this.canOperate(actor)) throw new ForbiddenException();
     const row = await this.prisma.dispatch.findUnique({ where: { id }, include: INCLUDE });
     if (!row) throw new NotFoundException('Dispatch not found');
-    if (!isPlatformRole(actor.role) && actor.role !== 'GLOBAL_ADMIN') {
-      const mine = row.createdById === actor.id || row.destinations.some((d) => d.organisationId === actor.orgId);
+    if (!isPlatformRole(actor.role) && actor.role !== 'GLOBAL_ADMIN' && !this.canOperate(actor)) {
+      const mine = row.destinations.some((d) => d.hostId === actor.id);
+      if (!mine) throw new ForbiddenException();
+    } else if (!isPlatformRole(actor.role) && actor.role !== 'GLOBAL_ADMIN') {
+      const mine = row.createdById === actor.id || row.destinations.some((d) => d.organisationId === actor.orgId || d.hostId === actor.id);
       if (!mine) throw new NotFoundException('Dispatch not found');
     }
     const [hydrated] = await this.withHosts([row]);
@@ -106,17 +108,7 @@ export class DispatchesService {
       },
       include: INCLUDE,
     });
-    for (const dest of row.destinations) {
-      if (dest.hostId) {
-        await this.notifications.create({
-          userId: dest.hostId,
-          title: requireApproval ? 'Dispatch awaiting approval' : 'Dispatch arriving',
-          body: `${row.courierName} is bringing items for ${dest.organisation?.name || 'your agency'}.`,
-          meta: { type: 'DISPATCH', dispatchId: row.id },
-          channels: ['in_app'],
-        }).catch(() => {});
-      }
-    }
+    await this.notifyRecipients(row, requireApproval);
     await this.audit.log({ action: 'DISPATCH_REGISTERED', entity: 'Dispatch', entityId: row.id, userId: actor.id, details: { orgIds, requireApproval } });
     const [hydrated] = await this.withHosts([row]);
     return hydrated;
@@ -174,6 +166,82 @@ export class DispatchesService {
     const filepath = path.join(this.photoDir(), path.basename(filename));
     if (!fs.existsSync(filepath)) throw new NotFoundException('Photo not found');
     return filepath;
+  }
+
+  private async notifyRecipients(row: any, requireApproval: boolean) {
+    const recipientIds = new Set<string>();
+    for (const dest of row.destinations || []) {
+      if (dest.hostId) recipientIds.add(dest.hostId);
+      const admins = await this.prisma.user.findMany({
+        where: { organisationId: dest.organisationId, isActive: true, role: 'ADMIN' },
+        select: { id: true },
+      });
+      for (const a of admins) recipientIds.add(a.id);
+    }
+    const title = requireApproval ? 'Dispatch awaiting approval' : 'Dispatch arriving';
+    const body = `${row.courierName} is bringing items${row.items?.length ? ` (${row.items.map((i: any) => i.description).slice(0, 3).join(', ')})` : ''}.`;
+    for (const userId of recipientIds) {
+      await this.notifications.create({
+        userId,
+        title,
+        body,
+        meta: { type: 'DISPATCH', dispatchId: row.id, url: '/gate/dispatch' },
+        link: '/gate/dispatch',
+        channels: ['in_app'],
+      }).catch(() => {});
+    }
+  }
+
+  async inbox(actor: any) {
+    if (!actor?.id) throw new ForbiddenException();
+    const where: any = { acknowledgedAt: null, status: { not: 'DECLINED' } };
+    if (isPlatformRole(actor.role)) {
+      /* all outstanding receipts */
+    } else if (actor.role === 'ADMIN') {
+      where.organisationId = actor.orgId;
+    } else {
+      where.hostId = actor.id;
+    }
+    const dests = await this.prisma.dispatchDestination.findMany({
+      where,
+      include: {
+        organisation: { select: { id: true, name: true, code: true } },
+        dispatch: { include: { items: true } },
+      },
+      orderBy: { dispatch: { createdAt: 'desc' } },
+      take: 40,
+    });
+    return dests.map((d) => ({
+      id: d.id,
+      dispatchId: d.dispatchId,
+      organisation: d.organisation,
+      hostId: d.hostId,
+      status: d.status,
+      acknowledgedAt: d.acknowledgedAt,
+      dispatch: d.dispatch,
+    }));
+  }
+
+  async acknowledge(actor: any, id: string, body: any) {
+    const row = await this.prisma.dispatch.findUnique({ where: { id }, include: INCLUDE });
+    if (!row) throw new NotFoundException('Dispatch not found');
+    const dest = row.destinations.find((d) => {
+      if (body?.organisationId) return d.organisationId === body.organisationId;
+      if (d.hostId === actor.id) return true;
+      if (actor.role === 'ADMIN' && d.organisationId === actor.orgId) return true;
+      return false;
+    }) || (isPlatformRole(actor.role) ? row.destinations[0] : null);
+    if (!dest) throw new ForbiddenException('You cannot acknowledge this dispatch');
+    const can = isPlatformRole(actor.role) || dest.hostId === actor.id || (actor.role === 'ADMIN' && dest.organisationId === actor.orgId);
+    if (!can) throw new ForbiddenException('You cannot acknowledge this dispatch');
+    if (dest.acknowledgedAt) return this.one(actor, id);
+    const comment = body?.comment || body?.note ? String(body.comment || body.note).trim().slice(0, 1000) : null;
+    await this.prisma.dispatchDestination.update({
+      where: { id: dest.id },
+      data: { acknowledgedAt: new Date(), acknowledgedById: actor.id, acknowledgeComment: comment },
+    });
+    await this.audit.log({ action: 'DISPATCH_ACKNOWLEDGED', entity: 'Dispatch', entityId: id, userId: actor.id, details: { comment, organisationId: dest.organisationId } });
+    return this.one(actor, id);
   }
 
   private async withHosts(rows: any[]) {

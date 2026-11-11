@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { BellRing, Mic, MicOff, Phone, PhoneOff, X } from 'lucide-react';
 import { api, getToken } from '@/lib/api';
 import { startRingtone, stopRingtone, unlockRingtone } from '@/lib/ringtone';
+import { voiceSession, type VoiceState } from '@/lib/webrtcCall';
 
 type Call = {
   id: string;
@@ -48,10 +49,12 @@ export default function RingOverlay() {
   const [micMuted, setMicMuted] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [elapsed, setElapsed] = useState(0);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localRef = useRef<MediaStream | null>(null);
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [needsGesture, setNeedsGesture] = useState(false);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const startedFor = useRef<string | null>(null);
+  const callRef = useRef<Call | null>(null);
+  callRef.current = call;
 
   const focus = useCallback(async (id: string) => {
     try {
@@ -64,65 +67,43 @@ export default function RingOverlay() {
   }, []);
 
   const hangupVoice = useCallback(() => {
-    pcRef.current?.getSenders().forEach((s) => s.track?.stop());
-    pcRef.current?.close();
-    pcRef.current = null;
-    localRef.current?.getTracks().forEach((t) => t.stop());
-    localRef.current = null;
+    voiceSession.cleanup();
     startedFor.current = null;
+    setVoiceState('idle');
+    setNeedsGesture(false);
   }, []);
 
   const startVoice = useCallback(async (current: Call) => {
-    if (startedFor.current === current.id && pcRef.current) return;
-    hangupVoice();
+    if (startedFor.current === current.id && voiceSession.pc) return;
     startedFor.current = current.id;
     setVoiceError('');
+    setNeedsGesture(false);
+    setVoiceState('connecting');
     try {
-      const { iceServers } = await api.ringIceServers();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localRef.current = stream;
-      const pc = new RTCPeerConnection({ iceServers: iceServers?.length ? iceServers : [{ urls: 'stun:stun.l.google.com:19302' }] });
-      pcRef.current = pc;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      pc.ontrack = (ev) => {
-        const audio = remoteAudioRef.current;
-        if (!audio) return;
-        audio.srcObject = ev.streams[0] || new MediaStream([ev.track]);
-        audio.play().catch(() => {});
-      };
-      pc.onicecandidate = (ev) => {
-        if (ev.candidate) api.ringSignal(current.id, { type: 'ice', candidate: ev.candidate }).catch(() => {});
-      };
-      if (current.youAre === 'caller') {
-        const offer = await pc.createOffer({ offerToReceiveAudio: true });
-        await pc.setLocalDescription(offer);
-        await api.ringSignal(current.id, { type: 'offer', sdp: offer.sdp });
-      }
+      const icePromise = api.ringIceServers().catch(() => ({ iceServers: [] as any[] }));
+      await voiceSession.start({
+        callId: current.id,
+        isCaller: current.youAre === 'caller',
+        iceServers: icePromise,
+        audio: remoteAudioRef.current,
+        handlers: {
+          send: (payload) => api.ringSignal(current.id, payload),
+          onState: setVoiceState,
+          onNeedsGesture: setNeedsGesture,
+          onError: (m) => setVoiceError(m),
+        },
+      });
     } catch (e: any) {
       setVoiceError(e?.message || 'Microphone access is needed for a live voice call. A TURN server may be required on strict networks.');
+      setVoiceState('failed');
     }
-  }, [hangupVoice]);
+  }, []);
 
   const onSignal = useCallback(async (payload: any, callId: string) => {
-    const pc = pcRef.current;
-    if (!pc || startedFor.current !== callId) return;
-    try {
-      if (payload.type === 'offer' && payload.sdp) {
-        await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await api.ringSignal(callId, { type: 'answer', sdp: answer.sdp });
-      } else if (payload.type === 'answer' && payload.sdp) {
-        if (pc.signalingState !== 'stable') await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
-      } else if (payload.type === 'ice' && payload.candidate) {
-        await pc.addIceCandidate(payload.candidate).catch(() => {});
-      } else if (payload.type === 'hangup') {
-        hangupVoice();
-      }
-    } catch {
-      /* ignore late signals */
-    }
-  }, [hangupVoice]);
+    // Buffer even before the peer connection exists so early offers/ICE are not dropped.
+    if (startedFor.current && startedFor.current !== callId && voiceSession.callId && voiceSession.callId !== callId) return;
+    await voiceSession.handleSignal(payload);
+  }, []);
 
   useEffect(() => {
     const unlock = () => unlockRingtone();
@@ -195,7 +176,9 @@ export default function RingOverlay() {
   }, [call?.id, call?.status]);
 
   useEffect(() => {
-    if (call?.status === 'ACCEPTED') startVoice(call);
+    // Caller starts the PC as soon as the line is accepted. Callee starts inside the Answer click
+    // so getUserMedia / play() keep the user gesture and autoplay is allowed.
+    if (call?.status === 'ACCEPTED' && call.youAre === 'caller') startVoice(call);
     if (call && !['RINGING', 'ACCEPTED'].includes(call.status)) hangupVoice();
   }, [call, startVoice, hangupVoice]);
 
@@ -214,10 +197,12 @@ export default function RingOverlay() {
     if (!call) return;
     setBusy(action);
     try {
+      const voice = action === 'accept' ? startVoice({ ...call, status: 'ACCEPTED', youAre: 'callee' }) : null;
       const next = await api.ringAction(call.id, action);
       if (action === 'hangup') hangupVoice();
       setCall(next);
       publish(next);
+      if (voice) await voice;
     } catch {
       setCall((c) => (c ? { ...c, status: action === 'hangup' ? 'ENDED' : 'MISSED' } : c));
       if (action === 'hangup') hangupVoice();
@@ -229,7 +214,7 @@ export default function RingOverlay() {
   function toggleMic() {
     const next = !micMuted;
     setMicMuted(next);
-    localRef.current?.getAudioTracks().forEach((t) => { t.enabled = !next; });
+    voiceSession.setMicMuted(next);
   }
 
   if (!call) return null;
@@ -245,7 +230,7 @@ export default function RingOverlay() {
 
   return (
     <div className="fixed inset-0 z-[110] flex items-end justify-center bg-slate-950/70 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label="Ring">
-      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+      <audio ref={remoteAudioRef} autoPlay playsInline />
       <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -272,7 +257,17 @@ export default function RingOverlay() {
         {live && (
           <div className="mb-4 rounded-2xl bg-emerald-50 px-4 py-3 text-center">
             <p className="font-mono text-2xl font-bold tabular-nums text-emerald-800">{formatElapsed(elapsed)}</p>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Live voice</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+              {voiceState === 'connected' ? 'Connected' : voiceState === 'poor' ? 'Poor connection' : voiceState === 'failed' ? 'Reconnecting…' : 'Connecting…'}
+            </p>
+            <p className="mt-0.5 text-[11px] text-emerald-800/80">
+              {voiceState === 'connected' ? 'Live voice' : voiceState === 'poor' ? 'Audio may drop — holding the line' : 'Setting up the call'}
+            </p>
+            {needsGesture && (
+              <button type="button" className="btn-primary mt-2 w-full !py-2 text-sm" onClick={() => voiceSession.enableAudio()}>
+                Tap to enable audio
+              </button>
+            )}
             {voiceError && <p className="mt-2 text-xs text-amber-700">{voiceError}</p>}
           </div>
         )}

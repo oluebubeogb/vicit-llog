@@ -63,36 +63,67 @@ export function buildNavLinks(
   return staffLinks;
 }
 
-/** Desktop sidebar: same as the mobile footer, plus Attendance for admins (not added to the crowded bottom nav). */
+const L = {
+  platform: { href: '/platform', icon: LayoutDashboard, label: 'Platform' } as AppNavLink,
+  invite: { href: '/invite/new', icon: UserPlus, label: 'Invite' } as AppNavLink,
+  visits: { href: '/gate/visits', icon: Users, label: 'Visits' } as AppNavLink,
+  visitors: { href: '/visitors', icon: Users, label: 'Visitors' } as AppNavLink,
+  alerts: { href: '/notifications', icon: Bell, label: 'Alerts', badge: true } as AppNavLink,
+  gate: { href: '/gate', icon: ScanLine, label: 'Gate', exact: true } as AppNavLink,
+  scan: { href: '/gate', icon: ScanLine, label: 'Scan', exact: true } as AppNavLink,
+  dispatch: { href: '/gate/dispatch', icon: Package, label: 'Dispatch' } as AppNavLink,
+  contractors: { href: '/contractors', icon: Briefcase, label: 'Contractors' } as AppNavLink,
+  attendance: { href: '/attendance', icon: ClipboardCheck, label: 'Attendance' } as AppNavLink,
+  profile: { href: '/profile', icon: User, label: 'Profile' } as AppNavLink,
+  home: { href: '/dashboard', icon: Home, label: 'Home' } as AppNavLink,
+};
+
+/** Desktop sidebar. Super Admin order is fixed. */
 export function buildSidebarLinks(role?: string | null, permissions: string[] = []): AppNavLink[] {
-  const links = buildNavLinks(role, permissions);
-  if ((role === 'GATE' || role === 'GLOBAL_GATE') && !links.some((l) => l.href === '/invite/new')) {
-    const inv: AppNavLink = { href: '/invite/new', icon: UserPlus, label: 'Invite' };
-    const i = links.findIndex((l) => l.href === '/gate/visits');
-    if (i >= 0) links.splice(i, 0, inv);
-    else links.push(inv);
+  if (role === 'SUPER_ADMIN') {
+    return [L.platform, L.invite, L.visits, L.alerts, L.gate, L.dispatch, L.contractors, L.attendance, L.profile];
   }
-  if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN' || role === 'ADMIN') {
-    const att: AppNavLink = { href: '/attendance', icon: ClipboardCheck, label: 'Attendance' };
-    const idx = links.findIndex((l) => l.href === '/profile');
-    if (idx >= 0) links.splice(idx, 0, att);
-    else links.push(att);
+  if (role === 'GLOBAL_ADMIN') {
+    const visits = permissions.includes('visits.view') ? [L.visits] : [];
+    return [L.platform, L.invite, ...visits, L.alerts, L.dispatch, L.contractors, L.attendance, L.profile];
   }
-  if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN' || role === 'ADMIN' || role === 'GATE' || role === 'GLOBAL_GATE') {
-    const ctr: AppNavLink = { href: '/contractors', icon: Briefcase, label: 'Contractors' };
-    const i = links.findIndex((l) => l.href === '/profile' || l.href === '/attendance');
-    if (i >= 0) links.splice(i, 0, ctr);
-    else links.push(ctr);
+  if (role === 'ADMIN') {
+    return [L.home, L.invite, L.visitors, L.alerts, L.dispatch, L.contractors, L.attendance, L.profile];
   }
-  if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN' || role === 'ADMIN') {
-    if (!links.some((l) => l.href === '/gate/dispatch')) {
-      const d: AppNavLink = { href: '/gate/dispatch', icon: Package, label: 'Dispatch' };
-      const i = links.findIndex((l) => l.href === '/contractors' || l.href === '/profile');
-      if (i >= 0) links.splice(i, 0, d);
-      else links.push(d);
-    }
+  if (role === 'GATE' || role === 'GLOBAL_GATE') {
+    return [L.scan, L.invite, L.dispatch, L.visits, L.contractors, L.alerts, L.profile];
   }
-  return links;
+  return buildNavLinks(role, permissions);
+}
+
+/** Mobile footer (max ~5) plus overflow items for the More sheet. */
+export function buildMobileNav(role?: string | null, permissions: string[] = []): { primary: AppNavLink[]; more: AppNavLink[] } {
+  if (role === 'SUPER_ADMIN') {
+    return {
+      primary: [L.platform, L.alerts, L.gate, L.profile],
+      more: [L.invite, L.visits, L.dispatch, L.contractors, L.attendance],
+    };
+  }
+  if (role === 'GLOBAL_ADMIN') {
+    const visits = permissions.includes('visits.view') ? [L.visits] : [];
+    return {
+      primary: [L.platform, L.alerts, L.profile],
+      more: [L.invite, ...visits, L.dispatch, L.contractors, L.attendance],
+    };
+  }
+  if (role === 'ADMIN') {
+    return {
+      primary: [L.home, L.invite, L.alerts, L.profile],
+      more: [L.visitors, L.dispatch, L.contractors, L.attendance],
+    };
+  }
+  if (role === 'GATE' || role === 'GLOBAL_GATE') {
+    return {
+      primary: [L.scan, L.dispatch, L.alerts, L.profile],
+      more: [L.invite, L.visits, L.contractors],
+    };
+  }
+  return { primary: buildNavLinks(role, permissions), more: [] };
 }
 
 export function platformHome(role?: string | null) {

@@ -76,6 +76,12 @@ model Organisation {
   defaultWorkflow WorkflowType    @default(NONE)
   photoRetentionDays Int          @default(90)
   maxGates        Int             @default(10)
+  /// Order of this agency on the public login grid (0 = first).
+  loginOrder      Int             @default(0)
+  /// When false the agency is hidden from the login page grid.
+  loginVisible    Boolean         @default(true)
+  /// Short label on login tiles (e.g. "Navy"). Falls back to name.
+  shortName       String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   users           User[]
@@ -85,6 +91,7 @@ model Organisation {
   blacklist       BlacklistEntry[]
   workflows       ApprovalWorkflow[]
   contractors     Contractor[]
+  contractorLinks ContractorOrganisation[]
   dispatchDestinations DispatchDestination[]
 }
 
@@ -420,6 +427,8 @@ model PlatformSettings {
   loginSecondaryColor       String?
   footerCredit              String   @default("Powered by CISTECH's Vicit 1.0.1")
   footerCreditEnabled       Boolean  @default(true)
+  /// Large title on the split login page. Default Defence Headquarters.
+  loginTitle                String?  @default("Defence Headquarters")
   contractorMinDurationDays Int      @default(1)
   assetVersion              String   @default("1.0.1")
   createdAt                 DateTime @default(now())
@@ -440,11 +449,17 @@ model Contractor {
   organisation   Organisation @relation(fields: [organisationId], references: [id])
   validFrom      DateTime
   validThrough   DateTime
+  /// daily | weekly | monthly | quarterly | yearly — used by Auto renew
+  cycle          String       @default("monthly")
+  terminatedAt   DateTime?
+  terminatedReason String?
+  terminatedById String?
   createdById    String
   isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   visits         ContractorVisit[]
+  agencies       ContractorOrganisation[]
 
   @@index([organisationId, validThrough])
   @@index([email])
@@ -457,6 +472,7 @@ model ContractorVisit {
   contractor     Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
   organisationId String
   destination    String?
+  hostId         String?
   gateId         String?
   officerId      String?
   arrivedAt      DateTime   @default(now())
@@ -468,6 +484,19 @@ model ContractorVisit {
 
   @@index([contractorId, day])
   @@index([organisationId, day])
+}
+
+/// Many-to-many: a contractor pass can be attached to more than one agency.
+model ContractorOrganisation {
+  id             String       @id @default(uuid())
+  contractorId   String
+  organisationId String
+  createdAt      DateTime     @default(now())
+  contractor     Contractor   @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([contractorId, organisationId])
+  @@index([organisationId])
 }
 
 model Dispatch {
@@ -509,6 +538,9 @@ model DispatchDestination {
   decidedAt      DateTime?
   decidedById    String?
   note           String?
+  acknowledgedAt        DateTime?
+  acknowledgedById      String?
+  acknowledgeComment    String?
 
   @@unique([dispatchId, organisationId])
   @@index([organisationId, status])

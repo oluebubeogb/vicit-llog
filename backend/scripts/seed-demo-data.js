@@ -1,8 +1,10 @@
 /**
  * Seed realistic demo data into EXISTING agencies (organisations).
  *
- * Does NOT create or modify Super Admins, Super Admin II, Super Gate Officers,
- * agency admins, or gate officers, and never touches their passwords.
+ * Does not modify existing Super Admins, agency admins or agency gate officers,
+ * and never touches their passwords. Creates Super Admin II
+ * (super.admin.ii@beuden.com.ng) and a Super Gate Officer
+ * (super.gate@beuden.com.ng) when missing, tagged as demo, with DEMO_PASSWORD.
  *
  * Safety: refuses to run unless SEED_DEMO=YES.
  *
@@ -164,27 +166,24 @@ const PURPOSES = [
   'Supplier onboarding',
 ];
 
-const DEMO_LOCATIONS = [
-  {
-    name: 'Victoria Island Office',
-    code: 'DEMO-LOS',
-    address: '14 Admiralty Way, Victoria Island, Lagos',
-    gates: [
-      { name: 'Main Reception', code: 'MAIN' },
-      { name: 'Visitors Gate', code: 'VIS' },
-      { name: 'Staff Entrance', code: 'STAFF' },
-    ],
-  },
-  {
-    name: 'Wuse II Annex',
-    code: 'DEMO-ABV',
-    address: '7 Yola Close, Wuse II, Abuja',
-    gates: [
-      { name: 'Lobby Checkpoint', code: 'LOBBY' },
-      { name: 'Service Bay', code: 'SERV' },
-    ],
-  },
-];
+const DEFENCE_COMPLEX_ADDRESS = 'Defence Complex, Area 7, Garki, Abuja, Federal Capital Territory, Nigeria';
+const DEFENCE_COMPLEX_CODE = 'DEMO-DEF';
+
+function shortNameFor(org) {
+  const n = String((org && (org.shortName || org.name)) || '');
+  const lower = n.toLowerCase();
+  if (/navy/.test(lower)) return 'Navy';
+  if (/army/.test(lower)) return 'Army';
+  if (/air/.test(lower)) return 'Air Force';
+  if (/headquarter|dhq|defence|defense/.test(lower)) return 'DHQ';
+  return (org && org.code) || n.split(/\s+/)[0] || 'Agency';
+}
+
+function loginOrderFor(org, index) {
+  const order = { DHQ: 0, Army: 1, 'Air Force': 2, Navy: 3 };
+  const s = shortNameFor(org);
+  return Object.prototype.hasOwnProperty.call(order, s) ? order[s] : 10 + index;
+}
 
 function flagReset() {
   return process.argv.slice(2).includes('--reset');
@@ -483,6 +482,29 @@ async function resetDemo() {
     summary.staffAttendances = r.count;
   }
 
+  const taggedContractors = await taggedIds('Contractor');
+  const taggedDispatches = await taggedIds('Dispatch');
+  if (taggedDispatches.length) {
+    try {
+      await prisma.dispatchItem.deleteMany({ where: { dispatchId: { in: taggedDispatches } } });
+      await prisma.dispatchDestination.deleteMany({ where: { dispatchId: { in: taggedDispatches } } });
+      const r = await prisma.dispatch.deleteMany({ where: { id: { in: taggedDispatches } } });
+      summary.dispatches = r.count;
+    } catch (err) {
+      console.warn('Dispatch reset skipped:', err.message || err);
+    }
+  }
+  if (taggedContractors.length) {
+    try {
+      await prisma.contractorVisit.deleteMany({ where: { contractorId: { in: taggedContractors } } });
+      await prisma.contractorOrganisation.deleteMany({ where: { contractorId: { in: taggedContractors } } });
+      const r = await prisma.contractor.deleteMany({ where: { id: { in: taggedContractors } } });
+      summary.contractors = r.count;
+    } catch (err) {
+      console.warn('Contractor reset skipped:', err.message || err);
+    }
+  }
+
   if (visitorIds.length) {
     const r = await prisma.visitor.deleteMany({ where: { id: { in: visitorIds } } });
     summary.visitors = r.count;
@@ -543,36 +565,47 @@ async function ensureLocations(org, officers, rng) {
   const created = { locations: 0, gates: 0, assignments: 0 };
   let locations = existing;
 
-  if (!existing.length) {
-    locations = [];
-    for (const loc of DEMO_LOCATIONS) {
-      const row = await prisma.location.create({
-        data: {
-          name: loc.name,
-          code: loc.code,
-          address: loc.address,
-          organisationId: org.id,
-          isShared: false,
-          gates: {
-            create: loc.gates.map((g, i) => ({
-              name: g.name,
-              code: g.code,
-              isActive: true,
-              sequence: i,
-              admissionsEnabled: true,
-              particularsCheckEnabled: true,
-            })),
-          },
-        },
-        include: { gates: true },
-      });
-      await tag('Location', row.id);
-      for (const g of row.gates) await tag('Gate', g.id);
-      created.locations += 1;
-      created.gates += row.gates.length;
-      locations.push(row);
-    }
+  const short = shortNameFor(org);
+  const wantedGates = [
+    { name: 'Main Gate', code: 'MAIN' },
+    { name: `${short} Gate`, code: 'AGENCY' },
+  ];
+  let complex = existing.find((l) => l.code === DEFENCE_COMPLEX_CODE);
+  if (!complex) {
+    complex = await prisma.location.create({
+      data: {
+        name: 'Defence Complex',
+        code: DEFENCE_COMPLEX_CODE,
+        address: DEFENCE_COMPLEX_ADDRESS,
+        organisationId: org.id,
+        isShared: true,
+      },
+      include: { gates: true },
+    });
+    await tag('Location', complex.id);
+    created.locations += 1;
+    locations = existing.concat([complex]);
   }
+  for (let i = 0; i < wantedGates.length; i++) {
+    const g = wantedGates[i];
+    if ((complex.gates || []).some((row) => row.code === g.code)) continue;
+    const gate = await prisma.gate.create({
+      data: {
+        name: g.name,
+        code: g.code,
+        locationId: complex.id,
+        isActive: true,
+        sequence: i,
+        admissionsEnabled: true,
+        particularsCheckEnabled: true,
+      },
+    });
+    await tag('Gate', gate.id);
+    complex.gates = (complex.gates || []).concat([gate]);
+    created.gates += 1;
+  }
+  locations = locations.map((l) => (l.id === complex.id ? complex : l));
+  if (!locations.some((l) => l.id === complex.id)) locations.push(complex);
 
   const allGates = locations.flatMap((l) => l.gates || []);
   // Assign existing agency gate officers (never created here) onto demo gates if a demo gate has nobody.
@@ -948,6 +981,199 @@ async function seedAlertsForAdmins(org, admins, rng) {
   return created;
 }
 
+
+async function ensurePlatformOfficers(passwordHash) {
+  const sa = await prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' }, orderBy: { createdAt: 'asc' } });
+  if (!sa) {
+    console.warn('No Super Admin found; skipping Super Admin II / Super Gate Officer seed.');
+    return { created: [], reused: [] };
+  }
+  const specs = [
+    { email: 'super.admin.ii@beuden.com.ng', fullName: 'Super Admin II', role: 'GLOBAL_ADMIN', permissions: ['visits.view'] },
+    { email: 'super.gate@beuden.com.ng', fullName: 'Super Gate Officer', role: 'GLOBAL_GATE', permissions: [] },
+  ];
+  const created = [];
+  const reused = [];
+  for (const spec of specs) {
+    const existing = await prisma.user.findUnique({ where: { email: spec.email } });
+    if (existing) {
+      await tag('User', existing.id);
+      reused.push(existing);
+      continue;
+    }
+    const row = await prisma.user.create({
+      data: {
+        email: spec.email,
+        passwordHash,
+        fullName: spec.fullName,
+        role: spec.role,
+        permissions: spec.permissions,
+        organisationId: sa.organisationId,
+        isActive: true,
+        mustChangePassword: false,
+        portfolio: spec.role === 'GLOBAL_ADMIN' ? 'Platform oversight' : 'Platform gate',
+      },
+    });
+    await tag('User', row.id);
+    created.push(row);
+    console.log(`Created ${spec.fullName} <${spec.email}> (password from DEMO_PASSWORD)`);
+  }
+  return { created, reused };
+}
+
+async function applyLoginGrid(orgs) {
+  for (let i = 0; i < orgs.length; i++) {
+    const org = orgs[i];
+    await prisma.organisation.update({
+      where: { id: org.id },
+      data: {
+        shortName: org.shortName || shortNameFor(org),
+        loginOrder: org.loginOrder || loginOrderFor(org, i),
+        loginVisible: /platform/i.test(String(org.code || org.name || '')) ? false : org.loginVisible !== false,
+      },
+    });
+  }
+}
+
+async function seedContractorsAndDispatches(agencies, reportByOrg, passwordHash) {
+  const created = { contractors: 0, visits: 0, dispatches: 0 };
+  const names = buildUniquePeople(agencies.length * 3 + 6);
+  let ni = 0;
+  // One multi-agency contractor, plus one expired and one terminated per first agencies
+  const allIds = agencies.map((o) => o.id);
+  if (allIds.length) {
+    const multi = names[ni++];
+    const from = new Date();
+    from.setDate(from.getDate() - 5);
+    const through = new Date();
+    through.setMonth(through.getMonth() + 1);
+    const row = await prisma.contractor.create({
+      data: {
+        token: crypto.randomBytes(32).toString('hex'),
+        qrToken: 'c_' + crypto.randomBytes(20).toString('hex'),
+        fullName: multi.fullName,
+        company: 'Sahel Works Ltd',
+        phone: '+2348010000001',
+        email: `${multi.first.toLowerCase()}.${multi.last.toLowerCase()}.contractor@example.com`,
+        organisationId: allIds[0],
+        cycle: 'monthly',
+        validFrom: from,
+        validThrough: through,
+        createdById: (agencies[0].users.find((u) => u.role === 'ADMIN') || agencies[0].users[0]).id,
+        agencies: { create: allIds.slice(0, Math.min(3, allIds.length)).map((organisationId) => ({ organisationId })) },
+      },
+    });
+    await tag('Contractor', row.id);
+    created.contractors += 1;
+    const home = agencies[0];
+    const locM = await prisma.location.findFirst({ where: { organisationId: home.id, code: DEFENCE_COMPLEX_CODE }, include: { gates: true } });
+    const gateM = locM && locM.gates && locM.gates[0];
+    const hostM = home.users.find((u) => u.role === 'STAFF' || u.role === 'ADMIN');
+    const officerM = home.users.find((u) => u.role === 'GATE');
+    if (gateM) {
+      const arrived = new Date();
+      arrived.setDate(arrived.getDate() - 1);
+      arrived.setHours(9, 15, 0, 0);
+      const visit = await prisma.contractorVisit.create({
+        data: {
+          contractorId: row.id,
+          organisationId: home.id,
+          destination: hostM ? hostM.fullName : 'Protocol office',
+          hostId: hostM ? hostM.id : null,
+          gateId: gateM.id,
+          officerId: officerM ? officerM.id : null,
+          arrivedAt: arrived,
+          exitedAt: new Date(arrived.getTime() + 5 * 3600000),
+          day: new Date(arrived.getFullYear(), arrived.getMonth(), arrived.getDate()),
+        },
+      });
+      await tag('ContractorVisit', visit.id);
+      created.visits += 1;
+    }
+  }
+  for (let i = 0; i < Math.min(agencies.length, 4); i++) {
+    const org = agencies[i];
+    const person = names[ni++];
+    const expired = i === 0;
+    const terminated = i === 1;
+    const validFrom = new Date();
+    validFrom.setDate(validFrom.getDate() - (expired ? 40 : 3));
+    const validThrough = new Date();
+    if (expired) validThrough.setDate(validThrough.getDate() - 5);
+    else validThrough.setDate(validThrough.getDate() + 20);
+    const admin = org.users.find((u) => u.role === 'ADMIN') || org.users[0];
+    const row = await prisma.contractor.create({
+      data: {
+        token: crypto.randomBytes(32).toString('hex'),
+        qrToken: 'c_' + crypto.randomBytes(20).toString('hex'),
+        fullName: person.fullName,
+        company: terminated ? 'Sunset Facilities' : 'Riverstone Engineering',
+        phone: `+23480100${String(1000 + i).slice(-4)}`,
+        email: `${person.first.toLowerCase()}.${person.last.toLowerCase()}.ctr@example.com`,
+        organisationId: org.id,
+        cycle: 'monthly',
+        validFrom,
+        validThrough,
+        isActive: !terminated,
+        terminatedAt: terminated ? new Date() : null,
+        terminatedReason: terminated ? 'Contract ended early by the agency' : null,
+        createdById: admin.id,
+        agencies: { create: [{ organisationId: org.id }] },
+      },
+    });
+    await tag('Contractor', row.id);
+    created.contractors += 1;
+    const loc = await prisma.location.findFirst({ where: { organisationId: org.id, code: DEFENCE_COMPLEX_CODE }, include: { gates: true } });
+    const gate = loc && loc.gates && loc.gates[0];
+    const officer = org.users.find((u) => u.role === 'GATE');
+    if (gate && !expired && !terminated) {
+      const host = org.users.find((u) => u.role === 'STAFF' || u.role === 'ADMIN');
+      const arrived = new Date();
+      arrived.setHours(9, 10, 0, 0);
+      const visit = await prisma.contractorVisit.create({
+        data: {
+          contractorId: row.id,
+          organisationId: org.id,
+          destination: host ? host.fullName : 'Protocol office',
+          hostId: host ? host.id : null,
+          gateId: gate.id,
+          officerId: officer ? officer.id : null,
+          arrivedAt: arrived,
+          exitedAt: i === 0 ? new Date(arrived.getTime() + 4 * 3600000) : null,
+          day: new Date(arrived.getFullYear(), arrived.getMonth(), arrived.getDate()),
+        },
+      });
+      await tag('ContractorVisit', visit.id);
+      created.visits += 1;
+    }
+    if (officer && loc) {
+      const destOrgs = agencies.slice(i, i + 1).concat(agencies[(i + 1) % agencies.length]).filter((o, idx, arr) => arr.findIndex((x) => x.id === o.id) === idx);
+      const dispatch = await prisma.dispatch.create({
+        data: {
+          courierName: `${person.first} Courier`,
+          courierCompany: 'NIPOST',
+          courierPhone: `+23480200${String(2000 + i).slice(-4)}`,
+          notes: 'Demo pouch',
+          createdById: officer.id,
+          gateId: gate ? gate.id : null,
+          status: 'REGISTERED',
+          items: { create: [{ description: 'Sealed letters', quantity: 2 }] },
+          destinations: {
+            create: destOrgs.map((o) => ({
+              organisationId: o.id,
+              hostId: (o.users.find((u) => u.role === 'STAFF') || o.users.find((u) => u.role === 'ADMIN') || {}).id || null,
+              status: 'APPROVED',
+            })),
+          },
+        },
+      });
+      await tag('Dispatch', dispatch.id);
+      created.dispatches += 1;
+    }
+  }
+  return created;
+}
+
 async function seed(demoPassword) {
   const orgs = await prisma.organisation.findMany({
     include: {
@@ -977,6 +1203,8 @@ async function seed(demoPassword) {
   }
 
   const passwordHash = await bcrypt.hash(demoPassword, 12);
+  const platformOfficers = await ensurePlatformOfficers(passwordHash);
+  await applyLoginGrid(orgs);
   const allotment = partitionPeople(agencies);
   const report = [];
 
@@ -1018,7 +1246,8 @@ async function seed(demoPassword) {
     });
   }
 
-  return { agencies: agencies.length, report };
+  const extras = await seedContractorsAndDispatches(agencies, report, passwordHash);
+  return { agencies: agencies.length, report, platformOfficers, extras };
 }
 
 async function main() {
@@ -1039,6 +1268,12 @@ async function main() {
     const result = await seed(demoPassword);
     console.log('\nDemo seed complete.');
     console.log(`Agencies processed: ${result.agencies}`);
+    if (result.platformOfficers) {
+      console.log(`Platform officers created: ${result.platformOfficers.created.length}  reused: ${result.platformOfficers.reused.length}`);
+    }
+    if (result.extras) {
+      console.log(`Contractors: ${result.extras.contractors}  contractor visits: ${result.extras.visits}  dispatches: ${result.extras.dispatches}`);
+    }
     console.log('Demo staff password: taken from DEMO_PASSWORD (not stored in the script).');
     if (result.report) {
       for (const row of result.report) {

@@ -68,7 +68,9 @@ export class BrandingService {
   }
 
   async getPlatform() {
-    return this.ensurePlatform();
+    const settings = await this.ensurePlatform();
+    const agencies = await this.loginAgencies(true);
+    return { ...settings, loginTitle: (settings as any).loginTitle || 'Defence Headquarters', agencies };
   }
 
   async get(orgId: string) {
@@ -109,8 +111,10 @@ export class BrandingService {
       ? await this.prisma.organisation.findUnique({ where: { id: platformOwnerId }, select: BRANDING_SELECT })
       : null;
     const appName = process.env.NEXT_PUBLIC_APP_NAME || 'Vicit Llog';
+    const title = (settings as any).loginTitle || 'Defence Headquarters';
+    const agencies = await this.loginAgencies(false);
     return {
-      name: settings.loginHeadline || org?.name || process.env.ORGANIZATION || appName,
+      name: title,
       appName,
       logoUrl: org?.logoUrl || null,
       primaryColor: settings.loginPrimaryColor || org?.primaryColor || '#2563eb',
@@ -128,11 +132,48 @@ export class BrandingService {
         watermarkWidth: settings.loginWatermarkWidth || '70vw',
         watermarkHeight: settings.loginWatermarkHeight || '70vh',
         watermarkOpacity: settings.loginWatermarkOpacity ?? 0.08,
-        headline: settings.loginHeadline || org?.name || appName,
+        title,
+        headline: settings.loginHeadline || title,
         primaryColor: settings.loginPrimaryColor || org?.primaryColor || '#2563eb',
         secondaryColor: settings.loginSecondaryColor || org?.secondaryColor || '#1e40af',
       },
+      agencies,
     };
+  }
+
+  /** Public (visible only) or admin (all) list of agencies for the login grid. */
+  async loginAgencies(includeHidden = false) {
+    const rows = await this.prisma.organisation.findMany({
+      select: { id: true, name: true, code: true, shortName: true, logoUrl: true, primaryColor: true, secondaryColor: true, loginOrder: true, loginVisible: true },
+      orderBy: [{ loginOrder: 'asc' }, { name: 'asc' }],
+    });
+    return includeHidden ? rows : rows.filter((r) => r.loginVisible !== false);
+  }
+
+  async updateLoginAgencies(items: Array<{ id: string; loginOrder?: number; loginVisible?: boolean; shortName?: string | null }>) {
+    if (!Array.isArray(items)) throw new BadRequestException('Agency list is required');
+    for (const [i, item] of items.entries()) {
+      if (!item?.id) continue;
+      const data: Record<string, any> = {};
+      if (item.loginOrder !== undefined) data.loginOrder = Number.isFinite(Number(item.loginOrder)) ? Number(item.loginOrder) : i;
+      else data.loginOrder = i;
+      if (item.loginVisible !== undefined) data.loginVisible = Boolean(item.loginVisible);
+      if (item.shortName !== undefined) {
+        const n = item.shortName == null ? null : String(item.shortName).trim().slice(0, 40);
+        data.shortName = n || null;
+      }
+      if (Object.keys(data).length) {
+        await this.prisma.organisation.update({ where: { id: item.id }, data }).catch(() => {
+          throw new BadRequestException('One of the agencies could not be updated');
+        });
+      }
+    }
+    await this.ensurePlatform();
+    await this.prisma.platformSettings.update({
+      where: { id: 'platform' },
+      data: { assetVersion: `${APP_VERSION}-${Date.now().toString(36)}` },
+    });
+    return this.loginAgencies(true);
   }
 
   /** Whitelisted, validated update — previously the raw body was passed to Prisma. */
@@ -216,6 +257,11 @@ export class BrandingService {
       if (h.length > 120) throw new BadRequestException('Headline must be 120 characters or fewer');
       data.loginHeadline = h || null;
     }
+    if (body.loginTitle !== undefined) {
+      const t = String(body.loginTitle || '').trim();
+      if (t.length > 120) throw new BadRequestException('Sign-in title must be 120 characters or fewer');
+      data.loginTitle = t || 'Defence Headquarters';
+    }
     if (body.loginPrimaryColor !== undefined) {
       const raw = body.loginPrimaryColor;
       data.loginPrimaryColor = raw === null || raw === '' ? null : normHex(raw, 'Sign-in primary colour');
@@ -236,7 +282,11 @@ export class BrandingService {
       data.contractorMinDurationDays = n;
     }
     data.assetVersion = `${APP_VERSION}-${Date.now().toString(36)}`;
-    return this.prisma.platformSettings.update({ where: { id: 'platform' }, data });
+    const settings = await this.prisma.platformSettings.update({ where: { id: 'platform' }, data });
+    if (Array.isArray(body.agencies) || Array.isArray(body.loginAgencies)) {
+      await this.updateLoginAgencies(body.agencies || body.loginAgencies);
+    }
+    return settings;
   }
 
   async uploadLogo(orgId: string, file: Express.Multer.File) {

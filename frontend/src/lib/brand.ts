@@ -10,6 +10,7 @@ export type LoginBranding = {
   watermarkHeight?: string | null;
   watermarkOpacity?: number | null;
   headline?: string | null;
+  title?: string | null;
   primaryColor?: string | null;
   secondaryColor?: string | null;
 };
@@ -28,6 +29,17 @@ export type PublicBranding = {
   footerCreditEnabled?: boolean;
   assetVersion?: string | null;
   login?: LoginBranding | null;
+  agencies?: Array<{
+    id: string;
+    name: string;
+    shortName?: string | null;
+    code?: string;
+    logoUrl?: string | null;
+    primaryColor?: string | null;
+    secondaryColor?: string | null;
+    loginOrder?: number;
+    loginVisible?: boolean;
+  }>;
 };
 
 export const DEFAULT_BRANDING: PublicBranding = {

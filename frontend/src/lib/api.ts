@@ -374,12 +374,15 @@ export const api = {
   uploadLoginLogo: async (file: File) => { const form = new FormData(); form.append('logo', file); return request('/branding/login-logo', { method: 'POST', body: form }); },
   uploadLoginWatermark: async (file: File) => { const form = new FormData(); form.append('watermark', file); return request('/branding/login-watermark', { method: 'POST', body: form }); },
   directoryAgencies: () => request('/directory/agencies'),
-  directoryHosts: (organisationId: string) => request(`/directory/hosts?organisationId=${encodeURIComponent(organisationId)}`),
+  directoryHosts: (organisationId?: string, q?: string, contractorId?: string) =>
+    request(`/directory/hosts?${toQuery({ organisationId, q, contractorId })}`),
+  updateLoginAgencies: (agencies: any[]) => request('/branding/platform/agencies', { method: 'PATCH', body: JSON.stringify({ agencies }) }),
   contractors: (params: Record<string, string | number | undefined | null> = {}) => request(`/contractors?${toQuery(params)}`),
   contractor: (token: string) => request(`/contractors/by-token/${encodeURIComponent(token)}`),
   createContractor: (data: any) => request('/contractors', { method: 'POST', body: JSON.stringify(data) }),
   updateContractor: (id: string, data: any) => request(`/contractors/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   renewContractor: (id: string, data: any = {}) => request(`/contractors/${id}/renew`, { method: 'POST', body: JSON.stringify(data) }),
+  terminateContractor: (id: string, data: any) => request(`/contractors/${id}/terminate`, { method: 'POST', body: JSON.stringify(data) }),
   reprintContractor: (id: string, email = false) => request(`/contractors/${id}/reprint`, { method: 'POST', body: JSON.stringify({ email }) }),
   uploadContractorPhoto: async (id: string, blob: Blob, filename = 'photo.jpg') => {
     const form = new FormData();
@@ -399,5 +402,7 @@ export const api = {
     return request('/dispatches/photo', { method: 'POST', body: form });
   },
   transferVisit: (visitorId: string, data: any) => request(`/invites/visitors/${visitorId}/transfer`, { method: 'POST', body: JSON.stringify(data) }),
+  dispatchInbox: () => request('/dispatches/inbox'),
+  acknowledgeDispatch: (id: string, data: any = {}) => request(`/dispatches/${id}/acknowledge`, { method: 'POST', body: JSON.stringify(data) }),
 };
 

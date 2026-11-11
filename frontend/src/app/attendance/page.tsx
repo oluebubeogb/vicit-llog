@@ -89,6 +89,37 @@ function statusLabel(row: Row) {
   return 'Present';
 }
 
+function toggleSort(cur: string, dir: 'asc' | 'desc', next: string): { key: string; dir: 'asc' | 'desc' } {
+  if (cur === next) return { key: next, dir: dir === 'asc' ? 'desc' : 'asc' };
+  return { key: next, dir: 'asc' };
+}
+
+function SortTh({ label, k, sortKey, sortDir, onSort, className = '' }: { label: string; k: string; sortKey: string; sortDir: 'asc' | 'desc'; onSort: (k: string) => void; className?: string }) {
+  const active = sortKey === k;
+  return (
+    <th className={className}>
+      <button type="button" className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide" onClick={() => onSort(k)}>
+        {label}
+        <span className={active ? 'text-brand-600' : 'text-slate-300'}>{active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+      </button>
+    </th>
+  );
+}
+
+function cmp(a: any, b: any, key: string, dir: 'asc' | 'desc') {
+  const pick = (row: any) => {
+    if (key === 'name') return row.name || row.staff?.fullName || '';
+    if (key === 'department') return row.department || row.staff?.portfolio || row.staff?.roleLabel || '';
+    if (key === 'in') return row.arrivedAt || row.cells && Object.values(row.cells)[0] && (Object.values(row.cells)[0] as any).in || '';
+    if (key === 'out') return row.exitedAt || '';
+    if (key === 'sn') return row.sn || 0;
+    return row[key] ?? '';
+  };
+  const va = pick(a), vb = pick(b);
+  const n = String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' });
+  return dir === 'asc' ? n : -n;
+}
+
 export default function AttendanceRegisterPage() {
   const router = useRouter();
   const [me, setMe] = useState<any>(null);
@@ -113,6 +144,11 @@ export default function AttendanceRegisterPage() {
   const [exporting, setExporting] = useState(false);
   const [view, setView] = useState<'list' | 'sheet'>('list');
   const [personType, setPersonType] = useState('all');
+  const [department, setDepartment] = useState('');
+  const [timeFrom, setTimeFrom] = useState('');
+  const [timeTo, setTimeTo] = useState('');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     const u = getUser();
@@ -162,9 +198,12 @@ export default function AttendanceRegisterPage() {
       page,
       pageSize: 25,
       type: personType !== 'all' ? personType : undefined,
+      department: department || undefined,
+      timeFrom: timeFrom || undefined,
+      timeTo: timeTo || undefined,
       view,
     }),
-    [debounced, from, to, orgId, locationId, gateId, role, status, page, platform, personType, view],
+    [debounced, from, to, orgId, locationId, gateId, role, status, page, platform, personType, view, department, timeFrom, timeTo],
   );
 
   const load = useCallback(() => {
@@ -188,6 +227,9 @@ export default function AttendanceRegisterPage() {
   const locations: any[] = data?.facets?.locations || [];
   const gates = locations.flatMap((l: any) => (l.gates || []).map((g: any) => ({ ...g, locationName: l.name, locationId: l.id })));
   const visibleGates = locationId ? gates.filter((g: any) => g.locationId === locationId) : gates;
+  const onSort = (k: string) => { const n = toggleSort(sortKey, sortDir, k); setSortKey(n.key); setSortDir(n.dir); };
+  const listRows = [...(data?.rows || [])].sort((a, b) => cmp(a, b, sortKey, sortDir));
+  const sheetRows = [...(data?.sheet?.rows || [])].sort((a, b) => cmp(a, b, sortKey, sortDir));
   const pages = Math.max(1, Math.ceil((data?.total || 0) / (data?.pageSize || 25)));
 
   async function openStaff(staffId: string) {
@@ -268,34 +310,36 @@ export default function AttendanceRegisterPage() {
             </button>
           ))}
         </div>
-        <label className="text-xs font-semibold text-slate-500">
-          From
-          <input
-            type="date"
-            className="input mt-1 !py-1.5"
-            value={from}
-            max={to}
-            onChange={(e) => {
-              setPreset('custom');
-              setFrom(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
-        <label className="text-xs font-semibold text-slate-500">
-          To
-          <input
-            type="date"
-            className="input mt-1 !py-1.5"
-            value={to}
-            min={from}
-            onChange={(e) => {
-              setPreset('custom');
-              setTo(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
+        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-1">
+          <label className="flex min-w-0 flex-1 items-center gap-2 text-xs font-semibold text-slate-500">
+            <span className="shrink-0">From</span>
+            <input
+              type="date"
+              className="input min-w-0 flex-1 !py-1.5"
+              value={from}
+              max={to}
+              onChange={(e) => {
+                setPreset('custom');
+                setFrom(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          <label className="flex min-w-0 flex-1 items-center gap-2 text-xs font-semibold text-slate-500">
+            <span className="shrink-0">To</span>
+            <input
+              type="date"
+              className="input min-w-0 flex-1 !py-1.5"
+              value={to}
+              min={from}
+              onChange={(e) => {
+                setPreset('custom');
+                setTo(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+        </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -350,34 +394,16 @@ export default function AttendanceRegisterPage() {
           <option value="absent">Absent</option>
           <option value="no_exit">No exit</option>
         </select>
+        <input className="input !w-36 !py-2 text-sm" placeholder="Department" value={department} onChange={(e) => { setDepartment(e.target.value); setPage(1); }} aria-label="Department" />
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+          <span className="shrink-0">In from</span>
+          <input type="time" className="input !w-auto !py-1.5" value={timeFrom} onChange={(e) => { setTimeFrom(e.target.value); setPage(1); }} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+          <span className="shrink-0">In to</span>
+          <input type="time" className="input !w-auto !py-1.5" value={timeTo} onChange={(e) => { setTimeTo(e.target.value); setPage(1); }} />
+        </label>
       </div>
-
-      {data?.flags && (
-        <div className="mb-4 grid gap-3 lg:grid-cols-2">
-          <FlagCard title="Frequently late" icon={<AlertTriangle size={14} className="text-amber-600" />} empty="No late patterns in this range.">
-            {(data.flags.frequentlyLate || []).map((s: any) => (
-              <button key={s.id} type="button" className="row-link !py-2" onClick={() => openStaff(s.id)}>
-                <Avatar name={s.fullName} src={avatarUrl(s.avatarPath)} size={32} />
-                <span className="min-w-0 flex-1 text-left">
-                  <b className="block truncate text-sm">{s.fullName}</b>
-                  <span className="text-[11px] text-slate-400">{s.late} late of {s.days} days</span>
-                </span>
-              </button>
-            ))}
-          </FlagCard>
-          <FlagCard title="Perfect attendance" icon={<Sparkles size={14} className="text-emerald-600" />} empty="No perfect records in this range yet.">
-            {(data.flags.perfectAttendance || []).map((s: any) => (
-              <button key={s.id} type="button" className="row-link !py-2" onClick={() => openStaff(s.id)}>
-                <Avatar name={s.fullName} src={avatarUrl(s.avatarPath)} size={32} />
-                <span className="min-w-0 flex-1 text-left">
-                  <b className="block truncate text-sm">{s.fullName}</b>
-                  <span className="text-[11px] text-slate-400">{s.days} weekdays present, on time</span>
-                </span>
-              </button>
-            ))}
-          </FlagCard>
-        </div>
-      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="segmented">
@@ -401,9 +427,9 @@ export default function AttendanceRegisterPage() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
-                  <th className="px-2 py-2 font-semibold md:sticky md:left-0 md:z-10 md:bg-slate-50 sm:px-3">S/N</th>
-                  <th className="px-2 py-2 font-semibold md:sticky md:left-10 md:z-10 md:bg-slate-50 sm:px-3">Name</th>
-                  <th className="px-3 py-2 font-semibold">Department</th>
+                  <SortTh label="S/N" k="sn" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-2 py-2 md:sticky md:left-0 md:z-10 md:bg-slate-50 sm:px-3" />
+                  <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-2 py-2 md:sticky md:left-10 md:z-10 md:bg-slate-50 sm:px-3" />
+                  <SortTh label="Department" k="department" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
                   {(data?.sheet?.days || []).map((d: any) => (
                     <th key={d.key} colSpan={2} className="border-l border-slate-200 px-3 py-2 text-center font-semibold text-slate-700">{d.label}</th>
                   ))}
@@ -417,10 +443,10 @@ export default function AttendanceRegisterPage() {
                 </tr>
               </thead>
               <tbody>
-                {(data?.sheet?.rows || []).map((r: any) => (
-                  <tr key={r.type + r.id} className="border-b border-slate-100 hover:bg-brand-50/40">
-                    <td className="whitespace-nowrap px-2 py-2 text-slate-400 sm:px-3 md:sticky md:left-0 md:bg-white">{r.sn}</td>
-                    <td className="whitespace-nowrap px-2 py-2 font-semibold text-slate-800 sm:px-3 md:sticky md:left-10 md:bg-white">
+                {sheetRows.map((r: any, i: number) => (
+                  <tr key={r.type + r.id} className={(i % 2 ? 'bg-slate-50/80 ' : 'bg-white ') + 'border-b border-slate-100 hover:bg-brand-50/40'}>
+                    <td className={`whitespace-nowrap px-2 py-2 text-slate-400 sm:px-3 md:sticky md:left-0 ${i % 2 ? 'md:bg-slate-50' : 'md:bg-white'}`}>{r.sn}</td>
+                    <td className={`whitespace-nowrap px-2 py-2 font-semibold text-slate-800 sm:px-3 md:sticky md:left-10 ${i % 2 ? 'md:bg-slate-50' : 'md:bg-white'}`}>
                       {r.name}
                       <span className="block text-[10px] font-medium text-slate-400">{r.type === 'contractor' ? 'Contractor' : 'Staff'}</span>
                     </td>
@@ -442,16 +468,16 @@ export default function AttendanceRegisterPage() {
             <table className="min-w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2">S/N</th>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Department</th>
-                  <th className="px-3 py-2">Time in</th>
-                  <th className="px-3 py-2">Time out</th>
+                  <SortTh label="S/N" k="sn" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
+                  <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
+                  <SortTh label="Department" k="department" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
+                  <SortTh label="Time in" k="in" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
+                  <SortTh label="Time out" k="out" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {(data?.rows || []).map((row: any, i: number) => (
-                  <tr key={row.id} className="border-b border-slate-100">
+                {listRows.map((row: any, i: number) => (
+                  <tr key={row.id} className={(i % 2 ? 'bg-slate-50/80 ' : 'bg-white ') + 'border-b border-slate-100'}>
                     <td className="px-3 py-2 text-slate-400">{(page - 1) * (data?.pageSize || 25) + i + 1}</td>
                     <td className="px-3 py-2 font-semibold text-slate-800">{row.staff.fullName}<span className="block text-[10px] font-medium text-slate-400">{row.type === 'contractor' ? 'Contractor' : row.staff.roleLabel}</span></td>
                     <td className="px-3 py-2 text-slate-500">{row.department || row.staff.portfolio || row.staff.roleLabel}</td>
@@ -465,8 +491,8 @@ export default function AttendanceRegisterPage() {
           </div>
         ) : (
         <ul className="divide-y divide-slate-100">
-          {(data?.rows || []).map((row: Row) => (
-            <li key={row.id}>
+          {listRows.map((row: Row, i: number) => (
+            <li key={row.id} className={i % 2 ? 'bg-slate-50/70' : 'bg-white'}>
               <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-brand-50/50" onClick={() => openStaff(row.staff.id)}>
                 <Avatar name={row.staff.fullName} src={avatarUrl(row.staff.avatarPath)} size={40} />
                 <span className="min-w-0 flex-1">
@@ -500,6 +526,34 @@ export default function AttendanceRegisterPage() {
           </div>
         )}
       </div>
+
+      {data?.flags && (
+        <div className="mb-4 grid gap-3 lg:grid-cols-2">
+          <FlagCard title="Frequently late" icon={<AlertTriangle size={14} className="text-amber-600" />} empty="No late patterns in this range.">
+            {(data.flags.frequentlyLate || []).map((s: any) => (
+              <button key={s.id} type="button" className="row-link !py-2" onClick={() => openStaff(s.id)}>
+                <Avatar name={s.fullName} src={avatarUrl(s.avatarPath)} size={32} />
+                <span className="min-w-0 flex-1 text-left">
+                  <b className="block truncate text-sm">{s.fullName}</b>
+                  <span className="text-[11px] text-slate-400">{s.late} late of {s.days} days</span>
+                </span>
+              </button>
+            ))}
+          </FlagCard>
+          <FlagCard title="Perfect attendance" icon={<Sparkles size={14} className="text-emerald-600" />} empty="No perfect records in this range yet.">
+            {(data.flags.perfectAttendance || []).map((s: any) => (
+              <button key={s.id} type="button" className="row-link !py-2" onClick={() => openStaff(s.id)}>
+                <Avatar name={s.fullName} src={avatarUrl(s.avatarPath)} size={32} />
+                <span className="min-w-0 flex-1 text-left">
+                  <b className="block truncate text-sm">{s.fullName}</b>
+                  <span className="text-[11px] text-slate-400">{s.days} weekdays present, on time</span>
+                </span>
+              </button>
+            ))}
+          </FlagCard>
+        </div>
+      )}
+
 
       <Sheet
         open={!!detail || detailLoading}

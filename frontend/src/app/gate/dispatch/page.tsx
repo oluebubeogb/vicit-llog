@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { BellRing, Package, Plus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { BellRing, Camera, Package, Plus } from 'lucide-react';
 import { api, getUser } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { Notice, SkeletonList } from '@/components/ui/Bits';
 import SleekOverlay from '@/components/ui/SleekOverlay';
 import StatusPill from '@/components/ui/StatusPill';
 import Collapse from '@/components/ui/Collapse';
+import HostSuggest, { type HostPick } from '@/components/HostSuggest';
 
 const TONE: Record<string, 'emerald' | 'amber' | 'rose' | 'slate'> = {
   REGISTERED: 'slate',
@@ -76,6 +77,12 @@ export default function DispatchPage() {
                   <b className="text-slate-800">{dest.organisation?.name}</b>
                   <span className="text-slate-400">{dest.host?.fullName || 'No host yet'}</span>
                   <StatusPill tone={TONE[dest.status] || 'slate'} label={String(dest.status || '').replace(/_/g, ' ').toLowerCase()} />
+                  {dest.acknowledgedAt && (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800">
+                      Acknowledged {new Date(dest.acknowledgedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {dest.acknowledgeComment ? ` · “${dest.acknowledgeComment}”` : ''}
+                    </span>
+                  )}
                   <span className="ml-auto flex gap-1">
                     {dest.hostId && isGate && <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => ring(d.id, dest.hostId)}><BellRing size={12} /> Ring</button>}
                     {dest.status === 'PENDING' && <button type="button" className="btn-success !px-2 !py-1" onClick={() => decide(d.id, dest.organisationId, true)}>Approve</button>}
@@ -101,20 +108,37 @@ export default function DispatchPage() {
 
 function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [agencies, setAgencies] = useState<any[]>([]);
-  const [hosts, setHosts] = useState<Record<string, any[]>>({});
   const [form, setForm] = useState({ courierName: '', courierPhone: '', courierCompany: '', notes: '', items: 'Letter' });
   const [orgIds, setOrgIds] = useState<string[]>([]);
-  const [pickedHosts, setPickedHosts] = useState<Record<string, string>>({});
+  const [pickedHosts, setPickedHosts] = useState<Record<string, HostPick | null>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [photoPath, setPhotoPath] = useState('');
+  const [preview, setPreview] = useState('');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const camBox = useRef<HTMLDivElement>(null);
 
   useEffect(() => { if (open) api.directoryAgencies().then(setAgencies).catch(() => {}); }, [open]);
+
   useEffect(() => {
-    orgIds.forEach((id) => {
-      if (hosts[id]) return;
-      api.directoryHosts(id).then((list) => setHosts((h) => ({ ...h, [id]: list }))).catch(() => {});
-    });
-  }, [orgIds, hosts]);
+    if (!open) {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+        if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = s;
+        if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play().catch(() => {}); }
+        setTimeout(() => camBox.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+      } catch { /* camera optional */ }
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
 
   function toggleOrg(id: string) {
     setOrgIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
@@ -125,7 +149,9 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
     setBusy(true); setError('');
     try {
       const items = form.items.split(/\n|,/).map((s) => s.trim()).filter(Boolean).map((description) => ({ description, quantity: 1 }));
-      await api.createDispatch({ ...form, items, organisationIds: orgIds, hosts: pickedHosts });
+      const hosts: Record<string, string> = {};
+      orgIds.forEach((id) => { if (pickedHosts[id]?.id) hosts[id] = pickedHosts[id]!.id; });
+      await api.createDispatch({ ...form, items, organisationIds: orgIds, hosts, photoPath: photoPath || undefined });
       onCreated();
     } catch (err: any) { setError(err.message); } finally { setBusy(false); }
   }
@@ -139,6 +165,29 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
           <label className="block"><span className="label">Company</span><input className="input" value={form.courierCompany} onChange={(e) => setForm({ ...form, courierCompany: e.target.value })} /></label>
         </div>
         <label className="block"><span className="label">Items (one per line)</span><textarea className="input min-h-[72px]" required value={form.items} onChange={(e) => setForm({ ...form, items: e.target.value })} /></label>
+        <div ref={camBox} className="space-y-2">
+          <p className="label">Particulars photo</p>
+          {preview ? (
+            <img src={preview} alt="" className="aspect-video w-full rounded-xl object-cover" />
+          ) : (
+            <video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full rounded-xl bg-black object-cover" />
+          )}
+          <div className="flex gap-2">
+            <button type="button" className="btn-quiet flex-1" onClick={async () => {
+              if (!videoRef.current) return;
+              const canvas = document.createElement('canvas');
+              canvas.width = videoRef.current.videoWidth || 1280;
+              canvas.height = videoRef.current.videoHeight || 720;
+              canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0);
+              const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), 'image/jpeg', 0.9));
+              setPreview(URL.createObjectURL(blob));
+              const up = await api.uploadDispatchPhoto(blob);
+              setPhotoPath(up.photoPath || up.filename || up.path || '');
+              streamRef.current?.getTracks().forEach((t) => t.stop());
+            }}><Camera size={14} /> Capture</button>
+            {preview && <button type="button" className="btn-quiet" onClick={() => { setPreview(''); setPhotoPath(''); }}>Retake</button>}
+          </div>
+        </div>
         <div>
           <p className="label">Destination agencies</p>
           <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-xl border border-slate-200 p-2">
@@ -153,13 +202,14 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
         <Collapse open={orgIds.length > 0}>
           <div className="space-y-2">
             {orgIds.map((id) => (
-              <label key={id} className="block">
-                <span className="label">Host at {agencies.find((a) => a.id === id)?.name}</span>
-                <select className="input" value={pickedHosts[id] || ''} onChange={(e) => setPickedHosts((h) => ({ ...h, [id]: e.target.value }))}>
-                  <option value="">Optional — speculate a host</option>
-                  {(hosts[id] || []).map((h) => <option key={h.id} value={h.id}>{h.fullName}</option>)}
-                </select>
-              </label>
+              <HostSuggest
+                key={id}
+                organisationId={id}
+                label={`Host at ${agencies.find((a) => a.id === id)?.name || 'agency'}`}
+                placeholder="Search staff to notify or ring…"
+                value={pickedHosts[id] || null}
+                onChange={(h) => setPickedHosts((cur) => ({ ...cur, [id]: h }))}
+              />
             ))}
           </div>
         </Collapse>
