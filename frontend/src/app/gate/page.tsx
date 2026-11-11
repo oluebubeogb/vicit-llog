@@ -738,7 +738,7 @@ export default function GatePage() {
           )}
 
           {currentCheckpoints.length > 0 && (result.visitors || [])[0] && (
-            <CheckpointTracker gates={currentCheckpoints} visits={(result.visitors || []).flatMap((v: any) => v.gateVisits || [])} direction={(result.visitors || []).some((v: any) => v.status === 'ARRIVED') ? 'both' : 'ENTRY'} />
+            <CheckpointTracker gates={currentCheckpoints} visits={(result.visitors || []).flatMap((v: any) => v.gateVisits || [])} direction={(result.visitors || []).some((v: any) => v.status === 'ARRIVED') ? 'both' : 'ENTRY'} activeGateId={activeGateId} />
           )}
 
           <div>
@@ -771,7 +771,9 @@ export default function GatePage() {
           {result.visitors?.map((v: any) => {
             const open = expandedGuests[v.id] === true || result.visitors.length === 1;
             const draftPhotos = evidencePhotos[v.id] || [];
-            const openItems = (v.gateVisits || []).flatMap((ev: any) => (ev.particulars || []).filter((x: any) => x.kind === 'WITHHELD' && !x.resolvedAt && !x.returnedAt));
+            const openItems = (v.gateVisits || []).flatMap((ev: any) => (ev.particulars || []).filter((x: any) => x.kind === 'WITHHELD' && !x.resolvedAt && !x.returnedAt).map((x: any) => ({ ...x, gateId: ev.gateId || ev.gate?.id, gateName: ev.gate?.name || 'a checkpoint' })));
+            const heldHere = openItems.filter((x: any) => x.gateId === activeGateId);
+            const heldElsewhere = openItems.filter((x: any) => x.gateId !== activeGateId);
             const showInspect = (v.status === 'INVITED' || v.status === 'ARRIVED') && currentCheckpoints.length > 0;
             return (
             <div key={v.id} className={`card p-4 ${result.scannedVisitorId === v.id ? '!border-brand-300 ring-2 ring-brand-200' : ''}`}>
@@ -796,7 +798,7 @@ export default function GatePage() {
 
               <Collapse open={open}>
               <div className="mt-3 space-y-2">
-              {currentCheckpoints.length > 0 && <CheckpointTracker gates={currentCheckpoints} visits={v.gateVisits || []} direction={v.status === 'ARRIVED' || v.status === 'EXITED' ? 'both' : 'ENTRY'} />}
+              {currentCheckpoints.length > 0 && <CheckpointTracker gates={currentCheckpoints} visits={v.gateVisits || []} direction={v.status === 'ARRIVED' || v.status === 'EXITED' ? 'both' : 'ENTRY'} activeGateId={activeGateId} />}
 
               {(v.transfers || []).length > 0 && (
                 <div className="rounded-xl bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
@@ -815,17 +817,25 @@ export default function GatePage() {
                     const withheld = (event.particulars || []).filter((x: any) => x.kind === 'WITHHELD');
                     const allowed = (event.particulars || []).filter((x: any) => x.kind === 'ALLOWED');
                     return <>
-                      {withheld.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{withheld.map((x: any) => (
-                        <span key={x.id} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${x.resolvedAt || x.returnedAt ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+                      {withheld.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{withheld.map((x: any) => {
+                        const holdingGateId = event.gateId || event.gate?.id;
+                        const holdingGateName = event.gate?.name || 'this gate';
+                        const atHoldingGate = holdingGateId === activeGateId;
+                        const resolved = !!(x.resolvedAt || x.returnedAt);
+                        return (
+                        <span key={x.id} className={`inline-flex flex-wrap items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${resolved ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
                           {x.description}{x.quantity > 1 ? ` ×${x.quantity}` : ''}
-                          {x.resolvedAt || x.returnedAt ? <span className="uppercase tracking-wide">{(x.resolution || 'returned').toLowerCase()}</span> : (
+                          {resolved ? <span className="uppercase tracking-wide">{(x.resolution || 'returned').toLowerCase()}</span> : atHoldingGate ? (
                             <span className="flex gap-1">
                               <button type="button" className="underline" onClick={() => resolveItem(x.id, 'RETURNED')}>Return</button>
                               <button type="button" className="underline" onClick={() => resolveItem(x.id, 'SEIZED')}>Seize</button>
                             </span>
+                          ) : (
+                            <span className="font-medium text-rose-700">Held at {holdingGateName}</span>
                           )}
                         </span>
-                      ))}</div>}
+                        );
+                      })}</div>}
                       {allowed.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{allowed.map((x: any) => <span key={x.id} className="chip !bg-emerald-50 !text-emerald-800">{x.description}</span>)}</div>}
                       {shots.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{shots.map((shot, i) => <button type="button" key={`${shot.src}-${i}`} onClick={() => setGallery({ images: shots, index: i })} className="overflow-hidden rounded-lg border border-slate-200"><img src={shot.src} alt={shot.alt || 'Checkpoint photo'} className="aspect-square w-full object-cover"/></button>)}</div>}
                     </>;
@@ -849,8 +859,11 @@ export default function GatePage() {
                 {showInspect && (
                   <div className="w-full space-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
                     <p className="text-xs font-semibold text-slate-700">{v.status === 'ARRIVED' ? 'Exit checkpoint' : 'Checkpoint inspection'}</p>
-                    {openItems.length > 0 && v.status === 'ARRIVED' && (
-                      <p className="rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] font-medium text-rose-800">Return, seize or resolve withheld items before the final exit.</p>
+                    {heldHere.length > 0 && v.status === 'ARRIVED' && (
+                      <p className="rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] font-medium text-rose-800">Return, seize or resolve items held at this gate before the visitor leaves here.</p>
+                    )}
+                    {heldElsewhere.length > 0 && v.status === 'ARRIVED' && (
+                      <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-medium text-amber-900">Items are held at {Array.from(new Set(heldElsewhere.map((x: any) => x.gateName))).join(', ')}. The visitor can pass this checkpoint; items must be returned or seized there before the final exit.</p>
                     )}
                     <select className="input !py-2 text-sm" value={activeGateId} onChange={e => setActiveGateId(e.target.value)}>
                       {currentCheckpoints.map((g: any) => <option key={g.id} value={g.id}>{g.location?.organisation?.name ? `${g.location.organisation.name} · ` : ''}{g.location?.name} · {g.sequence + 1}. {g.name}</option>)}
@@ -871,7 +884,7 @@ export default function GatePage() {
                     </div>
                     {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={!!particularsChecked[v.id]} onChange={e=>setParticularsChecked((c)=>({...c,[v.id]:e.target.checked}))}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || (v.status!=='ARRIVED' && checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false) || (checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false && !particularsChecked[v.id])} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…': v.status==='ARRIVED' ? 'Pass exit checkpoint' : 'Pass checkpoint'}</button>
+                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || (v.status!=='ARRIVED' && checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false) || (checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false && !particularsChecked[v.id]) || (v.status==='ARRIVED' && heldHere.length>0)} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…': v.status==='ARRIVED' && heldHere.length>0 ? 'Resolve items at this gate first' : v.status==='ARRIVED' ? 'Pass exit checkpoint' : 'Pass checkpoint'}</button>
                       <button type="button" onClick={() => { setDenyFor(denyFor===v.id?null:v.id); }} disabled={!!actionLoading} className="btn-danger !px-4"><Ban size={17}/></button>
                     </div>
                     <Collapse open={denyFor === v.id}><textarea value={denyReasons[v.id] || ''} onChange={e=>setDenyReasons((c)=>({...c,[v.id]:e.target.value}))} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!(denyReasons[v.id]||'').trim()||(checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&!particularsChecked[v.id])} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>

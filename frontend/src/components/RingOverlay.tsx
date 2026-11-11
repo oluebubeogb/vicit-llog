@@ -20,6 +20,7 @@ type Call = {
   to?: { fullName?: string; role?: string; phone?: string | null } | null;
   phone?: string | null;
   answeredAt?: string | null;
+  endedAt?: string | null;
   canCallback?: boolean;
 };
 
@@ -43,6 +44,18 @@ function formatElapsed(ms: number) {
   return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function endedCaption(call: Call, lastMs: number) {
+  const answered = !!call.answeredAt || lastMs > 0;
+  let ms = lastMs;
+  if (call.answeredAt && call.endedAt) {
+    const computed = new Date(call.endedAt).getTime() - new Date(call.answeredAt).getTime();
+    if (Number.isFinite(computed) && computed >= 0) ms = computed;
+  }
+  if (call.status === 'ENDED' && answered) return `Call ended · ${formatElapsed(ms)}`;
+  if (call.status === 'ENDED' || call.status === 'MISSED') return 'Not answered';
+  return LABEL[call.status] || call.status;
+}
+
 export default function RingOverlay() {
   const pathname = usePathname();
   const [call, setCall] = useState<Call | null>(null);
@@ -56,6 +69,8 @@ export default function RingOverlay() {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const startedFor = useRef<string | null>(null);
   const callRef = useRef<Call | null>(null);
+  const lastElapsedRef = useRef(0);
+  const lastElapsedFor = useRef<string | null>(null);
   callRef.current = call;
 
   const focus = useCallback(async (id: string) => {
@@ -104,7 +119,7 @@ export default function RingOverlay() {
   const onSignal = useCallback(async (payload: any, callId: string) => {
     // Buffer even before the peer connection exists so early offers/ICE are not dropped.
     if (startedFor.current && startedFor.current !== callId && voiceSession.callId && voiceSession.callId !== callId) return;
-    await voiceSession.handleSignal(payload);
+    await voiceSession.handleSignal(payload, callId);
   }, []);
 
   useEffect(() => {
@@ -185,9 +200,17 @@ export default function RingOverlay() {
   }, [call, startVoice, hangupVoice]);
 
   useEffect(() => {
-    if (call?.status !== 'ACCEPTED') { setElapsed(0); return; }
+    if (call?.id && lastElapsedFor.current !== call.id) {
+      lastElapsedRef.current = 0;
+      lastElapsedFor.current = call.id;
+    }
+    if (call?.status !== 'ACCEPTED') return;
     const started = call.answeredAt ? new Date(call.answeredAt).getTime() : Date.now();
-    const tick = () => setElapsed(Date.now() - started);
+    const tick = () => {
+      const ms = Math.max(0, Date.now() - started);
+      lastElapsedRef.current = ms;
+      setElapsed(ms);
+    };
     tick();
     const t = setInterval(tick, 500);
     return () => clearInterval(t);
@@ -295,26 +318,31 @@ export default function RingOverlay() {
             </button>
           </div>
         )}
-        {!live && call.status !== 'RINGING' && <p className="rounded-xl bg-slate-50 px-3 py-2 text-center text-sm font-semibold text-slate-700">{LABEL[call.status]}</p>}
-
         {!live && call.status !== 'RINGING' && (
-          <div className="mt-3 flex flex-col gap-2">
-            {call.canCallback && (
-              <InAppCallButton
-                className="w-full"
-                label="Call back"
-                onClick={async () => {
-                  try {
-                    const next = await api.ringCallback(call.id);
-                    window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: next }));
-                  } catch (e: any) {
-                    setVoiceError(e.message);
-                    alert(e.message || 'Could not call back');
-                  }
-                }}
-              />
+          <div className="space-y-3">
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-center text-sm font-semibold text-slate-700">
+              {endedCaption(call, lastElapsedRef.current || elapsed)}
+            </p>
+            {(call.canCallback || phone) && (
+              <div className={`grid gap-2 ${call.canCallback && phone ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {call.canCallback && (
+                  <InAppCallButton
+                    className="w-full !py-3"
+                    label="Call back"
+                    onClick={async () => {
+                      try {
+                        const next = await api.ringCallback(call.id);
+                        window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: next }));
+                      } catch (e: any) {
+                        setVoiceError(e.message);
+                        alert(e.message || 'Could not call back');
+                      }
+                    }}
+                  />
+                )}
+                <PhoneCallLink phone={phone} className="btn-quiet w-full justify-center !py-3" />
+              </div>
             )}
-            <PhoneCallLink phone={phone} className="btn-quiet w-full justify-center !py-3" />
             {voiceError && <p className="text-center text-xs text-rose-600">{voiceError}</p>}
           </div>
         )}

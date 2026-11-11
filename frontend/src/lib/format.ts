@@ -82,3 +82,49 @@ export const photoUrl = (p?: string | null) => (p ? `${API_URL}/visitors/photo/$
 export const avatarUrl = (p?: string | null) => (p ? `${API_URL}/users/avatar/${p}` : null);
 
 export const staffBadgeUrl = (p?: string | null) => (p ? `${API_URL}/users/staff-badge/${p}` : null);
+
+/** App calendar day (matches backend APP_TIMEZONE, default Africa/Lagos). */
+export const APP_TIMEZONE = 'Africa/Lagos';
+
+export function localDayKey(ts?: string | Date | null, timeZone = APP_TIMEZONE): string {
+  const d = ts ? new Date(ts) : new Date();
+  if (isNaN(+d)) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+/** True when the visit is expected after today (and has not already arrived/exited). */
+export function isScheduledVisit(expectedAt?: string | Date | null, status?: string | null) {
+  if (!expectedAt) return false;
+  if (['ARRIVED', 'EXITED', 'DENIED', 'CANCELLED'].includes(String(status || ''))) return false;
+  const when = localDayKey(expectedAt);
+  return !!when && when > localDayKey(new Date());
+}
+
+export function isScheduledInvite(inv: { expectedAt?: string | Date | null; visitors?: Array<{ status?: string }> } | null | undefined) {
+  if (!inv?.expectedAt) return false;
+  const visitors = inv.visitors || [];
+  if (visitors.some((v) => ['ARRIVED', 'EXITED', 'DENIED'].includes(String(v.status || '')))) return false;
+  return isScheduledVisit(inv.expectedAt, 'INVITED');
+}
+
+/** Clock-style duration such as 02:14 (or 1:02:14 if an hour or more). */
+export function fmtCallClock(ms?: number | null): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '00:00';
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+export function callDurationMs(answeredAt?: string | Date | null, endedAt?: string | Date | null): number | null {
+  if (!answeredAt || !endedAt) return null;
+  const ms = new Date(endedAt).getTime() - new Date(answeredAt).getTime();
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}

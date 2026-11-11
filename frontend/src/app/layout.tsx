@@ -43,10 +43,10 @@ export const metadata: Metadata = {
   formatDetection: { telephone: false },
   icons: {
     icon: [
-      { url: '/icon-192.png?v=1.0.1', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512.png?v=1.0.1', sizes: '512x512', type: 'image/png' },
+      { url: '/icon-192.png?v=1.0.1-v15', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png?v=1.0.1-v15', sizes: '512x512', type: 'image/png' },
     ],
-    apple: '/apple-touch-icon.png?v=1.0.1',
+    apple: '/apple-touch-icon.png?v=1.0.1-v15',
   },
 };
 

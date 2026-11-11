@@ -44,8 +44,8 @@ export class GateController {
 
   @Get('visits')
   @ApiOperation({ summary: 'List visits for gate dashboard' })
-  visits(@CurrentUser() user: any, @Query('filter') filter?: string) {
-    return this.gateService.listVisits(user, filter);
+  visits(@CurrentUser() user: any, @Query('filter') filter?: string, @Query('q') q?: string) {
+    return this.gateService.listVisits(user, filter, q);
   }
 
   @Patch('host-response/:visitorId')

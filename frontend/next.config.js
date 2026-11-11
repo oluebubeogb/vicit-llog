@@ -8,7 +8,7 @@ const nextConfig = {
     return [
       {
         source: '/:path*',
-        headers: [{ key: 'X-App-Version', value: '1.0.1' }],
+        headers: [{ key: 'X-App-Version', value: '1.0.1-v15' }],
       },
       {
         source: '/((?!_next/static|_next/image|icon-|apple-touch|splash|sw\.js).*)',

@@ -124,8 +124,13 @@ export const api = {
   },
   gateLookup: (code: string) =>
     request(`/gate/lookup?code=${encodeURIComponent(code)}`),
-  gateVisits: (filter?: string) =>
-    request(`/gate/visits${filter ? `?filter=${encodeURIComponent(filter)}` : ''}`),
+  gateVisits: (filter?: string, q?: string) => {
+    const p = new URLSearchParams();
+    if (filter) p.set('filter', filter);
+    if (q) p.set('q', q);
+    const s = p.toString();
+    return request(`/gate/visits${s ? `?${s}` : ''}`);
+  },
   recordEntry: (data: any) =>
     request('/gate/entry', { method: 'POST', body: JSON.stringify(data) }),
   recordExit: (visitorId: string, notes?: string) =>

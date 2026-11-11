@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { PhoneCall } from 'lucide-react';
 import { api } from '@/lib/api';
 import { InAppCallButton, PhoneCallLink } from '@/components/CallButtons';
-import { relTime } from '@/lib/format';
+import { callDurationMs, fmtCallClock, relTime } from '@/lib/format';
 
 const STATUS: Record<string, string> = {
   RINGING: 'Ringing',
@@ -64,16 +64,18 @@ export default function RecentCalls({ compact }: { compact?: boolean }) {
           {rows.slice(0, compact ? 6 : 20).map((c) => {
             const other = c.youAre === 'callee' ? c.from : c.to;
             const subject = c.visitor?.fullName || c.dispatch?.courierName || 'Call';
-            const label = STATUS[c.status] || c.status;
+            const dur = callDurationMs(c.answeredAt, c.endedAt);
+            const unanswered = ['MISSED', 'CANCELLED'].includes(c.status) || (c.status === 'ENDED' && !c.answeredAt);
+            const label = unanswered ? 'Not answered' : (STATUS[c.status] || c.status);
             return (
               <li key={c.id} className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-800">{other?.fullName || 'Unknown'}</p>
                   <p className="truncate text-[11px] text-slate-500">
-                    {subject} · {label} · {relTime(c.endedAt || c.createdAt)}
+                    {subject} · {label}{dur != null ? ` · ${fmtCallClock(dur)}` : ''} · {relTime(c.endedAt || c.createdAt)}
                   </p>
                 </div>
-                <div className="ml-auto flex shrink-0 gap-1">
+                <div className="ml-auto flex shrink-0 flex-row items-center gap-1">
                   {c.canCallback && (
                     <InAppCallButton
                       compact

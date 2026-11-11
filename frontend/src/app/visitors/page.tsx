@@ -4,13 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, getUser } from '@/lib/api';
 import { platformHome } from '@/lib/navLinks';
 import Link from 'next/link';
-import { Loader2, RotateCcw, Search, Sparkles, UserPlus, Users, X } from 'lucide-react';
+import { CalendarClock, Loader2, RotateCcw, Search, Sparkles, UserPlus, Users, X } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Sheet from '@/components/ui/Sheet';
 import StatusPill from '@/components/ui/StatusPill';
 import { Empty, Notice, SkeletonList } from '@/components/ui/Bits';
 import { InviteDetail, InviteRow, inviteSheetProps } from '@/components/InviteBits';
-import { inviteStatus } from '@/lib/format';
+import { inviteStatus, isScheduledInvite } from '@/lib/format';
 
 const FILTERS = [
   { k: 'all', l: 'All' },
@@ -26,6 +26,7 @@ export default function VisitorsPage() {
   const [role, setRole] = useState<string | null>(null);
   const [detail, setDetail] = useState<any | null>(null);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['k']>('all');
+  const [period, setPeriod] = useState<'current' | 'scheduled'>('current');
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -79,9 +80,17 @@ export default function VisitorsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const scheduledInvites = useMemo(
+    () => (term && hits ? hits.results : invites).filter((inv) => isScheduledInvite(inv)),
+    [invites, hits, term],
+  );
+
   const list = useMemo(() => {
     const source = term && hits ? hits.results : invites;
     return source.filter((inv) => {
+      const scheduled = isScheduledInvite(inv);
+      if (period === 'scheduled') return scheduled;
+      if (scheduled) return false;
       const st = inviteStatus(inv);
       const expiredLike = st === 'EXPIRED' || (inv.expiresAt && new Date(inv.expiresAt) < new Date() && st !== 'USED');
       if (filter === 'live' && !['ACTIVE', 'USED'].includes(st)) return false;
@@ -90,7 +99,7 @@ export default function VisitorsPage() {
       if (filter === 'expired' && !expiredLike) return false;
       return true;
     });
-  }, [invites, hits, filter, term]);
+  }, [invites, hits, filter, term, period]);
   const searchMode = !!term;
   const pending = searchMode && (searching || !hits || hits.q !== term);
 
@@ -129,15 +138,25 @@ export default function VisitorsPage() {
             </button>
           )}
         </label>
-        <div>
-          <div className="segmented grid w-full grid-cols-5">
-            {FILTERS.map((f) => (
-              <button key={f.k} type="button" data-active={filter === f.k} onClick={() => setFilter(f.k)} className="!px-1 !text-[13px]">
-                {f.l}
-              </button>
-            ))}
-          </div>
+        <div className="segmented grid w-full grid-cols-2">
+          <button type="button" data-active={period === 'current'} onClick={() => setPeriod('current')} className="!px-2">
+            Today &amp; past
+          </button>
+          <button type="button" data-active={period === 'scheduled'} onClick={() => setPeriod('scheduled')} className="!px-2">
+            Scheduled{scheduledInvites.length ? <span className="ml-1 rounded-full bg-brand-50 px-1.5 text-[11px] font-bold text-brand-700">{scheduledInvites.length}</span> : null}
+          </button>
         </div>
+        {period === 'current' && (
+          <div>
+            <div className="segmented grid w-full grid-cols-5">
+              {FILTERS.map((f) => (
+                <button key={f.k} type="button" data-active={filter === f.k} onClick={() => setFilter(f.k)} className="!px-1 !text-[13px]">
+                  {f.l}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {searchMode && hits && !pending && (
@@ -153,9 +172,9 @@ export default function VisitorsPage() {
         <SkeletonList rows={6} />
       ) : list.length === 0 ? (
         <Empty
-          icon={<Users size={24} />}
-          title={invites.length || searchMode ? 'No matches' : 'No visitors yet'}
-          hint={invites.length || searchMode ? 'Try other words or a different filter.' : 'Invites you create will appear here with live status.'}
+          icon={period === 'scheduled' ? <CalendarClock size={24} /> : <Users size={24} />}
+          title={invites.length || searchMode ? 'No matches' : period === 'scheduled' ? 'No scheduled visits' : 'No visitors yet'}
+          hint={invites.length || searchMode ? 'Try other words or a different filter.' : period === 'scheduled' ? 'Invites dated after today will appear here, so they do not sit on top of today\'s list.' : 'Invites you create will appear here with live status.'}
         />
       ) : (
         <ul className="rows stagger">

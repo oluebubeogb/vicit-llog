@@ -116,8 +116,9 @@ function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
     <div className="space-y-4">
       <p className="text-[15px] leading-relaxed text-slate-700">{n.body}</p>
       {m.type === 'RING' && m.callId && (
-        <div className="flex gap-2">
+        <div className="flex flex-row gap-2">
           <InAppCallButton className="flex-1 !py-2 text-xs" label="Call back" onClick={async () => { try { const call = await api.ringCallback(m.callId); window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call })); } catch (e: any) { alert(e.message || 'Could not call back'); } }} />
+          <PhoneCallLink phone={m.phone || v?.phone || inv?.host?.phone || n.context?.from?.phone || n.context?.other?.phone} className="flex-1 !py-2 text-xs" />
         </div>
       )}
       {m.type === 'HOST_ARRIVAL_CONFIRMATION' && v && (
