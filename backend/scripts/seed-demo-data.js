@@ -523,6 +523,14 @@ async function resetDemo() {
   }
 
   if (gateIds.length) {
+    // GateVisit -> Gate is RESTRICT. Any remaining visit rows on demo gates
+    // (e.g. test scans of real visitors at demo gates) must go first, or the
+    // gate delete fails with P2003. Particulars cascade from GateVisit.
+    const leftover = await prisma.gateVisit.deleteMany({ where: { gateId: { in: gateIds } } });
+    if (leftover.count) {
+      summary.gateVisits += leftover.count;
+      console.log(`Removed ${leftover.count} other gate visit record(s) that pointed at demo gates.`);
+    }
     const r = await prisma.gate.deleteMany({ where: { id: { in: gateIds } } });
     summary.gates = r.count;
   }

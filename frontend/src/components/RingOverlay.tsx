@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { BellRing, Mic, MicOff, Phone, PhoneOff, X } from 'lucide-react';
+import { BellRing, Mic, MicOff, PhoneOff, X } from 'lucide-react';
+import { InAppCallButton, PhoneCallLink } from '@/components/CallButtons';
 import { api, getToken } from '@/lib/api';
 import { startRingtone, stopRingtone, unlockRingtone } from '@/lib/ringtone';
 import { voiceSession, type VoiceState } from '@/lib/webrtcCall';
@@ -19,6 +20,7 @@ type Call = {
   to?: { fullName?: string; role?: string; phone?: string | null } | null;
   phone?: string | null;
   answeredAt?: string | null;
+  canCallback?: boolean;
 };
 
 const LABEL: Record<string, string> = {
@@ -224,7 +226,6 @@ export default function RingOverlay() {
   const who = incoming ? call.from?.fullName : call.to?.fullName;
   const place = [call.gate?.name, call.gate?.location].filter(Boolean).join(' · ');
   const phone = call.phone;
-  const showCall = !!phone && (call.status !== 'RINGING' || incoming);
   const subject = call.dispatch?.courierName || call.visitor?.fullName;
   const live = call.status === 'ACCEPTED';
 
@@ -296,10 +297,26 @@ export default function RingOverlay() {
         )}
         {!live && call.status !== 'RINGING' && <p className="rounded-xl bg-slate-50 px-3 py-2 text-center text-sm font-semibold text-slate-700">{LABEL[call.status]}</p>}
 
-        {showCall && !live && (
-          <a href={`tel:${phone}`} className="btn-primary mt-3 w-full">
-            <Phone size={16} /> Call
-          </a>
+        {!live && call.status !== 'RINGING' && (
+          <div className="mt-3 flex flex-col gap-2">
+            {call.canCallback && (
+              <InAppCallButton
+                className="w-full"
+                label="Call back"
+                onClick={async () => {
+                  try {
+                    const next = await api.ringCallback(call.id);
+                    window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: next }));
+                  } catch (e: any) {
+                    setVoiceError(e.message);
+                    alert(e.message || 'Could not call back');
+                  }
+                }}
+              />
+            )}
+            <PhoneCallLink phone={phone} className="btn-quiet w-full justify-center !py-3" />
+            {voiceError && <p className="text-center text-xs text-rose-600">{voiceError}</p>}
+          </div>
         )}
       </div>
     </div>

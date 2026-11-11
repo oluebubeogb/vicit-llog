@@ -33,3 +33,8 @@ export class RingSignalDto {
   @IsOptional()
   candidate?: any;
 }
+
+export class CallbackRingDto {
+  @IsUUID()
+  callId!: string;
+}

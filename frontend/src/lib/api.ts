@@ -317,6 +317,8 @@ export const api = {
     request(`/rings/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
   ring: (id: string) => request(`/rings/${id}`),
   activeRing: () => request('/rings/active'),
+  recentRings: () => request('/rings/recent'),
+  ringCallback: (callId: string) => request('/rings/callback', { method: 'POST', body: JSON.stringify({ callId }) }),
   ringStreamUrl: () => `${API_URL}/rings/stream?token=${encodeURIComponent(getToken() || '')}`,
   platformInvite: (id: string) => request(`/platform/invites/${id}`),
   exportCsv: (from?: string, to?: string, columns?: string[]) => {

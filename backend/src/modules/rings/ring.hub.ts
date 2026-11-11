@@ -17,6 +17,10 @@ export class RingHub {
     };
   }
 
+  isOnline(userId: string) {
+    return (this.listeners.get(userId)?.size || 0) > 0;
+  }
+
   publish(userId: string, event: any) {
     for (const listener of this.listeners.get(userId) || []) {
       try {

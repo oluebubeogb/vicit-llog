@@ -124,7 +124,7 @@ export default function PublicUserPage() {
           )}
           {profile.phone && (
             <a href={`tel:${profile.phone}`} className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 ring-1 ring-on-brand/20 backdrop-blur transition hover:bg-on-brand/25">
-              <Phone size={12} /> {profile.phone}
+              <Phone size={12} /> Phone call · {profile.phone}
             </a>
           )}
           {profile.subjectIsGate && (

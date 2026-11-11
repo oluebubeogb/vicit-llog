@@ -5,7 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RingService } from './ring.service';
 import { RingHub } from './ring.hub';
-import { RingActionDto, RingSignalDto, StartRingDto } from './dto/ring.dto';
+import { CallbackRingDto, RingActionDto, RingSignalDto, StartRingDto } from './dto/ring.dto';
 
 @ApiTags('Rings')
 @Controller('rings')
@@ -49,6 +49,20 @@ export class RingController {
   @UseGuards(JwtAuthGuard)
   active(@CurrentUser() user: any) {
     return this.rings.active(user);
+  }
+
+  @Get('recent')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  recent(@CurrentUser() user: any) {
+    return this.rings.recent(user);
+  }
+
+  @Post('callback')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  callback(@Body() body: CallbackRingDto, @CurrentUser() user: any) {
+    return this.rings.callback(user, body.callId);
   }
 
   @Post(':id/signal')

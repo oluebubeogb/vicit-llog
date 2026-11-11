@@ -272,24 +272,36 @@ model AuditLog {
   createdAt DateTime @default(now())
 }
 
-/// In-app ring between a gate officer and a host about one visitor.
+/// In-app ring between a gate officer (or any initiator) and a host about one visitor or dispatch.
 model RingCall {
-  id         String    @id @default(uuid())
-  visitorId  String?
-  visitor    Visitor?  @relation(fields: [visitorId], references: [id], onDelete: Cascade)
-  dispatchId String?
-  fromUserId String
-  toUserId   String
-  direction  String
-  status     String    @default("RINGING")
-  gateId     String?
-  createdAt  DateTime  @default(now())
-  answeredAt DateTime?
-  endedAt    DateTime?
+  id                String    @id @default(uuid())
+  visitorId         String?
+  visitor           Visitor?  @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  dispatchId        String?
+  fromUserId        String
+  toUserId          String
+  /// Logged-in account that placed this call (SA / SA II / super gate included).
+  callerUserId      String?
+  /// Intended answerer for this call (usually the host, or the initiator on a call-back).
+  calleeUserId      String?
+  /// Gate officer responsible: the initiator if they are a gate officer, else the officer on that gate.
+  gateOfficerUserId String?
+  parentCallId      String?
+  parentCall        RingCall?  @relation("RingCallback", fields: [parentCallId], references: [id], onDelete: SetNull)
+  callbacks         RingCall[] @relation("RingCallback")
+  direction         String
+  status            String    @default("RINGING")
+  gateId            String?
+  createdAt         DateTime  @default(now())
+  answeredAt        DateTime?
+  endedAt           DateTime?
 
   @@index([toUserId, status])
   @@index([fromUserId, status])
   @@index([visitorId, createdAt])
+  @@index([dispatchId])
+  @@index([parentCallId])
+  @@index([callerUserId, createdAt])
 }
 
 model Notification {
@@ -516,6 +528,8 @@ model Dispatch {
   courierPhone    String?
   courierCompany  String?
   photoPath       String?
+  /// Additional particulars photos (photoPath remains the first/cover).
+  photoPaths      String[]  @default([])
   notes           String?
   status          String   @default("REGISTERED")
   createdById     String

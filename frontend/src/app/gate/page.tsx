@@ -11,8 +11,6 @@ import {
   Camera,
   X,
   Ban,
-  BellRing,
-  Phone,
   ImagePlus,
   Flashlight,
   SwitchCamera,
@@ -30,6 +28,8 @@ import Collapse from '@/components/ui/Collapse';
 import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
 import PhotoGallery, { GalleryImage } from '@/components/PhotoGallery';
+import CaptureThumbGrid from '@/components/CaptureThumbGrid';
+import { InAppCallButton, PhoneCallLink } from '@/components/CallButtons';
 import CheckpointTracker from '@/components/CheckpointTracker';
 import { fmtDate, MODE_LABEL } from '@/lib/format';
 import {
@@ -839,8 +839,8 @@ export default function GatePage() {
                     <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${v.hostAvailabilityStatus==='AVAILABLE'?'bg-emerald-100 text-emerald-800':'bg-slate-200 text-slate-700'}`}>{ringNote[v.id] || (v.hostAvailabilityStatus==='AVAILABLE'?'Available':v.hostAvailabilityStatus==='WAITING'?'Waiting':'No answer')}</span>
                   </div>
                   <div className="mt-2 flex gap-2">
-                    <button type="button" onClick={async()=>{try{const call=await api.startRing(v.id,'GATE_TO_HOST');window.dispatchEvent(new CustomEvent('vicit:ring-local',{detail:call}));}catch(e:any){setError(e.message||'Could not ring the host')}}} className="btn-primary flex-1 !py-2 text-xs"><BellRing size={14}/> Ring</button>
-                    {result.host?.phone && <a href={`tel:${result.host.phone}`} className="btn-quiet flex-1 !py-2 text-xs"><Phone size={14}/> Call</a>}
+                    <InAppCallButton className="flex-1 !py-2 text-xs" onClick={async()=>{try{const call=await api.startRing(v.id,'GATE_TO_HOST');window.dispatchEvent(new CustomEvent('vicit:ring-local',{detail:call}));}catch(e:any){setError(e.message||'Could not start the in-app call')}}} />
+                    <PhoneCallLink phone={result.host?.phone} className="flex-1 !py-2 text-xs" />
                   </div>
                 </div>}
                 {v.status === 'INVITED' && !v.photoPath && (
@@ -867,7 +867,7 @@ export default function GatePage() {
                       <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">Checkpoint photo evidence</p><button type="button" onClick={() => evidenceCameraOpen && evidenceGuestId === v.id ? stopEvidenceCamera() : startEvidenceCamera(v.id)} className="btn-ghost !py-2 !px-3 text-xs"><Camera size={14}/>{evidenceCameraOpen && evidenceGuestId === v.id ? 'Close camera' : 'Open camera'}</button></div>
                       {evidenceCameraOpen && evidenceGuestId === v.id && <div className="overflow-hidden rounded-xl bg-black"><video ref={evidenceVideoRef} autoPlay muted playsInline className="aspect-video w-full object-cover"/><div className="flex justify-center p-3"><button type="button" onClick={captureEvidencePhoto} disabled={draftPhotos.length >= 10} className="btn-primary !rounded-full !px-6 !py-2"><Camera size={16}/> Capture photo</button></div></div>}
                       {evidenceCameraError && evidenceGuestId === v.id && <p className="text-[11px] text-rose-600">{evidenceCameraError}</p>}
-                      {draftPhotos.length > 0 && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">{draftPhotos.map((item, index) => <div key={item.preview} className="relative overflow-hidden rounded-lg border border-slate-200"><button type="button" onClick={() => setGallery({ images: draftPhotos.map((photo, i) => ({ src: photo.preview, alt: `Capture ${i + 1}` })), index })} className="block w-full"><img src={item.preview} alt={`Checkpoint evidence ${index + 1}`} className="aspect-square w-full object-cover"/></button><button type="button" onClick={() => removeEvidencePhoto(v.id, index)} aria-label={`Remove photo ${index + 1}`} className="absolute right-1 top-1 rounded-full bg-slate-950/80 p-1.5 text-white shadow"><X size={13}/></button></div>)}</div>}
+                      {draftPhotos.length > 0 && <CaptureThumbGrid photos={draftPhotos.map((item, index) => ({ preview: item.preview, alt: `Checkpoint evidence ${index + 1}` }))} onRemove={(index) => removeEvidencePhoto(v.id, index)} />}
                     </div>
                     {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={!!particularsChecked[v.id]} onChange={e=>setParticularsChecked((c)=>({...c,[v.id]:e.target.checked}))}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">

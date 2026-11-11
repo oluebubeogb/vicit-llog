@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { BellRing, Camera, Package, Plus } from 'lucide-react';
+import { Camera, Package, Plus } from 'lucide-react';
 import { api, getUser } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { Notice, SkeletonList } from '@/components/ui/Bits';
@@ -9,6 +9,8 @@ import SleekOverlay, { scrollIntoOverlay } from '@/components/ui/SleekOverlay';
 import StatusPill from '@/components/ui/StatusPill';
 import Collapse from '@/components/ui/Collapse';
 import HostSuggest, { type HostPick } from '@/components/HostSuggest';
+import CaptureThumbGrid from '@/components/CaptureThumbGrid';
+import { InAppCallButton, PhoneCallLink } from '@/components/CallButtons';
 
 const TONE: Record<string, 'emerald' | 'amber' | 'rose' | 'slate'> = {
   REGISTERED: 'slate',
@@ -21,7 +23,7 @@ const TONE: Record<string, 'emerald' | 'amber' | 'rose' | 'slate'> = {
 
 export default function DispatchPage() {
   const user = getUser();
-  const isGate = ['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN'].includes(String(user?.role));
+  const isGate = ['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN', 'GLOBAL_ADMIN'].includes(String(user?.role));
   const [rows, setRows] = useState<any[] | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
@@ -71,6 +73,16 @@ export default function DispatchPage() {
                 <li key={it.id} className="chip !py-0.5">{it.description}{it.quantity > 1 ? ` ×${it.quantity}` : ''}</li>
               ))}
             </ul>
+            {!!(d.photoPaths?.length || d.photoPath) && (
+              <div className="mt-3 space-y-1.5">
+                <CaptureThumbGrid
+                  photos={(d.photoPaths?.length ? d.photoPaths : [d.photoPath]).filter(Boolean).map((path: string, i: number) => ({
+                    preview: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/dispatches/photo/${path}`,
+                    alt: `Particulars ${i + 1}`,
+                  }))}
+                />
+              </div>
+            )}
             <div className="mt-3 space-y-1.5">
               {(d.destinations || []).map((dest: any) => (
                 <div key={dest.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs">
@@ -84,7 +96,7 @@ export default function DispatchPage() {
                     </span>
                   )}
                   <span className="ml-auto flex gap-1">
-                    {dest.hostId && isGate && <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => ring(d.id, dest.hostId)}><BellRing size={12} /> Ring</button>}
+                    {dest.hostId && isGate && <InAppCallButton compact className="!px-2 !py-1" onClick={() => ring(d.id, dest.hostId)} />}{dest.host?.phone && <PhoneCallLink phone={dest.host.phone} compact />}
                     {dest.status === 'PENDING' && <button type="button" className="btn-success !px-2 !py-1" onClick={() => decide(d.id, dest.organisationId, true)}>Approve</button>}
                     {dest.status === 'PENDING' && <button type="button" className="btn-danger !px-2 !py-1" onClick={() => decide(d.id, dest.organisationId, false)}>Decline</button>}
                   </span>
@@ -113,11 +125,13 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const [pickedHosts, setPickedHosts] = useState<Record<string, HostPick | null>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [photoPath, setPhotoPath] = useState('');
-  const [preview, setPreview] = useState('');
+  const [photos, setPhotos] = useState<{ preview: string; path: string }[]>([]);
+  const [camError, setCamError] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const camBox = useRef<HTMLDivElement>(null);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
 
   useEffect(() => { if (open) api.directoryAgencies().then(setAgencies).catch(() => {}); }, [open]);
 
@@ -125,16 +139,21 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
     if (!open) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      photosRef.current.forEach((p) => URL.revokeObjectURL(p.preview));
+      setPhotos([]);
+      setCamError('');
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
         if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = s;
         if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play().catch(() => {}); }
-      } catch { /* camera optional */ }
+      } catch {
+        setCamError('Could not open the camera. You can still register the dispatch without a photo.');
+      }
     })();
     return () => { cancelled = true; };
   }, [open]);
@@ -150,7 +169,8 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
       const items = form.items.split(/\n|,/).map((s) => s.trim()).filter(Boolean).map((description) => ({ description, quantity: 1 }));
       const hosts: Record<string, string> = {};
       orgIds.forEach((id) => { if (pickedHosts[id]?.id) hosts[id] = pickedHosts[id]!.id; });
-      await api.createDispatch({ ...form, items, organisationIds: orgIds, hosts, photoPath: photoPath || undefined });
+      const paths = photos.map((p) => p.path).filter(Boolean);
+      await api.createDispatch({ ...form, items, organisationIds: orgIds, hosts, photoPath: paths[0] || undefined, photoPaths: paths });
       onCreated();
     } catch (err: any) { setError(err.message); } finally { setBusy(false); }
   }
@@ -212,29 +232,56 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
             <div ref={camBox} className="space-y-2">
               <p className="label">Particulars photo</p>
               <div className="overflow-hidden rounded-xl bg-black">
-                {preview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={preview} alt="" className="aspect-video h-auto w-full max-h-56 object-cover lg:max-h-[min(240px,32dvh)]" />
-                ) : (
-                  <video ref={videoRef} autoPlay muted playsInline className="aspect-video h-auto w-full max-h-56 bg-black object-cover lg:max-h-[min(240px,32dvh)]" />
-                )}
+                <video ref={videoRef} autoPlay muted playsInline className="aspect-video h-auto w-full max-h-56 bg-black object-cover lg:max-h-[min(240px,32dvh)]" />
               </div>
-              <div className="flex gap-2">
-                <button type="button" className="btn-quiet flex-1" onClick={async () => {
-                  if (!videoRef.current) return;
+              {camError && <p className="text-[11px] text-rose-600">{camError}</p>}
+              <button
+                type="button"
+                disabled={photos.length >= 10}
+                className="btn-primary w-full !py-3.5"
+                onClick={async () => {
+                  const video = videoRef.current;
+                  if (!video || video.readyState < 2 || !video.videoWidth) {
+                    setCamError('Camera is still starting. Try again in a moment.');
+                    return;
+                  }
+                  if (photos.length >= 10) {
+                    setCamError('You can capture up to 10 photos.');
+                    return;
+                  }
                   const canvas = document.createElement('canvas');
-                  canvas.width = videoRef.current.videoWidth || 1280;
-                  canvas.height = videoRef.current.videoHeight || 720;
-                  canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0);
-                  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), 'image/jpeg', 0.9));
-                  setPreview(URL.createObjectURL(blob));
-                  const up = await api.uploadDispatchPhoto(blob);
-                  setPhotoPath(up.photoPath || up.filename || up.path || '');
-                  streamRef.current?.getTracks().forEach((t) => t.stop());
-                  setTimeout(() => scrollIntoOverlay(camBox.current), 80);
-                }}><Camera size={14} /> Capture</button>
-                {preview && <button type="button" className="btn-quiet" onClick={() => { setPreview(''); setPhotoPath(''); }}>Retake</button>}
-              </div>
+                  canvas.width = video.videoWidth;
+                  canvas.height = video.videoHeight;
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx) return;
+                  ctx.drawImage(video, 0, 0);
+                  const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), 'image/jpeg', 0.9));
+                  if (!blob) { setCamError('Could not capture the frame.'); return; }
+                  const preview = URL.createObjectURL(blob);
+                  try {
+                    const up = await api.uploadDispatchPhoto(blob);
+                    const path = up.photoPath || up.filename || up.path || '';
+                    setPhotos((cur) => [...cur, { preview, path }]);
+                    setCamError('');
+                    setTimeout(() => scrollIntoOverlay(camBox.current), 80);
+                  } catch (err: any) {
+                    URL.revokeObjectURL(preview);
+                    setCamError(err.message || 'Could not save the photo.');
+                  }
+                }}
+              >
+                <Camera size={16} /> Capture
+              </button>
+              <CaptureThumbGrid
+                photos={photos.map((p, i) => ({ preview: p.preview, alt: `Particulars ${i + 1}` }))}
+                onRemove={(index) => {
+                  setPhotos((cur) => {
+                    const item = cur[index];
+                    if (item) URL.revokeObjectURL(item.preview);
+                    return cur.filter((_, i) => i !== index);
+                  });
+                }}
+              />
             </div>
           </div>
         </div>

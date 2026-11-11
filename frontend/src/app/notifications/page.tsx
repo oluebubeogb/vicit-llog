@@ -32,12 +32,14 @@ import { Empty, Field, Fields, SkeletonList } from '@/components/ui/Bits';
 import PersonLink from '@/components/PersonLink';
 import { fmtDate, fmtDuration, fmtTime, MODE_LABEL, photoUrl, relTime, titleCase } from '@/lib/format';
 import { MODE_ICON } from '@/components/InviteBits';
+import RecentCalls from '@/components/RecentCalls';
+import { InAppCallButton, PhoneCallLink } from '@/components/CallButtons';
 
 type Tone = 'brand' | 'emerald' | 'amber' | 'rose' | 'violet';
 const TYPE: Record<string, { label: string; icon: ReactNode; tone: Tone }> = {
   ARRIVAL: { label: 'Visitor arrival', icon: <LogIn size={18} />, tone: 'emerald' },
   HOST_ARRIVAL_CONFIRMATION: { label: 'Host availability required', icon: <BellRing size={18} />, tone: 'amber' },
-  RING: { label: 'Ring', icon: <BellRing size={18} />, tone: 'amber' },
+  RING: { label: 'In-app call', icon: <BellRing size={18} />, tone: 'amber' },
   EXIT: { label: 'Visitor exit', icon: <LogOut size={18} />, tone: 'brand' },
   ENTRY_DENIED: { label: 'Entry declined', icon: <Ban size={18} />, tone: 'rose' },
   PHOTO_CAPTURED: { label: 'Visitor registered', icon: <Camera size={18} />, tone: 'violet' },
@@ -113,6 +115,11 @@ function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
   return (
     <div className="space-y-4">
       <p className="text-[15px] leading-relaxed text-slate-700">{n.body}</p>
+      {m.type === 'RING' && m.callId && (
+        <div className="flex gap-2">
+          <InAppCallButton className="flex-1 !py-2 text-xs" label="Call back" onClick={async () => { try { const call = await api.ringCallback(m.callId); window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call })); } catch (e: any) { alert(e.message || 'Could not call back'); } }} />
+        </div>
+      )}
       {m.type === 'HOST_ARRIVAL_CONFIRMATION' && v && (
         <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4">
           <div className="flex items-center gap-2 text-amber-900"><BellRing size={18}/><b className="text-sm">Can you receive this visitor now?</b></div>
@@ -123,8 +130,8 @@ function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
           </div>}
           {v.hostAvailabilityStatus === 'WAITING' && v.hostWaitUntil && <p className="mt-2 text-[11px] text-slate-500">Your previous wait request ends {new Date(v.hostWaitUntil).toLocaleTimeString()}.</p>}
           <div className="mt-2 flex gap-2">
-            <button type="button" className="btn-primary flex-1 !py-2 text-xs" onClick={async () => { try { const call = await api.startRing(v.id, 'HOST_TO_GATE'); window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call })); } catch (e: any) { alert(e.message || 'Could not ring the gate'); } }}><BellRing size={14}/> Ring gate</button>
-            {v.entryBy?.phone && <a href={`tel:${v.entryBy.phone}`} className="btn-quiet !py-2 text-xs"><Phone size={14}/> Call</a>}
+            <InAppCallButton className="flex-1 !py-2 text-xs" label="In-app call" onClick={async () => { try { const call = await api.startRing(v.id, 'HOST_TO_GATE'); window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call })); } catch (e: any) { alert(e.message || 'Could not start the in-app call'); } }} />
+            <PhoneCallLink phone={v.entryBy?.phone} className="!py-2 text-xs" />
           </div>
         </div>
       )}
@@ -204,9 +211,9 @@ function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
           </Field>
         )}
         {(v?.phone || m.phone) && (
-          <Field icon={<Phone size={14} />} label="Phone">
-            <a href={`tel:${v?.phone || m.phone}`} className="text-brand-700 hover:underline">
-              {v?.phone || m.phone}
+          <Field icon={<Phone size={14} />} label="Phone call">
+            <a href={`tel:${v?.phone || m.phone}`} className="inline-flex items-center gap-1 text-brand-700 hover:underline">
+              <Phone size={13} /> Phone call · {v?.phone || m.phone}
             </a>
           </Field>
         )}
@@ -375,6 +382,8 @@ export default function NotificationsPage() {
           </button>
         ))}
       </div>
+
+      <RecentCalls />
 
       {loading ? (
         <SkeletonList rows={6} h={72} />
