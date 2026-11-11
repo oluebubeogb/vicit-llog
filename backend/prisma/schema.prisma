@@ -47,6 +47,11 @@ enum WorkflowType {
   SECURITY_THEN_HOST
 }
 
+enum FooterCreditMobileMode {
+  FLOATING
+  STATIC
+}
+
 enum InviteCategory {
   PERSONAL
   OFFICIAL
@@ -82,6 +87,8 @@ model Organisation {
   loginVisible    Boolean         @default(true)
   /// Short label on login tiles (e.g. "Navy"). Falls back to name.
   shortName       String?
+  /// Custom background for the public login tile. Null = Auto (glass / brand colour).
+  loginTileColor  String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   users           User[]
@@ -427,8 +434,12 @@ model PlatformSettings {
   loginSecondaryColor       String?
   footerCredit              String   @default("Powered by CISTECH's Vicit 1.0.1")
   footerCreditEnabled       Boolean  @default(true)
+  /// Mobile footer: FLOATING sits above the bottom nav; STATIC is in document flow above nav padding.
+  footerCreditMobileMode    FooterCreditMobileMode @default(FLOATING)
   /// Large title on the split login page. Default Defence Headquarters.
   loginTitle                String?  @default("Defence Headquarters")
+  /// When false, an uploaded login logo is kept but not shown above the sign-in form.
+  loginLogoVisible          Boolean  @default(true)
   contractorMinDurationDays Int      @default(1)
   assetVersion              String   @default("1.0.1")
   createdAt                 DateTime @default(now())

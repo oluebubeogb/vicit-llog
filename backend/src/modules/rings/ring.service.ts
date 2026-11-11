@@ -144,10 +144,13 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
 
   iceServers() {
     const iceServers: Array<Record<string, any>> = [{ urls: 'stun:stun.l.google.com:19302' }];
-    const turn = (process.env.TURN_URL || '').trim();
-    if (turn) {
+    const urls = (process.env.TURN_URL || '')
+      .split(',')
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (urls.length) {
       iceServers.push({
-        urls: turn,
+        urls: urls.length === 1 ? urls[0] : urls,
         username: process.env.TURN_USERNAME || undefined,
         credential: process.env.TURN_CREDENTIAL || undefined,
       });

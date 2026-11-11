@@ -5,7 +5,7 @@ import { BellRing, Camera, Package, Plus } from 'lucide-react';
 import { api, getUser } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { Notice, SkeletonList } from '@/components/ui/Bits';
-import SleekOverlay from '@/components/ui/SleekOverlay';
+import SleekOverlay, { scrollIntoOverlay } from '@/components/ui/SleekOverlay';
 import StatusPill from '@/components/ui/StatusPill';
 import Collapse from '@/components/ui/Collapse';
 import HostSuggest, { type HostPick } from '@/components/HostSuggest';
@@ -134,7 +134,6 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
         if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = s;
         if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play().catch(() => {}); }
-        setTimeout(() => camBox.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
       } catch { /* camera optional */ }
     })();
     return () => { cancelled = true; };
@@ -157,64 +156,88 @@ function NewDispatch({ open, onClose, onCreated }: { open: boolean; onClose: () 
   }
 
   return (
-    <SleekOverlay open={open} onClose={onClose} title="Register dispatch" subtitle="Courier with letters, parcels or physical mail" size="lg">
-      <form onSubmit={submit} className="space-y-3">
-        <label className="block"><span className="label">Courier name</span><input className="input" required value={form.courierName} onChange={(e) => setForm({ ...form, courierName: e.target.value })} /></label>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block"><span className="label">Phone</span><input className="input" value={form.courierPhone} onChange={(e) => setForm({ ...form, courierPhone: e.target.value })} /></label>
-          <label className="block"><span className="label">Company</span><input className="input" value={form.courierCompany} onChange={(e) => setForm({ ...form, courierCompany: e.target.value })} /></label>
-        </div>
-        <label className="block"><span className="label">Items (one per line)</span><textarea className="input min-h-[72px]" required value={form.items} onChange={(e) => setForm({ ...form, items: e.target.value })} /></label>
-        <div ref={camBox} className="space-y-2">
-          <p className="label">Particulars photo</p>
-          {preview ? (
-            <img src={preview} alt="" className="aspect-video w-full rounded-xl object-cover" />
-          ) : (
-            <video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full rounded-xl bg-black object-cover" />
-          )}
-          <div className="flex gap-2">
-            <button type="button" className="btn-quiet flex-1" onClick={async () => {
-              if (!videoRef.current) return;
-              const canvas = document.createElement('canvas');
-              canvas.width = videoRef.current.videoWidth || 1280;
-              canvas.height = videoRef.current.videoHeight || 720;
-              canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0);
-              const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), 'image/jpeg', 0.9));
-              setPreview(URL.createObjectURL(blob));
-              const up = await api.uploadDispatchPhoto(blob);
-              setPhotoPath(up.photoPath || up.filename || up.path || '');
-              streamRef.current?.getTracks().forEach((t) => t.stop());
-            }}><Camera size={14} /> Capture</button>
-            {preview && <button type="button" className="btn-quiet" onClick={() => { setPreview(''); setPhotoPath(''); }}>Retake</button>}
+    <SleekOverlay
+      open={open}
+      onClose={onClose}
+      title="Register dispatch"
+      subtitle="Courier with letters, parcels or physical mail"
+      icon={<Package size={20} />}
+      size="xl"
+      placement="sheet"
+      contentClassName="max-lg:overflow-y-auto lg:flex lg:flex-col lg:!overflow-hidden"
+      footer={
+        <>
+          <button type="button" className="btn-ghost min-w-[7rem] flex-1" onClick={onClose}>Cancel</button>
+          <button type="submit" form="new-dispatch-form" disabled={busy || !orgIds.length} className="btn-primary min-w-[7rem] flex-1">{busy ? 'Saving…' : 'Register dispatch'}</button>
+        </>
+      }
+    >
+      <form id="new-dispatch-form" onSubmit={submit} className="flex min-h-0 flex-col lg:h-full lg:flex-1">
+        <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:gap-6 lg:overflow-hidden">
+          <div className="min-w-0 space-y-3 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:pb-2" data-overlay-scroll>
+            <label className="block"><span className="label">Courier name</span><input className="input" required value={form.courierName} onChange={(e) => setForm({ ...form, courierName: e.target.value })} /></label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block"><span className="label">Phone</span><input className="input" value={form.courierPhone} onChange={(e) => setForm({ ...form, courierPhone: e.target.value })} /></label>
+              <label className="block"><span className="label">Company</span><input className="input" value={form.courierCompany} onChange={(e) => setForm({ ...form, courierCompany: e.target.value })} /></label>
+            </div>
+            <div>
+              <p className="label">Destination agencies</p>
+              <div className="flex flex-col gap-1 rounded-xl border border-slate-200 p-2">
+                {agencies.map((a) => (
+                  <label key={a.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                    <input type="checkbox" checked={orgIds.includes(a.id)} onChange={() => toggleOrg(a.id)} />
+                    <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <Collapse open={orgIds.length > 0}>
+              <div className="space-y-2">
+                {orgIds.map((id) => (
+                  <HostSuggest
+                    key={id}
+                    organisationId={id}
+                    label={`Host at ${agencies.find((a) => a.id === id)?.name || 'agency'}`}
+                    placeholder="Search staff to notify or ring…"
+                    value={pickedHosts[id] || null}
+                    onChange={(h) => setPickedHosts((cur) => ({ ...cur, [id]: h }))}
+                  />
+                ))}
+              </div>
+            </Collapse>
+            {error && <Notice tone="error">{error}</Notice>}
+          </div>
+          <div className="min-w-0 space-y-3 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:pb-2" data-overlay-scroll>
+            <label className="block"><span className="label">Items (one per line)</span><textarea className="input min-h-[72px] lg:min-h-[120px]" required value={form.items} onChange={(e) => setForm({ ...form, items: e.target.value })} /></label>
+            <div ref={camBox} className="space-y-2">
+              <p className="label">Particulars photo</p>
+              <div className="overflow-hidden rounded-xl bg-black">
+                {preview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={preview} alt="" className="aspect-video h-auto w-full max-h-56 object-cover lg:max-h-[min(240px,32dvh)]" />
+                ) : (
+                  <video ref={videoRef} autoPlay muted playsInline className="aspect-video h-auto w-full max-h-56 bg-black object-cover lg:max-h-[min(240px,32dvh)]" />
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button type="button" className="btn-quiet flex-1" onClick={async () => {
+                  if (!videoRef.current) return;
+                  const canvas = document.createElement('canvas');
+                  canvas.width = videoRef.current.videoWidth || 1280;
+                  canvas.height = videoRef.current.videoHeight || 720;
+                  canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0);
+                  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), 'image/jpeg', 0.9));
+                  setPreview(URL.createObjectURL(blob));
+                  const up = await api.uploadDispatchPhoto(blob);
+                  setPhotoPath(up.photoPath || up.filename || up.path || '');
+                  streamRef.current?.getTracks().forEach((t) => t.stop());
+                  setTimeout(() => scrollIntoOverlay(camBox.current), 80);
+                }}><Camera size={14} /> Capture</button>
+                {preview && <button type="button" className="btn-quiet" onClick={() => { setPreview(''); setPhotoPath(''); }}>Retake</button>}
+              </div>
+            </div>
           </div>
         </div>
-        <div>
-          <p className="label">Destination agencies</p>
-          <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-xl border border-slate-200 p-2">
-            {agencies.map((a) => (
-              <label key={a.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
-                <input type="checkbox" checked={orgIds.includes(a.id)} onChange={() => toggleOrg(a.id)} />
-                <span className="min-w-0 flex-1 truncate">{a.name}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-        <Collapse open={orgIds.length > 0}>
-          <div className="space-y-2">
-            {orgIds.map((id) => (
-              <HostSuggest
-                key={id}
-                organisationId={id}
-                label={`Host at ${agencies.find((a) => a.id === id)?.name || 'agency'}`}
-                placeholder="Search staff to notify or ring…"
-                value={pickedHosts[id] || null}
-                onChange={(h) => setPickedHosts((cur) => ({ ...cur, [id]: h }))}
-              />
-            ))}
-          </div>
-        </Collapse>
-        {error && <Notice tone="error">{error}</Notice>}
-        <button type="submit" disabled={busy || !orgIds.length} className="btn-primary w-full">{busy ? 'Saving…' : 'Register dispatch'}</button>
       </form>
     </SleekOverlay>
   );

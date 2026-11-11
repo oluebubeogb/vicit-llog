@@ -417,3 +417,10 @@ html[data-auth='1'] .auth-reserve { display: flex; }
   -webkit-mask: var(--art-lines) center / cover no-repeat;
   mask: var(--art-lines) center / cover no-repeat;
 }
+
+
+/* Overlay / sheet: 85dvh with a 85vh fallback so the dialog never leaves the viewport. */
+.max-h-overlay {
+  max-height: 85vh;
+  max-height: 85dvh;
+}

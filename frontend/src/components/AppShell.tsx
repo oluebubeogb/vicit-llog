@@ -114,7 +114,9 @@ function DesktopSidebar({
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { pathname, links, unread, mounted, role } = useSessionNav();
+  const { brand } = useBrand();
   const bare = isBarePath(pathname);
+  const mobileStatic = brand.footerCreditMobileMode === 'STATIC';
 
   if (bare) {
     return (
@@ -137,12 +139,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto w-full max-w-lg lg:max-w-6xl">
           <AgencyIdentity />
           {children}
+          {mobileStatic && (
+            <div className="lg:hidden px-4 pb-3 pt-10">
+              <FooterCredit />
+            </div>
+          )}
         </div>
       </main>
       <div className="lg:hidden">
-        <div className="pointer-events-none fixed inset-x-0 bottom-[5.6rem] z-40 px-4 pb-[env(safe-area-inset-bottom)]">
-          <FooterCredit className="pointer-events-auto" />
-        </div>
+        {!mobileStatic && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-[5.6rem] z-40 px-4 pb-[env(safe-area-inset-bottom)]">
+            <FooterCredit className="pointer-events-auto" />
+          </div>
+        )}
         <BottomNav />
       </div>
     </div>

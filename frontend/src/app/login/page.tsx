@@ -23,12 +23,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const logo = login.logoUrl || brand.logoUrl;
+  const logo = login.logoUrl || null;
+  const showLogo = login.showLogo !== false && !!logo;
   const logoWidth = login.logoWidth || '180px';
   const watermark = login.watermarkUrl ? logoSrc(login.watermarkUrl, { fallback: false, version: brand.assetVersion }) : null;
   const title = login.title || brand.name || 'Defence Headquarters';
   const headline = login.headline && login.headline !== title ? login.headline : null;
   const agencies = brand.agencies || [];
+  const mobileStatic = brand.footerCreditMobileMode === 'STATIC';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -79,7 +81,7 @@ export default function LoginPage() {
             <LoginAgencyGrid agencies={agencies} variant="desktop" />
           </div>
         )}
-        <div className="relative mx-auto w-full max-w-sm lg:mx-0">
+        <div className={`relative mx-auto w-full max-w-sm lg:mx-0 ${mobileStatic ? '' : 'pb-12'}`}>
         <div className="animate-in mb-6">
           <InstallBanner variant="login" />
         </div>
@@ -90,21 +92,26 @@ export default function LoginPage() {
           </div>
         )}
 
-        <div className="stagger mb-7 flex flex-col items-center text-center">
-          <div className="relative flex justify-center">
-            <span className="absolute inset-0 animate-pulse-ring rounded-[26px]" />
-            <BrandMark
-              size={96}
-              width={logoWidth}
-              src={logoSrc(logo, { fallback: false, version: brand.assetVersion })}
-              alt={title}
-              className="animate-float !bg-white/95"
-            />
-          </div>
-          <h1 className="mt-5 text-[26px] font-bold tracking-tight">{title}</h1>
+        <div className="stagger mb-6 flex flex-col items-center text-center">
+          <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
           <p className="mt-1 text-sm text-on-brand/70">Visitor access & exit control</p>
           {headline && <p className="mt-0.5 text-xs text-on-brand/60">{headline}</p>}
         </div>
+
+        {showLogo && (
+          <div className="mb-5 flex justify-center">
+            <div className="relative">
+              <span className="absolute inset-0 animate-pulse-ring rounded-[26px]" />
+              <BrandMark
+                size={96}
+                width={logoWidth}
+                src={logoSrc(logo, { fallback: false, version: brand.assetVersion })}
+                alt={title}
+                className="animate-float !bg-white/95"
+              />
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="animate-in relative overflow-hidden rounded-[28px] border border-white/60 bg-white/95 p-6 text-slate-900 shadow-[0_30px_80px_-30px_rgb(2_6_23/0.7)] ring-1 ring-slate-200/80 backdrop-blur-xl">
           <div className="art-dots !opacity-[0.04]" />
@@ -147,9 +154,14 @@ export default function LoginPage() {
         <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-on-brand/60">
           <ShieldCheck size={13} /> Secured, encrypted access
         </p>
-        <FooterCredit light className="mt-4 !text-on-brand/55" />
+        {mobileStatic && <FooterCredit light className="mt-8 !text-on-brand/55" />}
       </div>
       </div>
+      {!mobileStatic && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <FooterCredit light className="pointer-events-auto !text-on-brand/55" />
+        </div>
+      )}
     </div>
   );
 }

@@ -55,6 +55,10 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Africa/Lagos}
+      TURN_URL: ${TURN_URL:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
     volumes:
       - photos_data:/data/photos
       - reports_data:/data/reports

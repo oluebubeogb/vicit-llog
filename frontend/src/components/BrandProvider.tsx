@@ -73,6 +73,7 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
           emailIconBg: agency?.emailIconBg || DEFAULT_BRANDING.emailIconBg,
           footerCredit: agency?.footerCredit ?? DEFAULT_BRANDING.footerCredit,
           footerCreditEnabled: agency?.footerCreditEnabled !== false,
+          footerCreditMobileMode: agency?.footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
           assetVersion: agency?.assetVersion || DEFAULT_BRANDING.assetVersion,
         }, identityScope());
       } else {
@@ -90,6 +91,7 @@ export default function BrandProvider({ children }: { children: ReactNode }) {
             login,
             footerCredit: pub.footerCredit ?? DEFAULT_BRANDING.footerCredit,
             footerCreditEnabled: pub.footerCreditEnabled !== false,
+            footerCreditMobileMode: pub.footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
             assetVersion: pub.assetVersion || DEFAULT_BRANDING.assetVersion,
           }, 'public');
         }

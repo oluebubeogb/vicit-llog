@@ -21,8 +21,10 @@ import {
   Eye,
   EyeOff,
   GripVertical,
+  Minus,
 } from 'lucide-react';
 import LoginAgencyGrid from '@/components/LoginAgencyGrid';
+import SleekOverlay from '@/components/ui/SleekOverlay';
 import PageHeader from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/Tooltip';
 import { Notice, SkeletonList } from '@/components/ui/Bits';
@@ -171,6 +173,9 @@ export default function BrandingPage() {
     photoRetentionDays: 90,
   });
   const [initial, setInitial] = useState<typeof form | null>(null);
+  const isSa = viewer?.role === 'SUPER_ADMIN';
+  const [contractorMinDurationDays, setContractorMinDurationDays] = useState(1);
+  const [contractorMinDaysInitial, setContractorMinDaysInitial] = useState(1);
   const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -197,6 +202,13 @@ export default function BrandingPage() {
         setInitial(f);
       })
       .finally(() => setLoading(false));
+    if (viewer?.role === 'SUPER_ADMIN') {
+      api.platformBranding().then((b) => {
+        const days = b.contractorMinDurationDays ?? 1;
+        setContractorMinDurationDays(days);
+        setContractorMinDaysInitial(days);
+      }).catch(() => {});
+    }
     // restore the saved brand if the admin leaves with an unsaved live preview
     return () => applyBranding(brandRef.current);
   }, []);
@@ -216,7 +228,7 @@ export default function BrandingPage() {
     }
   }, [form.primaryColor, form.secondaryColor, form.primaryTextColor, loading]);
 
-  const dirty = initial && JSON.stringify(initial) !== JSON.stringify(form);
+  const dirty = (initial && JSON.stringify(initial) !== JSON.stringify(form)) || (isSa && contractorMinDurationDays !== contractorMinDaysInitial);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -234,6 +246,10 @@ export default function BrandingPage() {
         requireDispatchHostApproval: form.requireDispatchHostApproval,
         photoRetentionDays: form.photoRetentionDays,
       });
+      if (isSa) {
+        await api.updatePlatformBranding({ contractorMinDurationDays });
+        setContractorMinDaysInitial(contractorMinDurationDays);
+      }
       setInitial(form);
       await refresh();
       window.dispatchEvent(new Event('vicit-brand-updated'));
@@ -435,6 +451,22 @@ export default function BrandingPage() {
               <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${form.requireDispatchHostApproval ? 'left-6' : 'left-1'}`} />
             </span>
           </button>
+          {isSa && (
+            <label className="block">
+              <span className="label">
+                Minimum contractor pass (days)
+                <InfoTip text="Platform-wide. A contractor ID card must be valid for at least this many days. Applies to every agency." size={12} />
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={contractorMinDurationDays}
+                onChange={(e) => setContractorMinDurationDays(Math.max(1, Math.min(365, parseInt(e.target.value) || 1)))}
+                className="input !w-28"
+              />
+            </label>
+          )}
           <label className="block">
             <span className="label">
               <Clock size={14} /> Photo retention
@@ -450,7 +482,7 @@ export default function BrandingPage() {
 
         <div className="fixed inset-x-0 bottom-[calc(var(--nav-height)+max(0.6rem,var(--safe-bottom))+0.5rem)] z-40 px-4">
           <div className={`mx-auto flex max-w-lg gap-2 rounded-2xl border border-white/70 bg-white/85 p-2 shadow-lift backdrop-blur-xl transition duration-300 ${dirty ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-4 opacity-0'}`}>
-            <button type="button" className="btn-ghost" onClick={() => initial && setForm(initial)}>
+            <button type="button" className="btn-ghost" onClick={() => { if (initial) setForm(initial); setContractorMinDurationDays(contractorMinDaysInitial); }}>
               <RotateCcw size={15} /> Reset
             </button>
             <button type="submit" disabled={saving} className="btn-primary flex-1">
@@ -478,14 +510,17 @@ function SignInSettings() {
     loginSecondaryColor: '',
     footerCredit: "Powered by CISTECH's Vicit 1.0.1",
     footerCreditEnabled: true,
-    contractorMinDurationDays: 1,
+    footerCreditMobileMode: 'FLOATING' as 'FLOATING' | 'STATIC',
     loginTitle: 'Defence Headquarters',
+    loginLogoVisible: true,
   });
   const [agencies, setAgencies] = useState<any[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState('');
+  const [clearLogoOpen, setClearLogoOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const logoRef = useRef<HTMLInputElement>(null);
   const markRef = useRef<HTMLInputElement>(null);
 
@@ -503,8 +538,9 @@ function SignInSettings() {
         loginSecondaryColor: b.loginSecondaryColor || '',
         footerCredit: b.footerCredit || "Powered by CISTECH's Vicit 1.0.1",
         footerCreditEnabled: b.footerCreditEnabled !== false,
-        contractorMinDurationDays: b.contractorMinDurationDays ?? 1,
+        footerCreditMobileMode: b.footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
         loginTitle: b.loginTitle || 'Defence Headquarters',
+        loginLogoVisible: b.loginLogoVisible !== false,
       });
       if (Array.isArray(b.agencies)) setAgencies(b.agencies);
     }).catch(() => {});
@@ -517,7 +553,12 @@ function SignInSettings() {
     try {
       await api.updatePlatformBranding({
         ...form,
-        agencies: agencies.map((a, i) => ({ id: a.id, loginOrder: i, loginVisible: a.loginVisible !== false })),
+        agencies: agencies.map((a, i) => ({
+          id: a.id,
+          loginOrder: i,
+          loginVisible: a.loginVisible !== false,
+          loginTileColor: a.loginTileColor || null,
+        })),
       });
       window.dispatchEvent(new Event('vicit-brand-updated'));
       setMsg({ tone: 'success', text: 'Sign-in page and footer credit are live on every device.' });
@@ -559,22 +600,50 @@ function SignInSettings() {
           <input value={form.loginHeadline} onChange={(e) => setForm({ ...form, loginHeadline: e.target.value })} className="input" placeholder="Optional — shown under the title if different" maxLength={120} />
         </label>
         <div className="flex items-center gap-4">
-          <button type="button" onClick={() => logoRef.current?.click()} className="group relative flex h-20 min-w-[5rem] items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-brand-200 bg-white px-3 transition hover:border-brand-400">
-            {form.loginLogoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={logoSrc(form.loginLogoUrl) || ''} alt="Sign-in logo" className="max-h-16 max-w-[6rem] object-contain" />
-            ) : (
-              <ImagePlus className="text-brand-300" size={28} />
+          <div className="relative">
+            <button type="button" onClick={() => logoRef.current?.click()} className="group relative flex h-20 min-w-[5rem] items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-brand-200 bg-white px-3 transition hover:border-brand-400">
+              {form.loginLogoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoSrc(form.loginLogoUrl) || ''} alt="Sign-in logo" className="max-h-16 max-w-[6rem] object-contain" />
+              ) : (
+                <ImagePlus className="text-brand-300" size={28} />
+              )}
+            </button>
+            {form.loginLogoUrl && (
+              <button
+                type="button"
+                title="Remove sign-in logo"
+                aria-label="Remove sign-in logo"
+                onClick={() => setClearLogoOpen(true)}
+                className="absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+              >
+                <Minus size={12} strokeWidth={3} />
+              </button>
             )}
-          </button>
+          </div>
           <div className="min-w-0 flex-1">
             <button type="button" onClick={() => logoRef.current?.click()} disabled={uploading === 'logo'} className="btn-ghost">
               <ImagePlus size={16} /> {uploading === 'logo' ? 'Uploading…' : 'Upload sign-in logo'}
             </button>
-            <p className="mt-1 text-xs text-slate-400">Wide or square marks are both fine — set the width below.</p>
+            <p className="mt-1 text-xs text-slate-400">Wide or square marks are both fine — set the width below. Use the − button to remove an uploaded logo so the sign-in form has no mark above it.</p>
             <input ref={logoRef} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile('logo', e.target.files[0])} />
           </div>
         </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={form.loginLogoVisible}
+          onClick={() => setForm({ ...form, loginLogoVisible: !form.loginLogoVisible })}
+          className="tile flex w-full items-center justify-between gap-3 text-left"
+        >
+          <span>
+            <span className="block text-sm font-semibold text-slate-800">Show logo above sign-in form</span>
+            <span className="mt-0.5 block text-[11px] text-slate-500">Hide it without deleting the upload. When shown, the logo sits centred directly above the form.</span>
+          </span>
+          <span className={`relative h-7 w-12 shrink-0 rounded-full transition ${form.loginLogoVisible ? 'bg-gradient-to-r from-brand-500 to-brand-700' : 'bg-slate-200'}`}>
+            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${form.loginLogoVisible ? 'left-6' : 'left-1'}`} />
+          </span>
+        </button>
         <label className="block">
           <span className="label">Logo width <InfoTip text="Accepts px, %, vw or rem. Use a wider value for logos that lean towards imagery." size={12} /></span>
           <input value={form.loginLogoWidth} onChange={(e) => setForm({ ...form, loginLogoWidth: e.target.value })} className="input font-mono" placeholder="180px" />
@@ -598,7 +667,7 @@ function SignInSettings() {
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
           <p className="label mb-1">Agency logo grid</p>
-          <p className="mb-3 text-[11px] text-slate-500">Drag to reorder (or use the arrows). Hidden agencies stay off the sign-in page. The preview below updates live.</p>
+          <p className="mb-3 text-[11px] text-slate-500">Drag to reorder (or use the arrows). Hidden agencies stay off the sign-in page. Set a tile background, or Auto for the default glass / brand style. The preview below updates live.</p>
           <ul className="space-y-1.5">
             {agencies.map((a, i) => (
               <li
@@ -617,10 +686,40 @@ function SignInSettings() {
                   });
                   setDragId(null);
                 }}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5"
+                className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5"
               >
                 <span className="cursor-grab text-slate-400" aria-hidden><GripVertical size={15} /></span>
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{a.shortName || a.name}</span>
+                <span className="flex items-center gap-1.5" onPointerDown={(e) => e.stopPropagation()} draggable={false}>
+                  <span
+                    className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md border border-slate-200 shadow-inner"
+                    style={{ background: a.loginTileColor || 'linear-gradient(145deg, rgb(var(--brand-500)), rgb(var(--brand-800)))' }}
+                    title="Tile background"
+                  >
+                    <input
+                      type="color"
+                      aria-label={`Tile colour for ${a.shortName || a.name}`}
+                      value={a.loginTileColor || '#2563eb'}
+                      onChange={(e) => setAgencies((list) => list.map((x) => x.id === a.id ? { ...x, loginTileColor: e.target.value } : x))}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    />
+                  </span>
+                  <input
+                    value={a.loginTileColor || ''}
+                    placeholder="Auto"
+                    maxLength={7}
+                    aria-label={`Tile colour hex for ${a.shortName || a.name}`}
+                    onChange={(e) => setAgencies((list) => list.map((x) => x.id === a.id ? { ...x, loginTileColor: e.target.value } : x))}
+                    className="w-[5.5rem] rounded-lg border border-slate-200 bg-white px-1.5 py-1 font-mono text-[11px] uppercase text-slate-700 outline-none focus:border-brand-300"
+                  />
+                  <button
+                    type="button"
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${a.loginTileColor ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-brand-50 text-brand-700 ring-1 ring-brand-200'}`}
+                    onClick={() => setAgencies((list) => list.map((x) => x.id === a.id ? { ...x, loginTileColor: null } : x))}
+                  >
+                    Auto
+                  </button>
+                </span>
                 <button type="button" className="rounded-md p-1 text-slate-500 hover:bg-slate-100" aria-label="Move up" disabled={i === 0} onClick={() => setAgencies((list) => { const n = [...list]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })}>
                   <ChevronUp size={15} />
                 </button>
@@ -660,16 +759,56 @@ function SignInSettings() {
           </span>
         </button>
         <input value={form.footerCredit} onChange={(e) => setForm({ ...form, footerCredit: e.target.value })} className="input" maxLength={160} />
-        <label className="block">
-          <span className="label">Minimum contractor pass (days)</span>
-          <input type="number" min={1} max={365} value={form.contractorMinDurationDays} onChange={(e) => setForm({ ...form, contractorMinDurationDays: parseInt(e.target.value) || 1 })} className="input !w-28" />
-        </label>
+        <div>
+          <p className="label">Mobile placement</p>
+          <p className="mb-2 text-[11px] text-slate-500">Floating sits just above the bottom navigation. Static is a regular footer at the bottom of the page content, clear of the nav.</p>
+          <div className="segmented">
+            <button type="button" data-active={form.footerCreditMobileMode !== 'STATIC'} onClick={() => setForm({ ...form, footerCreditMobileMode: 'FLOATING' })}>Floating</button>
+            <button type="button" data-active={form.footerCreditMobileMode === 'STATIC'} onClick={() => setForm({ ...form, footerCreditMobileMode: 'STATIC' })}>Static</button>
+          </div>
+        </div>
       </Section>
 
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       <button type="submit" disabled={saving} className="btn-primary w-full">
         <Save size={16} /> {saving ? 'Saving…' : 'Save sign-in page'}
       </button>
+
+      <SleekOverlay
+        open={clearLogoOpen}
+        onClose={() => !clearing && setClearLogoOpen(false)}
+        tone="rose"
+        title="Remove sign-in logo"
+        subtitle="The logo will be cleared. The sign-in page will show no mark above the form — only the agency tiles, if any."
+        icon={<Minus size={20} />}
+        footer={
+          <>
+            <button type="button" className="btn-quiet flex-1" disabled={clearing} onClick={() => setClearLogoOpen(false)}>Cancel</button>
+            <button
+              type="button"
+              className="btn-primary flex-1 !bg-rose-600 hover:!bg-rose-700"
+              disabled={clearing}
+              onClick={async () => {
+                setClearing(true);
+                setMsg(null);
+                try {
+                  await api.updatePlatformBranding({ loginLogoUrl: null });
+                  setForm((f) => ({ ...f, loginLogoUrl: '' }));
+                  window.dispatchEvent(new Event('vicit-brand-updated'));
+                  setClearLogoOpen(false);
+                  setMsg({ tone: 'success', text: 'Sign-in logo removed. The form will have no logo above it.' });
+                } catch (err: any) {
+                  setMsg({ tone: 'error', text: err.message || 'Could not remove the logo' });
+                } finally {
+                  setClearing(false);
+                }
+              }}
+            >
+              {clearing ? 'Removing…' : 'Remove logo'}
+            </button>
+          </>
+        }
+      />
     </form>
   );
 }

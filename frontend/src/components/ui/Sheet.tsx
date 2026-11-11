@@ -47,12 +47,20 @@ export default function Sheet({
 
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const body = document.body;
+    const html = document.documentElement;
+    const prevBody = body.style.overflow;
+    const prevHtml = html.style.overflow;
+    const prevOverscroll = body.style.overscrollBehavior;
+    body.style.overflow = 'hidden';
+    html.style.overflow = 'hidden';
+    body.style.overscrollBehavior = 'none';
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
     return () => {
-      document.body.style.overflow = prev;
+      body.style.overflow = prevBody;
+      html.style.overflow = prevHtml;
+      body.style.overscrollBehavior = prevOverscroll;
       document.removeEventListener('keydown', onKey);
     };
   }, [open, onClose]);
@@ -79,7 +87,7 @@ export default function Sheet({
       {open && (
         <motion.div
           key="sheet-root"
-          className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center sm:p-4"
+          className="fixed inset-0 z-[90] flex items-end justify-center overflow-hidden sm:items-center sm:p-4"
           initial="closed"
           animate="open"
           exit="closed"
@@ -106,13 +114,14 @@ export default function Sheet({
               closed: { y: reduce ? 0 : '18%', opacity: 0, scale: reduce ? 1 : 0.97 },
             }}
             transition={{ type: 'spring', damping: 30, stiffness: 320, mass: 0.9 }}
-            className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-t-[28px] border border-white/70 bg-white shadow-[0_-20px_60px_-20px_rgb(15_23_42/0.45)] sm:rounded-[28px] ${
+            data-overlay-dialog
+            className={`relative flex w-full min-h-0 min-w-0 max-h-overlay flex-col overflow-hidden overflow-x-hidden rounded-t-[28px] border border-white/70 bg-white shadow-[0_-20px_60px_-20px_rgb(15_23_42/0.45)] sm:w-[min(100%,92vw)] sm:rounded-[28px] ${
               size === 'lg' ? 'max-w-2xl' : 'max-w-lg'
             }`}
           >
             {/* header artwork */}
             <div className={`pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b ${toneBg[tone]}`} />
-            <div className="art-dots !-z-0 h-36 opacity-[0.07]" />
+            <div className="art-dots pointer-events-none absolute inset-x-0 top-0 h-36 opacity-[0.07]" />
             <div
               onPointerDown={(e) => drag.start(e)}
               className="relative flex h-6 shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing sm:hidden"
@@ -122,7 +131,7 @@ export default function Sheet({
             {(c.title || c.icon || c.leading) && (
               <motion.div
                 onPointerDown={(e) => drag.start(e)}
-                className="relative flex touch-none items-start gap-3 px-5 pb-3 pt-1 sm:pt-5"
+                className="relative flex shrink-0 touch-none items-start gap-3 px-5 pb-3 pt-1 sm:pt-5"
                 variants={{ open: { opacity: 1, y: 0 }, closed: { opacity: 0, y: -6 } }}
                 transition={{ delay: 0.06, duration: 0.3 }}
               >
@@ -149,14 +158,15 @@ export default function Sheet({
               </motion.div>
             )}
             <motion.div
-              className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+              data-overlay-scroll
+              className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
               variants={{ open: { opacity: 1, y: 0 }, closed: { opacity: 0, y: 10 } }}
               transition={{ delay: 0.1, duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
             >
               {c.children}
             </motion.div>
             {c.footer && (
-              <div className="relative border-t border-slate-100 bg-gradient-to-b from-white to-slate-50 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <div className="relative shrink-0 border-t border-slate-100 bg-gradient-to-b from-white to-slate-50 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                 {c.footer}
               </div>
             )}

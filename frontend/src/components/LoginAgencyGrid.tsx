@@ -1,7 +1,7 @@
 'use client';
 
 import { motion, useReducedMotion } from 'framer-motion';
-import { logoSrc } from '@/lib/brand';
+import { autoOnPrimaryColor, logoSrc } from '@/lib/brand';
 
 export type LoginAgency = {
   id: string;
@@ -11,6 +11,7 @@ export type LoginAgency = {
   logoUrl?: string | null;
   primaryColor?: string | null;
   loginVisible?: boolean;
+  loginTileColor?: string | null;
 };
 
 const BLOBS = [
@@ -61,7 +62,12 @@ export default function LoginAgencyGrid({
     >
       {visible.map((a, i) => {
         const src = logoSrc(a.logoUrl, { fallback: false });
-        const color = a.primaryColor || 'rgb(var(--brand-600))';
+        const custom = a.loginTileColor && a.loginTileColor.trim() ? a.loginTileColor.trim() : '';
+        const color = custom || a.primaryColor || 'rgb(var(--brand-600))';
+        const ink = custom ? autoOnPrimaryColor(custom) : '#ffffff';
+        const background = custom
+          ? `linear-gradient(145deg, ${custom}, color-mix(in srgb, ${custom} 82%, #0f172a))`
+          : `linear-gradient(145deg, ${color}, color-mix(in srgb, ${color} 70%, #0f172a))`;
         return (
           <motion.div
             key={a.id}
@@ -74,7 +80,7 @@ export default function LoginAgencyGrid({
               className={`relative overflow-hidden ${tile} ${mobile ? '' : 'shadow-[0_18px_40px_-18px_rgb(2_6_23/0.55)]'}`}
               style={{
                 borderRadius: BLOBS[i % BLOBS.length],
-                background: `linear-gradient(145deg, ${color}, color-mix(in srgb, ${color} 70%, #0f172a))`,
+                background,
               }}
               animate={
                 reduce
@@ -88,12 +94,12 @@ export default function LoginAgencyGrid({
               }
               whileHover={reduce || mobile ? undefined : { y: -6, scale: 1.06 }}
             >
-              <span className="pointer-events-none absolute inset-0 bg-white/15" />
+              <span className={`pointer-events-none absolute inset-0 ${custom ? 'bg-white/10' : 'bg-white/15'}`} />
               {src ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={src} alt="" className="relative h-full w-full object-cover p-2" />
               ) : (
-                <span className="relative flex h-full w-full items-center justify-center px-1 text-center font-bold tracking-wide text-white drop-shadow-sm" style={{ fontSize: mobile || preview ? 11 : 20 }}>
+                <span className="relative flex h-full w-full items-center justify-center px-1 text-center font-bold tracking-wide drop-shadow-sm" style={{ fontSize: mobile || preview ? 11 : 20, color: ink }}>
                   {monogram(a)}
                 </span>
               )}

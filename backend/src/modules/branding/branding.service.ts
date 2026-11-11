@@ -95,6 +95,7 @@ export class BrandingService {
       emailIconBg: org.emailIconBg && org.emailIconBg.toLowerCase() !== '#ffffff' ? org.emailIconBg : platform?.emailIconBg || org.emailIconBg || '#ffffff',
       footerCredit: settings.footerCredit,
       footerCreditEnabled: settings.footerCreditEnabled,
+      footerCreditMobileMode: (settings as any).footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
       assetVersion: settings.assetVersion || APP_VERSION,
       contractorMinDurationDays: settings.contractorMinDurationDays,
     };
@@ -124,15 +125,17 @@ export class BrandingService {
       updatedAt: settings.updatedAt || org?.updatedAt || null,
       footerCredit: settings.footerCredit,
       footerCreditEnabled: settings.footerCreditEnabled,
+      footerCreditMobileMode: (settings as any).footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
       assetVersion: settings.assetVersion || APP_VERSION,
       login: {
-        logoUrl: settings.loginLogoUrl || org?.logoUrl || null,
+        logoUrl: settings.loginLogoUrl || null,
         logoWidth: settings.loginLogoWidth || '180px',
         watermarkUrl: settings.loginWatermarkUrl || null,
         watermarkWidth: settings.loginWatermarkWidth || '70vw',
         watermarkHeight: settings.loginWatermarkHeight || '70vh',
         watermarkOpacity: settings.loginWatermarkOpacity ?? 0.08,
         title,
+        showLogo: (settings as any).loginLogoVisible !== false,
         headline: settings.loginHeadline || title,
         primaryColor: settings.loginPrimaryColor || org?.primaryColor || '#2563eb',
         secondaryColor: settings.loginSecondaryColor || org?.secondaryColor || '#1e40af',
@@ -144,13 +147,13 @@ export class BrandingService {
   /** Public (visible only) or admin (all) list of agencies for the login grid. */
   async loginAgencies(includeHidden = false) {
     const rows = await this.prisma.organisation.findMany({
-      select: { id: true, name: true, code: true, shortName: true, logoUrl: true, primaryColor: true, secondaryColor: true, loginOrder: true, loginVisible: true },
+      select: { id: true, name: true, code: true, shortName: true, logoUrl: true, primaryColor: true, secondaryColor: true, loginOrder: true, loginVisible: true, loginTileColor: true },
       orderBy: [{ loginOrder: 'asc' }, { name: 'asc' }],
     });
     return includeHidden ? rows : rows.filter((r) => r.loginVisible !== false);
   }
 
-  async updateLoginAgencies(items: Array<{ id: string; loginOrder?: number; loginVisible?: boolean; shortName?: string | null }>) {
+  async updateLoginAgencies(items: Array<{ id: string; loginOrder?: number; loginVisible?: boolean; shortName?: string | null; loginTileColor?: string | null }>) {
     if (!Array.isArray(items)) throw new BadRequestException('Agency list is required');
     for (const [i, item] of items.entries()) {
       if (!item?.id) continue;
@@ -161,6 +164,11 @@ export class BrandingService {
       if (item.shortName !== undefined) {
         const n = item.shortName == null ? null : String(item.shortName).trim().slice(0, 40);
         data.shortName = n || null;
+      }
+      if (item.loginTileColor !== undefined) {
+        const raw = item.loginTileColor == null ? '' : String(item.loginTileColor).trim();
+        if (!raw || raw.toLowerCase() === 'auto') data.loginTileColor = null;
+        else data.loginTileColor = normHex(raw, 'Tile background');
       }
       if (Object.keys(data).length) {
         await this.prisma.organisation.update({ where: { id: item.id }, data }).catch(() => {
@@ -262,6 +270,7 @@ export class BrandingService {
       if (t.length > 120) throw new BadRequestException('Sign-in title must be 120 characters or fewer');
       data.loginTitle = t || 'Defence Headquarters';
     }
+    if (body.loginLogoVisible !== undefined) data.loginLogoVisible = body.loginLogoVisible !== false;
     if (body.loginPrimaryColor !== undefined) {
       const raw = body.loginPrimaryColor;
       data.loginPrimaryColor = raw === null || raw === '' ? null : normHex(raw, 'Sign-in primary colour');
@@ -276,6 +285,13 @@ export class BrandingService {
       data.footerCredit = c || "Powered by CISTECH's Vicit 1.0.1";
     }
     if (body.footerCreditEnabled !== undefined) data.footerCreditEnabled = Boolean(body.footerCreditEnabled);
+    if (body.footerCreditMobileMode !== undefined) {
+      const mode = String(body.footerCreditMobileMode || '').trim().toUpperCase();
+      if (mode !== 'FLOATING' && mode !== 'STATIC') {
+        throw new BadRequestException('Mobile placement must be FLOATING or STATIC');
+      }
+      data.footerCreditMobileMode = mode;
+    }
     if (body.contractorMinDurationDays !== undefined) {
       const n = parseInt(String(body.contractorMinDurationDays), 10);
       if (!Number.isFinite(n) || n < 1 || n > 365) throw new BadRequestException('Minimum contractor duration must be 1–365 days');

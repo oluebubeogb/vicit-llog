@@ -75,6 +75,32 @@ vicit-llog/
 ```
 
 
+## Voice calls: TURN server
+
+Gate and dispatch rings use WebRTC. A public STUN server (`stun:stun.l.google.com:19302`) is always offered. On strict NATs or corporate firewalls that is often not enough — those calls need a **TURN** relay.
+
+Set these on the **backend** (Coolify / `.env` / `docker-compose` environment):
+
+| Variable | Purpose |
+| --- | --- |
+| `TURN_URL` | One or more TURN URIs, **comma-separated**. |
+| `TURN_USERNAME` | TURN username (`lt-cred-mech`). |
+| `TURN_CREDENTIAL` | TURN password / credential. |
+
+Example (replace the host with your coturn hostname):
+
+```bash
+TURN_URL=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:5349?transport=tcp
+TURN_USERNAME=vicit
+TURN_CREDENTIAL=your-turn-password
+```
+
+The API splits `TURN_URL` on commas and passes the list as `iceServers[].urls`, with the username and credential attached. Leave the variables empty to use STUN only.
+
+A standalone coturn Docker Compose project is the recommended way to run the relay (its own git repo and Coolify project, `network_mode: host`, ports 3478/tcp+udp, 5349/tcp, and the UDP relay range). Traefik cannot proxy UDP, so TURN must be reached directly — not through the HTTP proxy.
+
+After deploying, confirm relay candidates with [Trickle ICE](https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/).
+
 ## Gate QR scanning (iPhone / Android / desktop)
 
 * The gate scanner works on iOS Safari, iOS home-screen (PWA) mode (iOS 13.4+), Android Chrome,

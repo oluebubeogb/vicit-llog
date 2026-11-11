@@ -11,6 +11,7 @@ export type LoginBranding = {
   watermarkOpacity?: number | null;
   headline?: string | null;
   title?: string | null;
+  showLogo?: boolean;
   primaryColor?: string | null;
   secondaryColor?: string | null;
 };
@@ -27,6 +28,7 @@ export type PublicBranding = {
   updatedAt?: string | null;
   footerCredit?: string | null;
   footerCreditEnabled?: boolean;
+  footerCreditMobileMode?: 'FLOATING' | 'STATIC' | null;
   assetVersion?: string | null;
   login?: LoginBranding | null;
   agencies?: Array<{
@@ -39,6 +41,7 @@ export type PublicBranding = {
     secondaryColor?: string | null;
     loginOrder?: number;
     loginVisible?: boolean;
+    loginTileColor?: string | null;
   }>;
 };
 
@@ -52,6 +55,7 @@ export const DEFAULT_BRANDING: PublicBranding = {
   emailIconBg: '#ffffff',
   footerCredit: "Powered by CISTECH's Vicit 1.0.1",
   footerCreditEnabled: true,
+  footerCreditMobileMode: 'FLOATING',
   assetVersion: APP_VERSION,
   login: null,
 };
@@ -67,6 +71,7 @@ export const NEUTRAL_BRANDING: PublicBranding = {
   emailIconBg: '#ffffff',
   footerCredit: "Powered by CISTECH's Vicit 1.0.1",
   footerCreditEnabled: true,
+  footerCreditMobileMode: 'FLOATING',
   assetVersion: APP_VERSION,
   login: null,
 };
