@@ -23,7 +23,7 @@ const BRANDING_SELECT = {
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const SIZE = /^\d+(\.\d+)?(px|%|vh|vw|em|rem)$/i;
-export const APP_VERSION = '1.0.1-v17';
+export const APP_VERSION = '1.0.1-v18';
 
 function normHex(v: unknown, field: string): string {
   const s = String(v || '').trim();
@@ -54,8 +54,23 @@ export class BrandingService {
     return dir;
   }
 
+  /**
+   * The platform owner (Defence Headquarters) organisation, resolved deterministically:
+   * 1. the organisation whose code matches ORGANIZATION_CODE (the one the deploy seed creates),
+   * 2. otherwise the organisation of the oldest active Super Admin.
+   * Never "any" Super Admin — an unordered pick could land on an agency (e.g. Air Force).
+   */
   async platformOwnerOrgId(): Promise<string | null> {
-    const platformAdmin = await this.prisma.user.findFirst({ where: { role: 'SUPER_ADMIN' }, select: { organisationId: true } });
+    const code = (process.env.ORGANIZATION_CODE || '').trim();
+    if (code) {
+      const byCode = await this.prisma.organisation.findUnique({ where: { code }, select: { id: true } });
+      if (byCode) return byCode.id;
+    }
+    const platformAdmin = await this.prisma.user.findFirst({
+      where: { role: 'SUPER_ADMIN' },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+      select: { organisationId: true },
+    });
     return platformAdmin?.organisationId || null;
   }
 
