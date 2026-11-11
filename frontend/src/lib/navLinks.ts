@@ -91,23 +91,24 @@ export function buildSidebarLinks(role?: string | null, permissions: string[] = 
     return [L.home, L.invite, L.visitors, L.alerts, L.dispatch, L.contractors, L.attendance, L.profile];
   }
   if (role === 'GATE' || role === 'GLOBAL_GATE') {
-    return [L.scan, L.invite, L.dispatch, L.visits, L.contractors, L.alerts, L.profile];
+    return [L.scan, L.invite, L.visits, L.alerts, L.dispatch, L.contractors, L.profile];
   }
   return buildNavLinks(role, permissions);
 }
 
 /** Mobile footer (max ~5) plus overflow items for the More sheet. */
 export function buildMobileNav(role?: string | null, permissions: string[] = []): { primary: AppNavLink[]; more: AppNavLink[] } {
+  // Primary order is Platform, Gate, (More is inserted here), Alerts, Profile.
   if (role === 'SUPER_ADMIN') {
     return {
-      primary: [L.platform, L.alerts, L.gate, L.profile],
+      primary: [L.platform, L.gate, L.alerts, L.profile],
       more: [L.invite, L.visits, L.dispatch, L.contractors, L.attendance],
     };
   }
   if (role === 'GLOBAL_ADMIN') {
     const visits = permissions.includes('visits.view') ? [L.visits] : [];
     return {
-      primary: [L.platform, L.alerts, L.profile],
+      primary: [L.platform, L.gate, L.alerts, L.profile],
       more: [L.invite, ...visits, L.dispatch, L.contractors, L.attendance],
     };
   }

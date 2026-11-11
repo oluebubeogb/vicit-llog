@@ -115,7 +115,7 @@ export class BrandingController {
   @Header('Cache-Control', 'no-store, no-cache, must-revalidate')
   @ApiOperation({ summary: 'Get organisation branding & settings' })
   get(@CurrentUser() user: any) {
-    return this.branding.get(user.orgId);
+    return this.branding.getForUser(user);
   }
 
   @Patch()

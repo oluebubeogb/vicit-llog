@@ -23,7 +23,7 @@ const BRANDING_SELECT = {
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const SIZE = /^\d+(\.\d+)?(px|%|vh|vw|em|rem)$/i;
-export const APP_VERSION = '1.0.1-v15';
+export const APP_VERSION = '1.0.1-v16';
 
 function normHex(v: unknown, field: string): string {
   const s = String(v || '').trim();
@@ -71,6 +71,20 @@ export class BrandingService {
     const settings = await this.ensurePlatform();
     const agencies = await this.loginAgencies(true);
     return { ...settings, loginTitle: (settings as any).loginTitle || 'Defence Headquarters', agencies };
+  }
+
+  /**
+   * Super Admin, Super Admin II and Super Gate Officers all wear the platform
+   * (Defence Headquarters) branding — not the agency they may be attached to.
+   */
+  async getForUser(user: { orgId?: string; role?: string }) {
+    const platformRoles = ['SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'];
+    let orgId = user?.orgId;
+    if (platformRoles.includes(String(user?.role || ''))) {
+      orgId = (await this.platformOwnerOrgId()) || orgId;
+    }
+    if (!orgId) throw new NotFoundException('Organisation not found');
+    return this.get(orgId);
   }
 
   async get(orgId: string) {

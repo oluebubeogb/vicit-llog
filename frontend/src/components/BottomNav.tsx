@@ -66,9 +66,9 @@ export default function BottomNav() {
   const slots: Array<AppNavLink | { href: '__more__'; icon: typeof Ellipsis; label: string; exact?: boolean; badge?: boolean }> =
     more.length
       ? [
-          ...primary.slice(0, Math.ceil(primary.length / 2)),
+          ...primary.slice(0, Math.floor(primary.length / 2)),
           { href: '__more__', icon: Ellipsis, label: 'More' },
-          ...primary.slice(Math.ceil(primary.length / 2)),
+          ...primary.slice(Math.floor(primary.length / 2)),
         ]
       : primary;
 

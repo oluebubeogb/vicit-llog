@@ -28,6 +28,8 @@ export default function DispatchPage() {
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState('');
+  const [confirm, setConfirm] = useState<{ dispatch: any; action: 'DELIVERED' | 'EXITED' } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   async function load() {
     setError('');
@@ -39,8 +41,19 @@ export default function DispatchPage() {
   async function decide(id: string, organisationId: string, approve: boolean) {
     try { await api.decideDispatch(id, { organisationId, approve }); await load(); } catch (e: any) { setError(e.message); }
   }
-  async function mark(id: string, s: string) {
-    try { await api.markDispatch(id, s); await load(); } catch (e: any) { setError(e.message); }
+  async function confirmMark() {
+    if (!confirm) return;
+    setConfirmBusy(true);
+    setError('');
+    try {
+      await api.markDispatch(confirm.dispatch.id, confirm.action);
+      setConfirm(null);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setConfirmBusy(false);
+    }
   }
   async function ring(id: string, hostId: string) {
     try { const call = await api.startDispatchRing(id, hostId); window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call })); } catch (e: any) { setError(e.message); }
@@ -105,8 +118,8 @@ export default function DispatchPage() {
             </div>
             {isGate && d.status !== 'EXITED' && d.status !== 'DECLINED' && (
               <div className="mt-3 flex gap-2">
-                {d.status !== 'DELIVERED' && <button type="button" className="btn-quiet flex-1 !py-2 text-xs" onClick={() => mark(d.id, 'DELIVERED')}>Mark delivered</button>}
-                <button type="button" className="btn-quiet flex-1 !py-2 text-xs" onClick={() => mark(d.id, 'EXITED')}>Courier left</button>
+                {d.status !== 'DELIVERED' && <button type="button" className="btn-quiet flex-1 !py-2 text-xs" onClick={() => setConfirm({ dispatch: d, action: 'DELIVERED' })}>Mark delivered</button>}
+                <button type="button" className="btn-quiet flex-1 !py-2 text-xs" onClick={() => setConfirm({ dispatch: d, action: 'EXITED' })}>Courier left</button>
               </div>
             )}
           </li>
@@ -114,7 +127,78 @@ export default function DispatchPage() {
       </ul>
       {rows && !rows.length && <p className="py-10 text-center text-sm text-slate-500">No dispatches yet.</p>}
       <NewDispatch open={open} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); load(); }} />
+      <DispatchMarkConfirm
+        confirm={confirm}
+        busy={confirmBusy}
+        error={error}
+        onClose={() => { if (!confirmBusy) setConfirm(null); }}
+        onConfirm={confirmMark}
+      />
     </div>
+  );
+}
+
+function DispatchMarkConfirm({
+  confirm,
+  busy,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  confirm: { dispatch: any; action: 'DELIVERED' | 'EXITED' } | null;
+  busy: boolean;
+  error?: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const d = confirm?.dispatch;
+  const delivered = confirm?.action === 'DELIVERED';
+  const items = (d?.items || []).map((it: any) => it.description + (it.quantity > 1 ? ` ×${it.quantity}` : '')).filter(Boolean);
+  const destinations = (d?.destinations || []).map((dest: any) => dest.organisation?.name || dest.host?.fullName).filter(Boolean);
+  return (
+    <SleekOverlay
+      open={!!confirm}
+      onClose={onClose}
+      title={delivered ? 'Mark delivered' : 'Courier left'}
+      subtitle={delivered ? 'Confirm that the items have been handed over.' : 'Confirm that the courier has left the premises.'}
+      icon={<Package size={20} />}
+      tone={delivered ? 'emerald' : 'amber'}
+      size="sm"
+      footer={
+        <>
+          <button type="button" className="btn-ghost min-w-[7rem] flex-1" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="button" className={delivered ? 'btn-success min-w-[7rem] flex-1' : 'btn-primary min-w-[7rem] flex-1'} disabled={busy} onClick={onConfirm}>
+            {busy ? 'Saving…' : 'Confirm'}
+          </button>
+        </>
+      }
+    >
+      {d && (
+        <div className="space-y-3">
+          <div className="rounded-2xl bg-slate-50 p-3">
+            <p className="font-bold text-slate-900">{d.courierName || 'Courier'}</p>
+            <p className="text-xs text-slate-500">{[d.courierCompany, d.courierPhone].filter(Boolean).join(' · ') || 'No company or phone on file'}</p>
+            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Current status</p>
+            <p className="text-sm font-semibold capitalize text-slate-700">{String(d.status || '').replace(/_/g, ' ').toLowerCase()}</p>
+          </div>
+          {items.length > 0 && (
+            <div>
+              <p className="label">Items</p>
+              <ul className="mt-1 flex flex-wrap gap-1.5">
+                {items.map((it: string) => <li key={it} className="chip !py-0.5">{it}</li>)}
+              </ul>
+            </div>
+          )}
+          {destinations.length > 0 && (
+            <div>
+              <p className="label">Destinations</p>
+              <p className="text-sm text-slate-700">{destinations.join(', ')}</p>
+            </div>
+          )}
+          {error && <Notice tone="error">{error}</Notice>}
+        </div>
+      )}
+    </SleekOverlay>
   );
 }
 
