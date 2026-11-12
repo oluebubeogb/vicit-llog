@@ -39,6 +39,7 @@ import Avatar from '@/components/ui/Avatar';
 import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import Collapse from '@/components/ui/Collapse';
 import { Empty, Field, Fields, Notice } from '@/components/ui/Bits';
+import BulkImportReport from '@/components/BulkImportReport';
 import PersonLink from '@/components/PersonLink';
 import { InviteDetail, InviteRow, VisitorCard, inviteSheetProps } from '@/components/InviteBits';
 import { AUDIT_TILE, auditMeta, fieldLabel, fmtValue } from '@/components/AuditBits';
@@ -81,6 +82,7 @@ export default function AdminPage() {
   const [original, setOriginal] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
   const [bulkResult, setBulkResult] = useState<any | null>(null);
+  const [bulkNotice, setBulkNotice] = useState<{ tone: string; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [showExport, setShowExport] = useState(false);
   const [exportCols, setExportCols] = useState<string[]>([
@@ -169,7 +171,8 @@ export default function AdminPage() {
     const text = await file.text();
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) {
-      fail('CSV needs a header and at least one row');
+      setBulkResult(null);
+      setBulkNotice({ tone: 'error', text: 'CSV needs a header and at least one row' });
       return;
     }
     const header = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/"/g, ''));
@@ -191,10 +194,14 @@ export default function AdminPage() {
     try {
       const res = await api.bulkUsers(rows);
       setBulkResult(res);
-      setMsg({ tone: res.errorCount || res.mailFailures?.length ? 'brand' : 'success', text: `Bulk import: ${res.createdCount} created, ${res.errorCount} errors · welcome emails sent: ${res.emailSentCount ?? res.createdCount}/${res.createdCount}${res.mailFailures?.length ? ` (not sent: ${res.mailFailures.map((f: any) => f.email).join(', ')})` : ''}` });
+      setBulkNotice({
+        tone: res.errorCount || res.mailFailures?.length ? 'brand' : 'success',
+        text: `Bulk import: ${res.createdCount} created, ${res.errorCount} errors · welcome emails sent: ${res.emailSentCount ?? res.createdCount}/${res.createdCount}${res.mailFailures?.length ? ` (not sent: ${res.mailFailures.map((f: any) => f.email).join(', ')})` : ''}`,
+      });
       loadUsers();
     } catch (err: any) {
-      fail(err.message);
+      setBulkResult(null);
+      setBulkNotice({ tone: 'error', text: err.message || 'Bulk import failed' });
     }
   }
 
@@ -522,6 +529,18 @@ export default function AdminPage() {
       {/* ------------------------------ USERS ------------------------------ */}
       {tab === 'users' && (
         <div className="animate-in">
+          <div className="mb-3">
+            <BulkImportReport
+              message={bulkNotice?.text}
+              tone={bulkNotice?.tone}
+              result={bulkResult}
+              onDownloadCredentials={
+                bulkResult?.credentialsCsv
+                  ? () => download(`staff-credentials-${Date.now()}.csv`, bulkResult.credentialsCsv)
+                  : undefined
+              }
+            />
+          </div>
           <div className="mb-3 grid grid-cols-3 gap-2">
             <button onClick={() => setShowForm(!showForm)} aria-expanded={showForm} className={`${showForm ? 'btn-primary' : 'btn-ghost'} !px-2`}>
               <UserPlus size={16} /> Add staff
@@ -538,12 +557,6 @@ export default function AdminPage() {
             </Tooltip>
             <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && onBulkFile(e.target.files[0])} />
           </div>
-
-          {bulkResult?.credentialsCsv && (
-            <button onClick={() => download(`staff-credentials-${Date.now()}.csv`, bulkResult.credentialsCsv)} className="btn-success mb-3 w-full">
-              <Download size={16} /> Download credentials CSV ({bulkResult.createdCount})
-            </button>
-          )}
 
           <Collapse open={showForm}>
             <form onSubmit={createUser} className="surface mb-4 space-y-3">

@@ -6,7 +6,7 @@ const MAP: Record<string, { label: string; tone: Tone }> = {
   ACTIVE: { label: 'Active', tone: 'emerald' },
   USED: { label: 'Used', tone: 'brand' },
   EXPIRED: { label: 'Expired', tone: 'slate' },
-  REVOKED: { label: 'Revoked', tone: 'rose' },
+  REVOKED: { label: 'Cancelled', tone: 'slate' },
   PENDING: { label: 'Pending', tone: 'amber' },
   OFFLINE_PENDING: { label: 'Awaiting approval', tone: 'amber' },
   AWAITING_APPROVAL: { label: 'Awaiting approval', tone: 'amber' },

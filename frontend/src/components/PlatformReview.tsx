@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import StatusPill from '@/components/ui/StatusPill';
 import Avatar from '@/components/ui/Avatar';
-import { photoUrl, avatarUrl } from '@/lib/format';
+import { photoUrl, avatarUrl, inviteStatus } from '@/lib/format';
+import { statusMeta } from '@/components/ui/StatusPill';
 
 const human = (s: string = '') => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -40,7 +41,7 @@ export function InviteReview({ summary }: { summary: any }) {
         <Cell label="Expected" value={invite.expectedAt ? new Date(invite.expectedAt).toLocaleString() : '—'} />
         <Cell label="Created" value={invite.createdAt ? new Date(invite.createdAt).toLocaleString() : '—'} />
         <Cell label="Expires" value={invite.expiresAt ? new Date(invite.expiresAt).toLocaleString() : '—'} />
-        <Cell label="Status" value={human(invite.status || 'Pending')} />
+        <Cell label="Status" value={statusMeta(inviteStatus(invite) || invite.status || 'Pending').label} />
       </dl>
       {visitors.length > 0 && (
         <section>

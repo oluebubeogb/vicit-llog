@@ -253,6 +253,8 @@ export class UsersService {
       role: string;
       phone: string;
       initialPassword: string;
+      row: number;
+      emailSent: boolean;
     }> = [];
     const errors: Array<{ row: number; email: string; error: string }> = [];
     const mailFailures: Array<{ row: number; email: string; error: string }> = [];
@@ -304,6 +306,8 @@ export class UsersService {
           role,
           phone: row.phone || '',
           initialPassword,
+          row: i + 2,
+          emailSent: !!mailResult?.ok,
         });
       } catch (e: any) {
         errors.push({ row: i + 1, email: row.email || '', error: e.message });
@@ -321,10 +325,29 @@ export class UsersService {
     );
     const credentialsCsv = [header, ...lines].join('\n');
 
+    const results = [
+      ...created.map((c) => ({
+        row: c.row,
+        success: true,
+        fullName: c.fullName,
+        email: c.email,
+        role: c.role,
+        phone: c.phone,
+        emailSent: c.emailSent,
+      })),
+      ...errors.map((e) => ({
+        row: e.row,
+        success: false,
+        email: e.email,
+        error: e.error,
+      })),
+    ].sort((a, b) => (a.row || 0) - (b.row || 0));
+
     return {
       createdCount: created.length,
       errorCount: errors.length,
       errors,
+      results,
       emailSent: mailFailures.length === 0,
       emailSentCount: created.length - mailFailures.length,
       mailFailures,

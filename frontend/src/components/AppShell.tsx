@@ -133,7 +133,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         className={clsx(
           'relative mx-auto min-h-screen pt-[env(safe-area-inset-top)]',
           'max-w-lg pb-36 px-0',
-          'lg:ml-60 lg:max-w-none lg:pb-10 lg:pr-8 lg:pt-6',
+          'lg:ml-60 lg:max-w-none lg:pb-10 lg:pl-8 lg:pr-8 lg:pt-6',
         )}
       >
         <div className="mx-auto w-full max-w-lg lg:max-w-6xl">

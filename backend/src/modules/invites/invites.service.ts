@@ -558,7 +558,7 @@ export class InvitesService {
     }
 
     if (invite.status === InviteStatus.REVOKED) {
-      throw new BadRequestException(invite.cancelledAt ? 'This visit has been cancelled by the host' : 'This invite has been revoked');
+      throw new BadRequestException('This visit has been cancelled by the host');
     }
 
     const expired =
