@@ -1,3 +1,4 @@
+import { ALL_ENTRY_MODES, normaliseModes } from '../../common/utils/entry-modes';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import * as fs from 'fs';
@@ -23,7 +24,7 @@ const BRANDING_SELECT = {
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const SIZE = /^\d+(\.\d+)?(px|%|vh|vw|em|rem)$/i;
-export const APP_VERSION = '1.0.1-v18';
+export const APP_VERSION = '1.0.1-v19';
 
 function normHex(v: unknown, field: string): string {
   const s = String(v || '').trim();
@@ -127,6 +128,7 @@ export class BrandingService {
       footerCreditMobileMode: (settings as any).footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
       assetVersion: settings.assetVersion || APP_VERSION,
       contractorMinDurationDays: settings.contractorMinDurationDays,
+      allowedEntryModes: normaliseModes((settings as any).allowedEntryModes),
     };
   }
 
@@ -156,6 +158,7 @@ export class BrandingService {
       footerCreditEnabled: settings.footerCreditEnabled,
       footerCreditMobileMode: (settings as any).footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
       assetVersion: settings.assetVersion || APP_VERSION,
+      allowedEntryModes: normaliseModes((settings as any).allowedEntryModes),
       login: {
         logoUrl: settings.loginLogoUrl || null,
         logoWidth: settings.loginLogoWidth || '180px',
@@ -325,6 +328,12 @@ export class BrandingService {
       const n = parseInt(String(body.contractorMinDurationDays), 10);
       if (!Number.isFinite(n) || n < 1 || n > 365) throw new BadRequestException('Minimum contractor duration must be 1–365 days');
       data.contractorMinDurationDays = n;
+    }
+    if (body.allowedEntryModes !== undefined) {
+      const raw = Array.isArray(body.allowedEntryModes) ? body.allowedEntryModes.map((m: any) => String(m).toUpperCase()) : [];
+      const modes = ALL_ENTRY_MODES.filter((m) => raw.includes(m));
+      if (!modes.length) throw new BadRequestException('Keep at least one mode of entry switched on');
+      data.allowedEntryModes = [...modes];
     }
     data.assetVersion = `${APP_VERSION}-${Date.now().toString(36)}`;
     const settings = await this.prisma.platformSettings.update({ where: { id: 'platform' }, data });

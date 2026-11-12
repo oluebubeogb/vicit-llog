@@ -220,8 +220,11 @@ export class VisitorsService {
   }
 
   async getPhoto(filename: string) {
-    const filepath = path.join(this.getPhotoDir(), filename);
-    if (!fs.existsSync(filepath)) {
+    // basename() blocks encoded path traversal (e.g. ..%2F..%2Fetc) — only files in the photo dir.
+    const safe = path.basename(String(filename || ''));
+    if (!safe || safe.startsWith('.')) throw new NotFoundException('Photo not found');
+    const filepath = path.join(this.getPhotoDir(), safe);
+    if (!fs.existsSync(filepath) || !fs.statSync(filepath).isFile()) {
       throw new NotFoundException('Photo not found');
     }
     return filepath;

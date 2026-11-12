@@ -2,16 +2,16 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, ShieldCheck } from 'lucide-react';
 import { api, setToken, setUser } from '@/lib/api';
 import InstallBanner from '@/components/InstallBanner';
 import BrandMark from '@/components/BrandMark';
 import FooterCredit from '@/components/FooterCredit';
-import Tooltip from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
 import { useBrand } from '@/components/BrandProvider';
 import { logoSrc } from '@/lib/brand';
 import LoginAgencyGrid from '@/components/LoginAgencyGrid';
+import PasswordInput from '@/components/ui/PasswordInput';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,7 +19,6 @@ export default function LoginPage() {
   const login = brand.login || {};
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -127,15 +126,7 @@ export default function LoginPage() {
             </label>
             <label className="block">
               <span className="label">Password</span>
-              <span className="relative block">
-                <Lock size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="Enter password" className="input pl-10 pr-12" required />
-                <Tooltip content={show ? 'Hide password' : 'Show password'}>
-                  <button type="button" onClick={() => setShow(!show)} className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-brand-50 hover:text-brand-600" aria-label={show ? 'Hide password' : 'Show password'}>
-                    {show ? <EyeOff size={17} /> : <Eye size={17} />}
-                  </button>
-                </Tooltip>
-              </span>
+              <PasswordInput icon={<Lock size={17} />} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="Enter password" required />
             </label>
 
             {error && <Notice tone="error">{error}</Notice>}

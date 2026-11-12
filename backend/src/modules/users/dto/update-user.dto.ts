@@ -1,4 +1,4 @@
-import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength , IsObject } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 
@@ -10,4 +10,5 @@ export class UpdateUserDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(120) portfolio?: string;
   @ApiPropertyOptional({ enum: Role }) @IsOptional() @IsEnum(Role) role?: Role;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsObject() customFields?: Record<string, any>;
 }

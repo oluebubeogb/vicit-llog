@@ -1,19 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import {
-  Bike,
   CalendarDays,
-  Car,
   Check,
   ChevronDown,
   ChevronRight,
   Clock,
   Copy,
   Download,
-  Footprints,
   Mail,
   Minus,
   PhoneOff,
@@ -21,7 +18,13 @@ import {
   Share2,
   Sparkles,
   UserPlus,
+  UserX,
+  PencilLine,
+  Send,
 } from 'lucide-react';
+import SleekOverlay from '@/components/ui/SleekOverlay';
+import VehicleFields from '@/components/VehicleFields';
+import { isVehicleMode, useEntryModes } from '@/lib/entry-modes';
 import PageHeader from '@/components/ui/PageHeader';
 import Avatar from '@/components/ui/Avatar';
 import Collapse from '@/components/ui/Collapse';
@@ -113,7 +116,14 @@ export default function NewInvitePage() {
   const [guests, setGuests] = useState<Guest[]>([emptyGuest()]);
   const [openGuests, setOpenGuests] = useState<Record<number, boolean>>({ 0: true });
   const [mode, setMode] = useState('PEDESTRIAN');
-  const [isOffline, setIsOffline] = useState(false);
+  const [vehiclePlate, setVehiclePlate] = useState('');
+  const [vehicleDetails, setVehicleDetails] = useState('');
+  const [missing, setMissing] = useState<{ i: number; name: string }[]>([]);
+  const guestRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const MODES = useEntryModes();
+  useEffect(() => {
+    if (MODES.length && !MODES.some((m) => m.v === mode)) setMode(MODES[0].v);
+  }, [MODES.map((m) => m.v).join(','), mode]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [copied, setCopied] = useState(false);
@@ -175,31 +185,70 @@ export default function NewInvitePage() {
     }
   }
 
+  const guestName = (g: Guest, i: number) => g.fullName.trim() || `Guest ${i + 1}`;
+
+  /** Guests with neither an email nor a phone — they get no link and are photographed at the gate. */
+  function noContactGuests() {
+    return guests.map((g, i) => ({ g, i })).filter(({ g }) => !g.email.trim() && !g.phone.trim()).map(({ g, i }) => ({ i, name: guestName(g, i) }));
+  }
+
+  function goBackAndFill() {
+    const first = missing[0];
+    setMissing([]);
+    if (!first) return;
+    setOpenGuests((o) => ({ ...o, [first.i]: true }));
+    // Wait for the overlay to close and the card to expand, then scroll + focus its email.
+    setTimeout(() => {
+      const el = guestRefs.current[first.i];
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-amber-300');
+      setTimeout(() => el.classList.remove('ring-2', 'ring-amber-300'), 2200);
+      const input = el.querySelector<HTMLInputElement>('input[type="email"]');
+      setTimeout(() => input?.focus({ preventScroll: true }), 380);
+    }, 320);
+  }
+
+  function expectedAtIso() {
+    if (!expectedDate) return undefined;
+    const time = expectedTime || '09:00';
+    return new Date(`${expectedDate}T${time}:00`).toISOString();
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError('');
+    const bad = guests.findIndex((g) => g.email.trim() && !isValidEmail(g.email.trim()));
+    if (bad >= 0) {
+      setError(`Invalid email for ${guestName(guests[bad], bad)}: "${guests[bad].email}". Please correct it.`);
+      return;
+    }
+    const at = expectedAtIso();
+    if (at && new Date(at).getTime() < Date.now() - 60_000) {
+      setError('The visit date and time cannot be in the past. Choose a later time.');
+      return;
+    }
+    const nc = noContactGuests();
+    if (nc.length) {
+      setMissing(nc);
+      return;
+    }
+    await createNow();
+  }
+
+  async function createNow() {
+    setMissing([]);
     setLoading(true);
     setError('');
     try {
       const clean = guests
-        .map((g) => ({
-          fullName: g.fullName.trim() || 'Guest',
+        .map((g, i) => ({
+          fullName: guestName(g, i),
           email: g.email.trim() || undefined,
           phone: g.phone.trim() || undefined,
           address: g.address.trim() || undefined,
         }))
         .filter((g) => g.fullName);
-      for (const g of clean) {
-        if (g.email && !isValidEmail(g.email)) {
-          setError(`Invalid email for ${g.fullName}: "${g.email}". Please correct it.`);
-          setLoading(false);
-          return;
-        }
-      }
-      let expectedAt: string | undefined;
-      if (expectedDate) {
-        const time = expectedTime || '09:00';
-        expectedAt = new Date(`${expectedDate}T${time}:00`).toISOString();
-      }
       const data = await api.createInvite({
         purpose: description.trim(),
         guestCount: clean.length || guestCount,
@@ -207,8 +256,8 @@ export default function NewInvitePage() {
         guestNames: clean.map((g) => g.fullName),
         expectedMode: mode,
         category: purpose,
-        isOffline,
-        expectedAt,
+        expectedAt: expectedAtIso(),
+        ...(isVehicleMode(mode) ? { vehiclePlate: vehiclePlate.trim() || undefined, vehicleDetails: vehicleDetails.trim() || undefined } : {}),
       });
       setResult(data);
     } catch (err: any) {
@@ -268,7 +317,7 @@ export default function NewInvitePage() {
   }
 
   if (result) {
-    const waiting = result.awaitingApproval || result.isOffline;
+    const waiting = result.awaitingApproval;
     return (
       <div className="page">
         <div className="hero animate-in mb-4" style={waiting ? { backgroundImage: 'linear-gradient(135deg, #fbbf24, #f59e0b 50%, #ea580c)', boxShadow: '0 14px 34px -12px rgb(217 119 6 / 0.6)' } : undefined}>
@@ -279,9 +328,7 @@ export default function NewInvitePage() {
           <p className={`mt-1 text-sm ${waiting ? 'text-white/80' : 'text-on-brand/80'}`}>
             {result.awaitingApproval
               ? 'An administrator will review it. Guests are emailed as soon as it is approved.'
-              : result.isOffline
-                ? 'Walk-in request — awaiting admin approval.'
-                : <>Share this link with your guests. It expires in <strong>{result.expiresInMinutes} minutes</strong>.</>}
+              : <>Share this link with your guests. It expires in <strong>{result.expiresInMinutes} minutes</strong>.</>}
           </p>
         </div>
         <div className="stagger space-y-3">
@@ -309,6 +356,16 @@ export default function NewInvitePage() {
             </p>
             <p className="mt-1 font-mono text-2xl font-bold tracking-[0.25em] text-gradient">{result.passphrase}</p>
           </div>
+          {result.noContactGuests?.length > 0 && (
+            <Notice tone="brand">
+              <span className="flex items-start gap-2">
+                <PhoneOff size={16} className="mt-0.5 shrink-0 text-slate-400" />
+                <span>
+                  <strong>{result.noContactGuests.map((g: any) => g.fullName).join(', ')}</strong> {result.noContactGuests.length === 1 ? 'has' : 'have'} no email or phone. The gate will take {result.noContactGuests.length === 1 ? 'their' : 'each'} photo and send it to you to confirm.
+                </span>
+              </span>
+            </Notice>
+          )}
           {result.emailsSent?.length > 0 && (
             <Notice tone="success">
               <span className="flex items-start gap-2">
@@ -318,7 +375,7 @@ export default function NewInvitePage() {
           )}
         </div>
         <div className="mt-6 grid grid-cols-2 gap-2">
-          <button onClick={() => { setResult(null); setDescription(''); setGuestCount(1); setGuests([emptyGuest()]); setOpenGuests({ 0: true }); }} className="btn-ghost">
+          <button onClick={() => { setResult(null); setDescription(''); setGuestCount(1); setGuests([emptyGuest()]); setOpenGuests({ 0: true }); setVehiclePlate(''); setVehicleDetails(''); }} className="btn-ghost">
             <UserPlus size={16} /> Another
           </button>
           <button onClick={() => router.push('/dashboard')} className="btn-primary">
@@ -329,11 +386,11 @@ export default function NewInvitePage() {
     );
   }
 
-  const MODES = [
-    { v: 'PEDESTRIAN', l: 'On foot', icon: <Footprints size={16} /> },
-    { v: 'MOTORCYCLE', l: 'Motorcycle', icon: <Bike size={16} /> },
-    { v: 'VEHICLE', l: 'Vehicle', icon: <Car size={16} /> },
-  ];
+  const todayMin = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const timeMin = expectedDate === todayMin ? (() => { const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; })() : undefined;
 
   return (
     <div className="page">
@@ -359,18 +416,18 @@ export default function NewInvitePage() {
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="label"><CalendarDays size={14} /> Date</span>
-              <input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} className="input" required />
+              <input type="date" min={todayMin} value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} className="input" required />
             </label>
             <label className="block">
               <span className="label"><Clock size={14} /> Time</span>
-              <input type="time" value={expectedTime} onChange={(e) => setExpectedTime(e.target.value)} className="input" required />
+              <input type="time" min={timeMin} value={expectedTime} onChange={(e) => setExpectedTime(e.target.value)} className="input" required />
             </label>
           </div>
           <div>
             <span className="label">
               Arriving by <InfoTip text="Pre-fills the gate. Officers can change it on arrival." size={12} />
             </span>
-            <div className="segmented w-full">
+            <div className="segmented w-full" data-testid="invite-modes">
               {MODES.map((m) => (
                 <button key={m.v} type="button" data-active={mode === m.v} onClick={() => setMode(m.v)} className="!flex flex-1 items-center justify-center gap-1.5 !px-1">
                   {m.icon} {m.l}
@@ -378,6 +435,9 @@ export default function NewInvitePage() {
               ))}
             </div>
           </div>
+          <Collapse open={isVehicleMode(mode)}>
+            <VehicleFields mode={mode} plate={vehiclePlate} details={vehicleDetails} onPlate={setVehiclePlate} onDetails={setVehicleDetails} />
+          </Collapse>
         </section>
 
         <section className="surface animate-in space-y-3">
@@ -415,20 +475,25 @@ export default function NewInvitePage() {
               const open = openGuests[i] !== false;
               const summary = g.fullName || g.email ? [g.fullName, g.email].filter(Boolean).join(' · ') : `Guest ${i + 1}`;
               return (
-                <div key={i} className={`card transition ${open ? '!border-brand-200 shadow-lift' : ''}`}>
+                <div key={i} id={`guest-card-${i}`} ref={(el) => { guestRefs.current[i] = el; }} className={`card scroll-mt-24 transition ${open ? '!border-brand-200 shadow-lift' : ''}`}>
                   <button type="button" onClick={() => toggleGuest(i)} className="group flex w-full items-center gap-2.5 px-3.5 py-3 text-left">
                     {g.fullName ? <Avatar name={g.fullName} size={30} /> : (
                       <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-700 text-xs font-bold text-on-brand on-brand-fill">{i + 1}</span>
                     )}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{summary}</span>
                     {g.email && <Mail size={14} className="text-emerald-500" />}
+                    {!g.email.trim() && !g.phone.trim() && (g.fullName.trim() || i > 0) && (
+                      <Tooltip content="No email or phone — gate will photograph this guest">
+                        <span className="inline-flex" role="img" aria-label="No email or phone"><PhoneOff size={13} className="text-slate-400" /></span>
+                      </Tooltip>
+                    )}
                     <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 group-hover:text-brand-500 ${open ? 'rotate-180' : ''}`} />
                   </button>
                   <Collapse open={open}>
                     <div className="grid grid-cols-1 gap-2 border-t border-slate-100 bg-gradient-to-b from-brand-50/40 to-white px-3.5 pb-3.5 pt-3">
                       <input value={g.fullName} onChange={(e) => updateGuest(i, 'fullName', e.target.value)} placeholder="Full name" className="input !py-2.5 text-sm" />
-                      <input type="email" value={g.email} onChange={(e) => updateGuest(i, 'email', e.target.value)} placeholder="Email — invite link is sent here" className="input !py-2.5 text-sm" />
-                      <input type="tel" inputMode="tel" value={g.phone} onChange={(e) => updateGuest(i, 'phone', e.target.value)} placeholder="Phone" className="input !py-2.5 text-sm" />
+                      <input type="email" value={g.email} onChange={(e) => updateGuest(i, 'email', e.target.value)} placeholder="Email (optional) — invite link is sent here" className="input !py-2.5 text-sm" />
+                      <input type="tel" inputMode="tel" value={g.phone} onChange={(e) => updateGuest(i, 'phone', e.target.value)} placeholder="Phone (optional)" className="input !py-2.5 text-sm" />
                       <input value={g.address} onChange={(e) => updateGuest(i, 'address', e.target.value)} placeholder="Address" className="input !py-2.5 text-sm" />
                     </div>
                   </Collapse>
@@ -438,21 +503,10 @@ export default function NewInvitePage() {
           </div>
         </section>
 
-        <button type="button" role="switch" aria-checked={isOffline} onClick={() => setIsOffline(!isOffline)} className="card card-art flex w-full items-center gap-3 p-4 text-left">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-50 to-amber-100 text-amber-600">
-            <PhoneOff size={18} />
-          </span>
-          <span className="flex-1">
-            <span className="flex items-center gap-1 text-sm font-semibold text-slate-800">
-              Walk-in / no-phone request
-              <InfoTip text="Requires admin approval. No emails are sent until it is approved." size={12} />
-            </span>
-            <span className="block text-xs text-slate-500">{isOffline ? 'Will wait for admin approval' : 'For guests without a phone'}</span>
-          </span>
-          <span className={`relative h-7 w-12 shrink-0 rounded-full transition ${isOffline ? 'bg-gradient-to-r from-amber-400 to-amber-600' : 'bg-slate-200'}`}>
-            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${isOffline ? 'left-6' : 'left-1'}`} />
-          </span>
-        </button>
+        <p className="flex items-start gap-2 px-1 text-xs text-slate-500">
+          <PhoneOff size={13} className="mt-0.5 shrink-0 text-slate-400" />
+          Email and phone are optional. Guests without either are tagged automatically and photographed at the gate — no admin approval needed.
+        </p>
 
         {error && <Notice tone="error">{error}</Notice>}
 
@@ -460,6 +514,43 @@ export default function NewInvitePage() {
           {loading ? 'Creating…' : <><Sparkles size={17} /> Create invite</>}
         </button>
       </form>
+
+      <SleekOverlay
+        open={missing.length > 0}
+        onClose={() => setMissing([])}
+        tone="amber"
+        icon={<UserX size={20} />}
+        title={missing.length === 1 ? `${missing[0].name} has no email or phone number set` : `${missing.length} guests have no email or phone number set`}
+        subtitle={missing.length === 1 ? 'They will not receive an invite link.' : 'They will not receive an invite link.'}
+        footer={
+          <div className="flex w-full flex-col gap-2 sm:flex-row">
+            <button type="button" className="btn-ghost flex-1" onClick={goBackAndFill}>
+              <PencilLine size={16} /> Go back and fill
+            </button>
+            <button type="button" className="btn-primary flex-1" onClick={createNow} disabled={loading}>
+              <Send size={16} /> {guests.length - missing.length > 0 ? 'Invite those with contact details' : 'Create without contacts'}
+            </button>
+          </div>
+        }
+      >
+        {missing.length > 1 && (
+          <ul className="space-y-1.5 pt-1.5" data-testid="missing-contact-list">
+            {missing.map((m) => (
+              <li key={m.i} className="flex items-center gap-2.5 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2 text-sm">
+                <Avatar name={m.name} size={26} />
+                <span className="min-w-0 flex-1 truncate font-medium text-slate-800">{m.name}</span>
+                <PhoneOff size={13} className="text-slate-400" aria-label="No email or phone" />
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className={`text-sm text-slate-600 ${missing.length > 1 ? 'mt-3' : 'pt-1.5'}`}>
+          {guests.length - missing.length > 0
+            ? 'Guests with an email get their link now. '
+            : ''}
+          {missing.length === 1 ? 'This guest will be added as a no-contact guest' : 'These guests will be added as no-contact guests'}: the gate takes {missing.length === 1 ? 'their' : 'each'} photo on arrival and sends it to you to confirm.
+        </p>
+      </SleekOverlay>
     </div>
   );
 }

@@ -12,11 +12,17 @@ import {
   RotateCcw,
   ShieldOff,
   UserCog,
+  XCircle,
+  CalendarPlus,
+  Mail,
+  ClipboardCheck,
+  BellRing,
+  ShieldCheck,
 } from 'lucide-react';
 import { MODE_LABEL, titleCase } from '@/lib/format';
 
 export type AuditTone = 'brand' | 'emerald' | 'amber' | 'rose' | 'violet';
-export type AuditGroup = 'gate' | 'invites' | 'people' | 'security';
+export type AuditGroup = 'gate' | 'invites' | 'approvals' | 'people' | 'security';
 
 const name = (a: any) => a.user?.fullName || 'System';
 const relName = (a: any) => a.related?.fullName || a.details?.fullName || 'a visitor';
@@ -103,15 +109,110 @@ const MAP: Record<string, Desc> = {
     label: 'Invite approved',
     icon: <CheckCircle2 size={16} />,
     tone: 'emerald',
-    group: 'invites',
+    group: 'approvals',
     text: (a) => `${name(a)} approved${purpose(a) ? ` “${purpose(a)}”` : ' an invite'}`,
   },
   OFFLINE_INVITE_APPROVED: {
     label: 'Walk-in approved',
     icon: <CheckCircle2 size={16} />,
     tone: 'emerald',
-    group: 'invites',
+    group: 'approvals',
     text: (a) => `${name(a)} approved the walk-in${purpose(a) ? ` “${purpose(a)}”` : ''}`,
+  },
+  INVITE_CANCELLED: {
+    label: 'Invite cancelled',
+    icon: <XCircle size={16} />,
+    tone: 'rose',
+    group: 'invites',
+    text: (a) => `${name(a)} cancelled${purpose(a) ? ` “${purpose(a)}”` : ' an invite'}${a.details?.reason ? ` — ${a.details.reason}` : ''}`,
+  },
+  INVITE_POSTPONED: {
+    label: 'Invite postponed',
+    icon: <CalendarPlus size={16} />,
+    tone: 'violet',
+    group: 'invites',
+    text: (a) => `${name(a)} postponed${purpose(a) ? ` “${purpose(a)}”` : ' an invite'}${a.details?.to ? ` to ${new Date(a.details.to).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`,
+  },
+  INVITE_GUESTS_NOTIFIED: {
+    label: 'Guests notified',
+    icon: <Mail size={16} />,
+    tone: 'brand',
+    group: 'invites',
+    text: (a) => {
+      const kind = String(a.details?.kind || '').toLowerCase().replace('_', ' ');
+      const n = a.details?.emailed ?? 0;
+      return `${n} guest${n === 1 ? '' : 's'} emailed${kind ? ` (${kind})` : ''}${a.details?.smtp === false ? ' — mail not configured' : ''}`;
+    },
+  },
+  INVITE_REMINDER_SENT: {
+    label: 'Reminder sent',
+    icon: <BellRing size={16} />,
+    tone: 'amber',
+    group: 'invites',
+    text: (a) => `${a.details?.kind === 'DAY' ? 'Day-before' : '1-hour'} reminder sent${purpose(a) ? ` for “${purpose(a)}”` : ''}`,
+  },
+  HOST_AVAILABILITY_CONFIRMED: {
+    label: 'Host confirmed',
+    icon: <CheckCircle2 size={16} />,
+    tone: 'emerald',
+    group: 'invites',
+    text: (a) => `${name(a)} confirmed availability${purpose(a) ? ` for “${purpose(a)}”` : ''}`,
+  },
+  PROFILE_EDIT_REQUESTED: {
+    label: 'Approval requested',
+    icon: <ClipboardCheck size={16} />,
+    tone: 'amber',
+    group: 'approvals',
+    text: (a) => `${name(a)} asked to change ${Object.keys(a.details?.changes || {}).map((k) => fieldLabel(k).toLowerCase()).join(', ') || 'their profile'}`,
+  },
+  PROFILE_EDIT_APPROVED: {
+    label: 'Approved',
+    icon: <CheckCircle2 size={16} />,
+    tone: 'emerald',
+    group: 'approvals',
+    text: (a) => `${name(a)} approved ${a.related?.fullName ? `${a.related.fullName}’s` : 'a'} profile change`,
+  },
+  PROFILE_EDIT_REJECTED: {
+    label: 'Rejected',
+    icon: <XCircle size={16} />,
+    tone: 'rose',
+    group: 'approvals',
+    text: (a) => `${name(a)} rejected ${a.related?.fullName ? `${a.related.fullName}’s` : 'a'} profile change${a.details?.note ? ` — ${a.details.note}` : ''}`,
+  },
+  PROFILE_EDIT_AUTO_APPLIED: {
+    label: 'Applied (approver)',
+    icon: <UserCog size={16} />,
+    tone: 'violet',
+    group: 'approvals',
+    text: (a) => `${name(a)} updated their own ${Object.keys(a.details?.changes || {}).map((k) => fieldLabel(k).toLowerCase()).join(', ') || 'profile'} — applied immediately`,
+  },
+  GUEST_IDENTITY_REQUESTED: {
+    label: 'Identity check sent',
+    icon: <ShieldCheck size={16} />,
+    tone: 'amber',
+    group: 'gate',
+    text: (a) => `${name(a)} asked the host to confirm ${(a.details?.guests || []).join(', ') || 'guests'}`,
+  },
+  GUEST_IDENTITY_CONFIRMED: {
+    label: 'Identity confirmed',
+    icon: <CheckCircle2 size={16} />,
+    tone: 'emerald',
+    group: 'gate',
+    text: (a) => `${name(a)} confirmed ${a.details?.guest || 'a guest'}`,
+  },
+  GUEST_IDENTITY_DECLINED: {
+    label: 'Identity declined',
+    icon: <XCircle size={16} />,
+    tone: 'rose',
+    group: 'gate',
+    text: (a) => `${name(a)} did not confirm ${a.details?.guest || 'a guest'}`,
+  },
+  GATE_GUEST_PHOTO_TAKEN: {
+    label: 'Gate photo',
+    icon: <Camera size={16} />,
+    tone: 'violet',
+    group: 'gate',
+    text: (a) => `${name(a)} photographed ${a.details?.guest || 'a guest'} at the gate`,
   },
   USER_UPDATED: {
     label: 'User updated',

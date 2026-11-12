@@ -80,4 +80,14 @@ export class CreateInviteDto {
   @IsOptional()
   @IsString()
   expectedAt?: string;
+
+  @ApiPropertyOptional({ description: 'Plate number (vehicle / motorcycle)' })
+  @IsOptional()
+  @IsString()
+  vehiclePlate?: string;
+
+  @ApiPropertyOptional({ description: 'Additional details, e.g. colour and brand' })
+  @IsOptional()
+  @IsString()
+  vehicleDetails?: string;
 }

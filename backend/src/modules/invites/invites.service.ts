@@ -15,6 +15,8 @@ import { buildGateQrPayload } from '../../common/utils/qr';
 import { gatePassCaption, qrFileName, renderCaptionedQrDataUrl } from '../../common/utils/qr-caption';
 import { isValidEmail } from '../../common/utils/email';
 import { publicFrontendBase } from '../../common/utils/urls';
+import { allowedEntryModes, cleanPlate, cleanVehicleDetails, vehicleMode } from '../../common/utils/entry-modes';
+import { fmtAppTime, isPast, parseAppDateTime } from '../../common/utils/app-time';
 
 @Injectable()
 export class InvitesService {
@@ -80,9 +82,18 @@ export class InvitesService {
       where: { id: orgId },
       select: { requireApproval: true },
     });
-    // Branding & Settings → "Require approval for invites": non-admin invites wait for an admin
+    // Branding & Settings → "Require approval for invites": non-admin invites wait for an admin.
+    // v19: guests without a phone/email no longer need admin approval — they are tagged per guest.
     const needsApproval =
-      !dto.isOffline && Boolean(orgSettings?.requireApproval) && ![Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE].includes(creatorRole as any);
+      Boolean(orgSettings?.requireApproval) && ![Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE].includes(creatorRole as any);
+    const expectedAt = parseAppDateTime(dto.expectedAt);
+    if (dto.expectedAt && !expectedAt) throw new BadRequestException('Expected date/time is not valid');
+    if (expectedAt && isPast(expectedAt)) throw new BadRequestException('The visit date and time cannot be in the past');
+    const modes = await allowedEntryModes(this.prisma);
+    if (dto.expectedMode && !modes.includes(dto.expectedMode)) {
+      throw new BadRequestException(`${dto.expectedMode.toLowerCase()} entry is not accepted. Allowed: ${modes.map((m) => m.toLowerCase()).join(', ')}`);
+    }
+    const isVehicle = vehicleMode(dto.expectedMode);
     const expiresAt = new Date(Date.now() + ttl * 60 * 1000);
     const token = uuidv4();
     const passphrase = this.generatePassphrase();
@@ -99,13 +110,11 @@ export class InvitesService {
         expiresAt,
         hostId,
         organisationId: orgId,
-        isOffline: dto.isOffline || false,
-        status: dto.isOffline
-          ? InviteStatus.OFFLINE_PENDING
-          : needsApproval
-            ? InviteStatus.AWAITING_APPROVAL
-            : InviteStatus.ACTIVE,
-        ...(dto.expectedAt ? { expectedAt: new Date(dto.expectedAt) } : {}),
+        isOffline: false,
+        status: needsApproval ? InviteStatus.AWAITING_APPROVAL : InviteStatus.ACTIVE,
+        vehiclePlate: isVehicle ? cleanPlate(dto.vehiclePlate) : null,
+        vehicleDetails: isVehicle ? cleanVehicleDetails(dto.vehicleDetails) : null,
+        ...(expectedAt ? { expectedAt } : {}),
       },
       include: {
         host: { select: { id: true, fullName: true, email: true } },
@@ -137,6 +146,8 @@ export class InvitesService {
       }));
     }
 
+    if (!guests.length) throw new BadRequestException('Add at least one guest');
+    for (const g of guests) if (!g.fullName) throw new BadRequestException('Every guest needs a full name');
     const createdVisitors: any[] = [];
     for (const g of guests) {
       const v = await this.prisma.visitor.create({
@@ -156,15 +167,24 @@ export class InvitesService {
       entity: 'Invite',
       entityId: invite.id,
       userId: hostId,
-      details: { purpose: dto.purpose, guestCount: guests.length },
+      details: {
+        purpose: dto.purpose,
+        guestCount: guests.length,
+        guests: guests.map((g) => g.fullName),
+        noContactGuests: guests.filter((g) => !g.email && !g.phone).map((g) => g.fullName),
+        expectedAt: expectedAt ? expectedAt.toISOString() : null,
+        expectedMode: dto.expectedMode || null,
+        awaitingApproval: needsApproval,
+      },
     });
 
     const link = `${await this.frontendBase(orgId)}/visitor/${token}`;
 
-    // Email each guest that has an address (skip offline / awaiting approval until approved)
+    // Email each guest that has an address (awaiting approval waits until approved)
     let emailsSent: string[] = [];
-    if (!dto.isOffline && !needsApproval) {
+    if (!needsApproval) {
       emailsSent = await this.sendGuestInviteEmails(invite.id);
+      await this.auditGuestNotified(invite.id, hostId, 'INVITE_LINK', emailsSent);
     }
 
     if (needsApproval) {
@@ -189,8 +209,218 @@ export class InvitesService {
       link,
       expiresInMinutes: ttl,
       emailsSent,
+      noContactGuests: createdVisitors.filter((v) => !v.email && !v.phone).map((v) => ({ id: v.id, fullName: v.fullName })),
       awaitingApproval: needsApproval,
     };
+  }
+
+  private async auditGuestNotified(inviteId: string, userId: string | undefined, kind: string, emails: string[], extra?: any) {
+    await this.audit.log({
+      action: 'INVITE_GUESTS_NOTIFIED',
+      entity: 'Invite',
+      entityId: inviteId,
+      userId,
+      details: { kind, emailed: emails.length, recipients: emails, smtp: this.mail.isEnabled(), ...(extra || {}) },
+    });
+  }
+
+  /** Host, an admin of the invite's agency, or a platform admin may manage the invite. */
+  private async loadManageable(inviteId: string, actor: { id: string; role: string; orgId: string }) {
+    const invite = await this.prisma.invite.findUnique({
+      where: { id: inviteId },
+      include: {
+        visitors: true,
+        host: { select: { id: true, fullName: true, email: true } },
+        organisation: { select: { id: true, name: true, customDomain: true } },
+      },
+    });
+    if (!invite) throw new NotFoundException('Invite not found');
+    const ok =
+      invite.hostId === actor.id ||
+      (actor.role === Role.ADMIN && invite.organisationId === actor.orgId) ||
+      actor.role === Role.SUPER_ADMIN ||
+      actor.role === Role.GLOBAL_ADMIN;
+    if (!ok) throw new ForbiddenException('Only the host or an admin can change this invite');
+    return invite;
+  }
+
+  /** Host cancels an invite. Guests are told at any stage; the gate shows "Cancelled" and blocks entry. */
+  async cancel(inviteId: string, actor: { id: string; role: string; orgId: string }, reason?: string) {
+    const invite = await this.loadManageable(inviteId, actor);
+    if (invite.cancelledAt) throw new BadRequestException('This invite is already cancelled');
+    const now = new Date();
+    const note = String(reason || '').trim().slice(0, 300) || null;
+    await this.prisma.$transaction([
+      this.prisma.invite.update({
+        where: { id: inviteId },
+        data: { status: InviteStatus.REVOKED, cancelledAt: now, cancelledById: actor.id, cancelReason: note },
+      }),
+      // Guests not yet through any gate are cancelled outright; anyone already inside keeps
+      // their status so the gate can still record their exit.
+      this.prisma.visitor.updateMany({
+        where: { inviteId, status: 'INVITED', gateVisits: { none: {} } },
+        data: { status: 'CANCELLED' },
+      }),
+    ]);
+    const when = fmtAppTime(invite.expectedAt);
+    const sent: string[] = [];
+    for (const v of invite.visitors) {
+      if (!v.email) continue;
+      const r = await this.mail.sendNotice({
+        to: v.email,
+        organisationId: invite.organisationId,
+        subject: `Visit cancelled: ${invite.purpose}`,
+        eyebrow: 'Visit cancelled',
+        title: `Hello ${v.fullName}, your visit has been cancelled`,
+        paragraphs: [
+          `${invite.host.fullName} has cancelled the visit "${invite.purpose}". Your gate pass will no longer be accepted.`,
+          ...(note ? [`Reason: ${note}`] : []),
+        ],
+        facts: [['Host', invite.host.fullName], ['Was scheduled for', when || null]],
+      });
+      if (r.ok) sent.push(v.email);
+    }
+    if (invite.hostId !== actor.id) {
+      await this.notifications.create({
+        userId: invite.hostId,
+        title: 'Invite cancelled',
+        body: `Your invite "${invite.purpose}" was cancelled by an administrator.${note ? ` ${note}` : ''}`,
+        meta: { type: 'INVITE_CANCELLED', inviteId },
+        channels: ['in_app'],
+      }).catch(() => {});
+    }
+    await this.audit.log({ action: 'INVITE_CANCELLED', entity: 'Invite', entityId: inviteId, userId: actor.id, details: { purpose: invite.purpose, reason: note, guests: invite.visitors.map((v) => v.fullName) } });
+    await this.auditGuestNotified(inviteId, actor.id, 'CANCELLED', sent);
+    return { ok: true, cancelledAt: now, emailsSent: sent };
+  }
+
+  /** Postpone an Active, Used or Expired invite to a new date/time (never in the past). */
+  async postpone(inviteId: string, actor: { id: string; role: string; orgId: string }, body: { expectedAt?: string; note?: string }) {
+    const invite = await this.loadManageable(inviteId, actor);
+    if (invite.cancelledAt || invite.status === InviteStatus.REVOKED) throw new BadRequestException('A cancelled invite cannot be postponed');
+    if (!([InviteStatus.ACTIVE, InviteStatus.EXPIRED, InviteStatus.USED] as InviteStatus[]).includes(invite.status)) {
+      throw new BadRequestException('Only active or expired invites can be postponed');
+    }
+    const next = parseAppDateTime(body.expectedAt);
+    if (!next) throw new BadRequestException('Choose the new date and time');
+    if (isPast(next)) throw new BadRequestException('The new date and time cannot be in the past');
+    if (invite.visitors.length && invite.visitors.every((v) => v.status !== 'INVITED')) {
+      throw new BadRequestException('Every guest has already been processed at the gate');
+    }
+    const ttl = parseInt(process.env.INVITE_LINK_TTL_MINUTES || '60', 10);
+    // Registration link stays usable until the new visit time (at least the normal TTL).
+    const expiresAt = new Date(Math.max(Date.now() + ttl * 60000, next.getTime() + 60 * 60000));
+    const note = String(body.note || '').trim().slice(0, 300) || null;
+    const previous = invite.expectedAt;
+    const updated = await this.prisma.invite.update({
+      where: { id: inviteId },
+      data: {
+        expectedAt: next,
+        postponedAt: new Date(),
+        postponeCount: { increment: 1 },
+        reminderDaySentAt: null,
+        reminderHourSentAt: null,
+        hostConfirmedAt: null,
+        expiresAt,
+        status: invite.status === InviteStatus.EXPIRED ? InviteStatus.ACTIVE : invite.status,
+      },
+    });
+    const link = `${publicFrontendBase(invite.organisation?.customDomain)}/visitor/${invite.token}`;
+    const sent: string[] = [];
+    for (const v of invite.visitors) {
+      if (!v.email || v.status !== 'INVITED') continue;
+      const r = await this.mail.sendNotice({
+        to: v.email,
+        organisationId: invite.organisationId,
+        subject: `Visit rescheduled: ${invite.purpose}`,
+        eyebrow: 'New date & time',
+        title: `Hello ${v.fullName}, your visit has moved`,
+        paragraphs: [`${invite.host.fullName} has postponed "${invite.purpose}". Please come at the new time below.`, ...(note ? [`Note: ${note}`] : [])],
+        facts: [['New date & time', fmtAppTime(next)], ['Previously', previous ? fmtAppTime(previous) : null], ['Gate passphrase', invite.passphrase]],
+        button: { href: link, label: v.photoPath ? 'View my gate pass' : 'Complete registration' },
+      });
+      if (r.ok) sent.push(v.email);
+    }
+    await this.notifications.create({
+      userId: invite.hostId,
+      title: 'Visit postponed',
+      body: `"${invite.purpose}" now takes place ${fmtAppTime(next)}.${sent.length ? ` ${sent.length} guest${sent.length === 1 ? '' : 's'} emailed.` : ''}`,
+      meta: { type: 'INVITE_POSTPONED', inviteId, expectedAt: next.toISOString() },
+      channels: ['in_app'],
+    }).catch(() => {});
+    if (invite.host.email && this.mail.isEnabled()) {
+      await this.mail.sendNotice({
+        to: invite.host.email,
+        organisationId: invite.organisationId,
+        subject: `Visit postponed: ${invite.purpose}`,
+        eyebrow: 'Postponed',
+        title: `Your visit is now ${fmtAppTime(next)}`,
+        paragraphs: [`Guests: ${invite.visitors.map((v) => v.fullName).join(', ')}`],
+        facts: [['Previously', previous ? fmtAppTime(previous) : null]],
+      }).catch(() => null);
+    }
+    await this.audit.log({ action: 'INVITE_POSTPONED', entity: 'Invite', entityId: inviteId, userId: actor.id, details: { purpose: invite.purpose, from: previous?.toISOString() || null, to: next.toISOString(), note } });
+    await this.auditGuestNotified(inviteId, actor.id, 'POSTPONED', sent);
+    return { ...updated, emailsSent: sent };
+  }
+
+  /** Host answers the reminder: "I'll be available". */
+  async confirmAvailability(inviteId: string, actor: { id: string; role: string; orgId: string }) {
+    const invite = await this.loadManageable(inviteId, actor);
+    const updated = await this.prisma.invite.update({ where: { id: inviteId }, data: { hostConfirmedAt: new Date() } });
+    await this.audit.log({ action: 'HOST_AVAILABILITY_CONFIRMED', entity: 'Invite', entityId: inviteId, userId: actor.id, details: { purpose: invite.purpose, expectedAt: invite.expectedAt?.toISOString() || null } });
+    return { ok: true, hostConfirmedAt: updated.hostConfirmedAt };
+  }
+
+  /**
+   * Host ticks (confirm) or crosses (decline) a gate photo of a guest who had no email/phone.
+   * Each guest is independent — one decline never blocks a co-guest.
+   */
+  async reviewIdentity(visitorId: string, actor: { id: string; role: string; orgId: string }, confirm: boolean) {
+    const visitor = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: { include: { host: { select: { id: true, fullName: true } } } }, transfers: { orderBy: { createdAt: 'desc' }, take: 1 } } });
+    if (!visitor) throw new NotFoundException('Guest not found');
+    const last = visitor.transfers[0];
+    const ok =
+      visitor.invite.hostId === actor.id ||
+      last?.toHostId === actor.id ||
+      (actor.role === Role.ADMIN && visitor.invite.organisationId === actor.orgId) ||
+      actor.role === Role.SUPER_ADMIN ||
+      actor.role === Role.GLOBAL_ADMIN;
+    if (!ok) throw new ForbiddenException('Only the host can confirm this guest');
+    if (!visitor.gatePhotoPath) throw new BadRequestException('The gate has not sent a photo for this guest');
+    if (visitor.identityStatus !== 'PENDING') throw new BadRequestException(`Already ${String(visitor.identityStatus || 'not requested').toLowerCase()}`);
+    const now = new Date();
+    const updated = await this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: confirm
+        ? { identityStatus: 'CONFIRMED', identityReviewedAt: now, identityReviewedById: actor.id, photoPath: visitor.gatePhotoPath }
+        : { identityStatus: 'DECLINED', identityReviewedAt: now, identityReviewedById: actor.id, status: 'DENIED', deniedAt: now, deniedReason: 'Host did not confirm identity' },
+    });
+    if (visitor.identityRequestedById) {
+      await this.notifications.create({
+        userId: visitor.identityRequestedById,
+        title: confirm ? 'Identity confirmed' : 'Identity not confirmed',
+        body: `${visitor.invite.host.fullName} ${confirm ? 'confirmed' : 'did not confirm'} ${visitor.fullName}.`,
+        meta: { type: 'IDENTITY_RESULT', visitorId, inviteId: visitor.inviteId, confirmed: confirm, url: `/gate?code=${encodeURIComponent(visitor.invite.passphrase)}` },
+        channels: ['in_app'],
+      }).catch(() => {});
+    }
+    await this.audit.log({ action: confirm ? 'GUEST_IDENTITY_CONFIRMED' : 'GUEST_IDENTITY_DECLINED', entity: 'Visitor', entityId: visitorId, userId: actor.id, details: { guest: visitor.fullName, inviteId: visitor.inviteId } });
+    return { id: updated.id, identityStatus: updated.identityStatus, status: updated.status };
+  }
+
+  /** Identity requests waiting for this host. */
+  async pendingIdentity(actor: { id: string; role: string; orgId: string }) {
+    const where: any = { identityStatus: 'PENDING' };
+    if (actor.role === Role.ADMIN) where.invite = { organisationId: actor.orgId };
+    else if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.GLOBAL_ADMIN) where.invite = { hostId: actor.id };
+    const rows = await this.prisma.visitor.findMany({
+      where,
+      include: { invite: { select: { id: true, purpose: true, expectedAt: true, host: { select: { id: true, fullName: true } } } } },
+      orderBy: { identityRequestedAt: 'asc' },
+      take: 100,
+    });
+    return rows.map((v) => ({ id: v.id, fullName: v.fullName, gatePhotoPath: v.gatePhotoPath, identityStatus: v.identityStatus, identityRequestedAt: v.identityRequestedAt, invite: v.invite }));
   }
 
   async findMyInvites(hostId: string) {
@@ -245,7 +475,7 @@ export class InvitesService {
         i.category::text,
         CASE i.status::text
           WHEN 'ACTIVE' THEN 'active live' WHEN 'USED' THEN 'used registered'
-          WHEN 'EXPIRED' THEN 'expired' WHEN 'OFFLINE_PENDING' THEN 'pending walk-in walkin offline'
+          WHEN 'EXPIRED' THEN 'expired' WHEN 'REVOKED' THEN 'cancelled revoked' WHEN 'OFFLINE_PENDING' THEN 'pending walk-in walkin offline'
           WHEN 'AWAITING_APPROVAL' THEN 'pending awaiting approval' ELSE i.status::text END,
         CASE i."expectedMode"::text WHEN 'PEDESTRIAN' THEN 'on foot walking' ELSE i."expectedMode"::text END,
         array_to_string(i."guestNames", ' '),
@@ -328,7 +558,7 @@ export class InvitesService {
     }
 
     if (invite.status === InviteStatus.REVOKED) {
-      throw new BadRequestException('This invite has been revoked');
+      throw new BadRequestException(invite.cancelledAt ? 'This visit has been cancelled by the host' : 'This invite has been revoked');
     }
 
     const expired =
@@ -380,6 +610,7 @@ export class InvitesService {
       where: { id: inviteId, organisationId: orgId },
     });
     if (!invite) throw new NotFoundException('Invite not found');
+    if (invite.cancelledAt) throw new BadRequestException('A cancelled invite cannot be revived');
 
     const ttl = parseInt(process.env.INVITE_LINK_TTL_MINUTES || '60', 10);
     const expiresAt = new Date(Date.now() + ttl * 60 * 1000);
@@ -436,7 +667,8 @@ export class InvitesService {
     });
 
     // Approved online invites now get their registration emails
-    const emailsSent = invite.isOffline ? [] : await this.sendGuestInviteEmails(inviteId);
+    const emailsSent = await this.sendGuestInviteEmails(inviteId);
+    await this.auditGuestNotified(inviteId, adminId, 'INVITE_LINK', emailsSent);
     await this.notifications.create({
       userId: invite.hostId,
       title: 'Invite approved',

@@ -25,6 +25,7 @@ import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import StatusPill from '@/components/ui/StatusPill';
 import { Empty, SkeletonList } from '@/components/ui/Bits';
 import { InviteDetail, InviteRow, inviteSheetProps } from '@/components/InviteBits';
+import { ApprovalTimeline } from '@/components/ApprovalBits';
 import { inviteStatus, plural, titleCase } from '@/lib/format';
 
 const DAY = 86400000;
@@ -249,6 +250,7 @@ export default function DashboardPage() {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => setNow(new Date()), []);
   const [view, setView] = useState<View>(null);
+  const [approvals, setApprovals] = useState<any>(null);
 
   useEffect(() => {
     const u = getUser();
@@ -269,6 +271,7 @@ export default function DashboardPage() {
       return;
     }
     setUserState(u);
+    if (u.role === 'ADMIN') api.approvalsSummary().then(setApprovals).catch(() => {});
     api
       .myInvites()
       .then(setInvites)
@@ -360,6 +363,23 @@ export default function DashboardPage() {
           ]}
           onClick={() => setView({ kind: 'active' })}
         />
+        {user?.role === 'ADMIN' && approvals ? (
+          <StatCard
+            title="Pending approvals"
+            value={approvals.pending}
+            data={s.pendSeries}
+            prev={s.pendPrev}
+            tone="amber"
+            icon={<Clock size={18} />}
+            info="Profile changes and invites waiting for you, plus what was approved or rejected in the last 30 days. Tap to review."
+            breakdown={[
+              { label: 'Pending', value: approvals.pending },
+              { label: 'Approved', value: approvals.approved30d },
+              { label: 'Rejected', value: approvals.declined30d },
+            ]}
+            onClick={() => router.push('/approvals')}
+          />
+        ) : (
         <StatCard
           title="Pending approval"
           value={s.pend.length}
@@ -374,7 +394,17 @@ export default function DashboardPage() {
           ]}
           onClick={() => setView({ kind: 'pending' })}
         />
+        )}
       </div>
+
+      {user?.role === 'ADMIN' && approvals?.recent?.length > 0 && (
+        <Link href="/approvals" className="surface animate-in mb-5 block !p-3 transition hover:shadow-lift" data-testid="approvals-recent">
+          <p className="eyebrow mb-2 flex items-center justify-between">
+            Approvals timeline <span className="flex items-center gap-0.5 text-[10px] font-semibold normal-case tracking-normal text-brand-600">Open <ChevronRight size={12} /></span>
+          </p>
+          <ApprovalTimeline rows={approvals.recent} limit={3} dense />
+        </Link>
+      )}
 
       <div className="stagger mb-6 grid grid-cols-2 gap-3">
         {quick.map(({ href, label, tip, icon: Icon, tone }) => (

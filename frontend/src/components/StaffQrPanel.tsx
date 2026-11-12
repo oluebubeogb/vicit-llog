@@ -6,6 +6,7 @@ import { staffBadgeUrl } from '@/lib/format';
 import SleekOverlay from '@/components/ui/SleekOverlay';
 import { QrCode, Shield, Camera, Download, KeyRound, RefreshCw, Loader2 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
+import PasswordInput from '@/components/ui/PasswordInput';
 
 type Status = { hasStaffPin: boolean; hasBadgePhoto: boolean; hasStaffQr: boolean; lockedUntil?: string | null; organisationName?: string };
 
@@ -327,7 +328,7 @@ export default function StaffQrPanel({ fullName, organisationName }: { fullName:
         }
       >
         <label className="block text-xs font-semibold text-slate-600">Account password
-          <input type="password" className="input mt-1" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+          <PasswordInput wrapperClassName="mt-1" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
         </label>
         <PinInputs pin={pin} setPin={setPin} pin2={pin2} setPin2={setPin2} confirm optional />
         {error && <p className="text-sm text-rose-600">{error}</p>}

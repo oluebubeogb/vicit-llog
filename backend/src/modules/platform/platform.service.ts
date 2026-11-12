@@ -8,8 +8,9 @@ import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { CUSTOM_FIELD_TYPES, cleanCustomFields, fieldKey } from '../../common/utils/custom-fields';
 
-const userSelect = { id: true, email: true, fullName: true, phone: true, role: true, isActive: true, mustChangePassword: true, organisationId: true, permissions: true, createdAt: true } as const;
+const userSelect = { id: true, email: true, fullName: true, phone: true, role: true, portfolio: true, customFields: true, isActive: true, mustChangePassword: true, organisationId: true, permissions: true, createdAt: true } as const;
 const showTempInAdmin = () => (process.env.SHOW_TEMP_PASSWORDS_IN_ADMIN || 'false').toLowerCase() === 'true';
 const GLOBAL_PERMISSIONS = ['agencies.view', 'agencies.create', 'agency_admins.create', 'people.view', 'people.create', 'gates.manage', 'visits.view', 'audit.view'];
 
@@ -105,7 +106,7 @@ export class PlatformService {
   async agencies(actor: any) {
     this.assertPermission(actor, 'agencies.view');
     const organisations = await this.prisma.organisation.findMany({
-      include: { _count: { select: { users: true, invites: true, locations: true } }, users: { where: { role: { in: [Role.ADMIN, Role.STAFF, Role.GATE] } }, select: { id: true, fullName: true, email: true, phone: true, role: true, isActive: true }, orderBy: [{ role: 'asc' }, { fullName: 'asc' }] } },
+      include: { _count: { select: { users: true, invites: true, locations: true } }, users: { where: { role: { in: [Role.ADMIN, Role.STAFF, Role.GATE] } }, select: { id: true, fullName: true, email: true, phone: true, role: true, portfolio: true, customFields: true, isActive: true }, orderBy: [{ role: 'asc' }, { fullName: 'asc' }] } },
       orderBy: { createdAt: 'desc' },
     });
     return Promise.all(organisations.map(async (org) => {
@@ -177,6 +178,8 @@ export class PlatformService {
     const duplicate = await this.prisma.user.findUnique({ where: { email } });
     if (duplicate && duplicate.id !== userId) throw new ConflictException('That email is already registered');
     const data: any = { fullName, email, phone };
+    if (input.portfolio !== undefined) data.portfolio = String(input.portfolio || '').trim().slice(0, 120) || null;
+    if (input.customFields !== undefined) data.customFields = await cleanCustomFields(this.prisma, target.organisationId, input.customFields, { existing: target.customFields });
     if (input.role !== undefined) {
       const role = String(input.role).toUpperCase();
       // Explicitly type these collections as Role[] so TypeScript does not
@@ -232,7 +235,7 @@ export class PlatformService {
     return updated;
   }
 
-  async createAgencyUser(actor: any, agencyId: string, input: any) {
+  async createAgencyUser(actor: any, agencyId: string, input: any, opts?: { bulk?: boolean }) {
     this.assertPermission(actor, 'people.create');
     const agency = await this.prisma.organisation.findUnique({ where: { id: agencyId } });
     if (!agency) throw new NotFoundException('Agency not found');
@@ -248,38 +251,140 @@ export class PlatformService {
       const count = await this.prisma.gate.count({ where: { id: { in: gateIds }, location: { OR: [{ organisationId: agencyId }, { isShared: true }] } } });
       if (count !== uniqueGateIds.length) throw new BadRequestException('One or more selected gates do not belong to this agency');
     }
+    const customFields = await cleanCustomFields(this.prisma, agencyId, input.customFields, { enforceRequired: !opts?.bulk });
     const initialPassword = generateNigerianPassword();
     const passwordHash = await bcrypt.hash(initialPassword, 12);
     const user = await this.prisma.$transaction(async tx => {
-      const created = await tx.user.create({ data: { fullName, email, phone: input.phone || null, role: role as Role, portfolio: input.portfolio || null, passwordHash, organisationId: agencyId, mustChangePassword: true } });
+      const created = await tx.user.create({ data: { fullName, email, phone: String(input.phone || '').trim() || null, role: role as Role, portfolio: String(input.portfolio || '').trim() || null, passwordHash, organisationId: agencyId, mustChangePassword: true, ...(customFields && Object.keys(customFields).length ? { customFields } : {}) } });
       if (role === 'GATE' && gateIds.length) await tx.gateOfficerAssignment.createMany({ data: uniqueGateIds.map((gateId: string) => ({ gateId, userId: created.id })) });
       return created;
     });
+    // Same welcome / credentials email as a single enrolment — bulk rows use this exact path.
     const mailResult = await this.mail.sendWelcome(email, fullName, initialPassword, undefined, agencyId);
-    await this.audit.log({ action: 'AGENCY_USER_CREATED', entity: 'User', entityId: user.id, userId: actor.id, details: { role, agencyId, assignedGateIds: gateIds } });
-    return { user: { id: user.id, email, fullName, role: user.role, organisationId: agencyId, mustChangePassword: true }, emailSent: !!mailResult?.ok, ...(showTempInAdmin() ? { initialPassword } : {}) };
+    await this.audit.log({ action: 'AGENCY_USER_CREATED', entity: 'User', entityId: user.id, userId: actor.id, details: { role, agencyId, assignedGateIds: gateIds, bulk: !!opts?.bulk, welcomeEmailSent: !!mailResult?.ok } });
+    return { user: { id: user.id, email, fullName, role: user.role, organisationId: agencyId, mustChangePassword: true }, emailSent: !!mailResult?.ok, mailError: mailResult?.ok ? undefined : (mailResult as any)?.error || 'Email not sent', ...(showTempInAdmin() ? { initialPassword } : {}) };
   }
 
   async bulkCreateAgencyPeople(actor: any, rows: any[]) {
     this.assertPermission(actor, 'people.create');
-    if (!Array.isArray(rows) || rows.length > 500) throw new BadRequestException('Upload between 1 and 500 rows');
-    const agencies = await this.prisma.organisation.findMany({ select: { id: true, name: true, code: true } });
-    const byCode = new Map<string, typeof agencies[number]>(agencies.map(a => [a.code.toLowerCase(), a] as const));
-    const byName = new Map<string, typeof agencies[number]>(agencies.map(a => [a.name.toLowerCase(), a] as const));
+    if (!Array.isArray(rows) || !rows.length || rows.length > 500) throw new BadRequestException('Upload between 1 and 500 rows');
+    const agencies = await this.prisma.organisation.findMany({ select: { id: true, name: true, code: true, shortName: true } });
+    const norm = (v: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const lookup = new Map<string, typeof agencies[number]>();
+    for (const a of agencies) {
+      lookup.set(norm(a.code), a);
+      lookup.set(norm(a.name), a);
+      if (a.shortName) lookup.set(norm(a.shortName), a);
+    }
+    // Common shorthand → the canonical agency code (only used when that code exists).
+    const SHORTHAND: Record<string, string> = {
+      navy: 'NN', 'nigeria navy': 'NN', 'nigerian navy': 'NN',
+      army: 'NA', 'nigeria army': 'NA', 'nigerian army': 'NA',
+      'air force': 'NAF', airforce: 'NAF', 'nigerian air force': 'NAF', 'nigeria air force': 'NAF', 'nigerian airforce': 'NAF',
+      'defence headquarters': 'DHQ', 'defense headquarters': 'DHQ', defence: 'DHQ', hq: 'DHQ',
+    };
+    const resolve = (raw: string) => {
+      const k = norm(raw);
+      if (!k) return undefined;
+      const direct = lookup.get(k);
+      if (direct) return direct;
+      const code = SHORTHAND[k];
+      const byCode = code ? lookup.get(norm(code)) : undefined;
+      if (byCode) return byCode;
+      // Last resort for shorthand: a single agency whose name contains the word (e.g. "Navy").
+      const word = k === 'airforce' ? 'air force' : k;
+      if (word.length < 3) return undefined;
+      const hits = agencies.filter((a) => norm(a.name).includes(word));
+      return hits.length === 1 ? hits[0] : undefined;
+    };
     const results: any[] = [];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] || {};
-      const key = String(row.agencyCode || row.agency || row.agencyName || '').trim().toLowerCase();
-      const agency = byCode.get(key) || byName.get(key);
-      if (!agency) { results.push({ row: i + 2, error: 'Agency code/name not found' }); continue; }
+      const raw = String(row.agencyCode || row.agency || row.agencyName || '').trim();
+      const agency = resolve(raw);
+      if (!agency) { results.push({ row: i + 2, email: row.email, agency: raw, error: `Agency "${raw || '(blank)'}" not found. Use a code (${agencies.map((a) => a.code).join(', ')}) or the exact agency name.` }); continue; }
       try {
-        const created = await this.createAgencyUser(actor, agency.id, row);
-        results.push({ row: i + 2, agency: agency.name, email: created.user.email, success: true, emailSent: created.emailSent });
+        const created = await this.createAgencyUser(actor, agency.id, row, { bulk: true });
+        results.push({ row: i + 2, agency: agency.name, agencyCode: agency.code, email: created.user.email, success: true, emailSent: created.emailSent, mailError: created.mailError });
       } catch (error: any) {
-        results.push({ row: i + 2, agency: agency.name, email: row.email, error: error?.message || 'Unable to create user' });
+        results.push({ row: i + 2, agency: agency.name, agencyCode: agency.code, email: row.email, error: error?.message || 'Unable to create user' });
       }
     }
-    return { total: rows.length, createdCount: results.filter(r => r.success).length, errorCount: results.filter(r => !r.success).length, results };
+    const created = results.filter(r => r.success);
+    await this.audit.log({ action: 'BULK_PEOPLE_IMPORTED', entity: 'User', userId: actor.id, details: { total: rows.length, created: created.length, emailsSent: created.filter(r => r.emailSent).length } });
+    return {
+      total: rows.length,
+      createdCount: created.length,
+      errorCount: results.filter(r => !r.success).length,
+      emailSentCount: created.filter(r => r.emailSent).length,
+      emailFailedCount: created.filter(r => !r.emailSent).length,
+      mailConfigured: this.mail.isEnabled(),
+      results,
+    };
+  }
+
+  /* ------------------------------------------------------------ custom fields (per agency) */
+
+  async listCustomFields(actor: any, agencyId: string) {
+    if (![Role.SUPER_ADMIN, Role.GLOBAL_ADMIN].includes(actor.role) && actor.orgId !== agencyId) throw new ForbiddenException();
+    return this.prisma.agencyCustomField.findMany({ where: { organisationId: agencyId }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
+  }
+
+  private cleanFieldInput(input: any, partial = false) {
+    const data: any = {};
+    if (!partial || input.label !== undefined) {
+      const label = String(input.label || '').trim();
+      if (label.length < 1 || label.length > 60) throw new BadRequestException('Field name must be 1–60 characters');
+      data.label = label;
+    }
+    if (!partial || input.type !== undefined) {
+      const type = String(input.type || 'text').toLowerCase();
+      if (!(CUSTOM_FIELD_TYPES as readonly string[]).includes(type)) throw new BadRequestException('Type must be text, textarea, radio, checkbox, date or dropdown');
+      data.type = type;
+    }
+    if (!partial || input.options !== undefined) {
+      const raw = Array.isArray(input.options) ? input.options : String(input.options || '').split(/\r?\n|,/);
+      const options = Array.from(new Set<string>(raw.map((o: any) => String(o).trim()).filter(Boolean))).slice(0, 60);
+      data.options = options;
+    }
+    if (input.required !== undefined) data.required = !!input.required;
+    if (input.isActive !== undefined) data.isActive = !!input.isActive;
+    if (input.sortOrder !== undefined) data.sortOrder = Math.max(0, Math.min(999, parseInt(String(input.sortOrder), 10) || 0));
+    const type = data.type;
+    if (type && ['radio', 'dropdown'].includes(type) && !(data.options || []).length) throw new BadRequestException('Add at least one option for radio and dropdown fields');
+    return data;
+  }
+
+  async createCustomField(actor: any, agencyId: string, input: any) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can define custom fields');
+    const agency = await this.prisma.organisation.findUnique({ where: { id: agencyId }, select: { id: true, name: true } });
+    if (!agency) throw new NotFoundException('Agency not found');
+    const data = this.cleanFieldInput(input);
+    let key = fieldKey(input.key || data.label);
+    for (let n = 2; await this.prisma.agencyCustomField.findUnique({ where: { organisationId_key: { organisationId: agencyId, key } } }); n++) key = `${fieldKey(input.key || data.label)}_${n}`;
+    const count = await this.prisma.agencyCustomField.count({ where: { organisationId: agencyId } });
+    const field = await this.prisma.agencyCustomField.create({ data: { ...data, key, organisationId: agencyId, sortOrder: data.sortOrder ?? count } });
+    await this.audit.log({ action: 'CUSTOM_FIELD_CREATED', entity: 'Organisation', entityId: agencyId, userId: actor.id, details: { label: field.label, type: field.type, options: field.options } });
+    return field;
+  }
+
+  async updateCustomField(actor: any, fieldId: string, input: any) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can edit custom fields');
+    const current = await this.prisma.agencyCustomField.findUnique({ where: { id: fieldId } });
+    if (!current) throw new NotFoundException('Field not found');
+    const data = this.cleanFieldInput({ type: current.type, options: current.options, ...input }, true);
+    const field = await this.prisma.agencyCustomField.update({ where: { id: fieldId }, data });
+    await this.audit.log({ action: 'CUSTOM_FIELD_UPDATED', entity: 'Organisation', entityId: current.organisationId, userId: actor.id, details: { label: field.label, type: field.type, options: field.options, active: field.isActive } });
+    return field;
+  }
+
+  async deleteCustomField(actor: any, fieldId: string) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only the Super Admin can remove custom fields');
+    const current = await this.prisma.agencyCustomField.findUnique({ where: { id: fieldId } });
+    if (!current) throw new NotFoundException('Field not found');
+    await this.prisma.agencyCustomField.delete({ where: { id: fieldId } });
+    await this.audit.log({ action: 'CUSTOM_FIELD_DELETED', entity: 'Organisation', entityId: current.organisationId, userId: actor.id, details: { label: current.label } });
+    return { ok: true };
   }
 
   async locations(actor: any) {

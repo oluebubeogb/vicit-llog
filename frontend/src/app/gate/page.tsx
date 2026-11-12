@@ -14,11 +14,13 @@ import {
   ImagePlus,
   Flashlight,
   SwitchCamera,
-  Footprints,
-  Bike,
-  Car,
   UserRound,
+  XCircle,
 } from 'lucide-react';
+import NoContactCapture from '@/components/NoContactCapture';
+import VehicleFields, { VehicleLine } from '@/components/VehicleFields';
+import { NoContactIcon, isNoContact } from '@/components/InviteBits';
+import { isVehicleMode, useEntryModes } from '@/lib/entry-modes';
 import PersonLink from '@/components/PersonLink';
 import HostSuggest, { type HostPick } from '@/components/HostSuggest';
 import PageHeader from '@/components/ui/PageHeader';
@@ -74,6 +76,9 @@ export default function GatePage() {
   const [hostPick, setHostPick] = useState<HostPick | null>(null);
   const [gallery, setGallery] = useState<{ images: GalleryImage[]; index: number } | null>(null);
   const [ringNote, setRingNote] = useState<Record<string, string>>({});
+  const [checkpointsFailed, setCheckpointsFailed] = useState(false);
+  const [gatePlate, setGatePlate] = useState('');
+  const [gateVehicleDetails, setGateVehicleDetails] = useState('');
 
   const [photoDecoding, setPhotoDecoding] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
@@ -97,11 +102,28 @@ export default function GatePage() {
 
   useEffect(() => {
     const u = getUser();
-    if (u) api.checkpoints().then((rows: any[]) => { setCheckpoints(rows || []); if (rows?.length) setActiveGateId(rows[0].id); }).catch(() => {});
     if (!u) {
       router.replace('/login');
       return;
     }
+    // Retry instead of silently giving up: an empty list used to fall back to the legacy
+    // "Permit entry / Record exit" buttons on flaky mobile connections (gate passes skipped).
+    let cancelled = false;
+    const load = async (attempt = 0): Promise<void> => {
+      try {
+        const rows = await api.checkpoints();
+        if (cancelled) return;
+        setCheckpoints(rows || []);
+        setCheckpointsFailed(false);
+        if (rows?.length) setActiveGateId((cur) => cur || rows[0].id);
+      } catch {
+        if (cancelled) return;
+        if (attempt < 4) setTimeout(() => load(attempt + 1), 800 * (attempt + 1));
+        else setCheckpointsFailed(true);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
   }, [router]);
 
   // Prefill from ?code= when coming from Visits table (no useSearchParams — avoids Suspense build error)
@@ -115,6 +137,8 @@ export default function GatePage() {
           const data = await api.gateLookup(q);
           setResult(data);
           if (data?.expectedMode) setEntryMode(data.expectedMode);
+          setGatePlate(data?.vehiclePlate || '');
+          setGateVehicleDetails(data?.vehicleDetails || '');
         } catch (err: any) {
           setError(err.message || 'Not found');
         }
@@ -132,8 +156,9 @@ export default function GatePage() {
   }, [evidenceCameraOpen]);
 
   useEffect(() => {
-    if (!result || result.kind === 'staff' || !checkpoints.length) return;
-    const relevant = checkpoints.filter((g: any) => result.locationId ? g.locationId === result.locationId : g.location?.organisationId === result.organisationId);
+    if (!result || result.kind === 'staff' || result.kind === 'contractor') return;
+    const relevant = operableGatesFor(result);
+    if (!relevant.length) return;
     const passed = new Set((result.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
     const next = relevant.sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
     if (next && !relevant.some((g: any) => g.id === activeGateId && !passed.has(g.id))) setActiveGateId(next.id);
@@ -143,6 +168,20 @@ export default function GatePage() {
   const resultRef = useRef(result);
   codeRef.current = code;
   resultRef.current = result;
+
+  /** The full checkpoint route for a lookup: server-provided gates win, the officer's list is a fallback. */
+  function routeGatesFor(data: any): any[] {
+    if (!data) return [];
+    if (Array.isArray(data.gates)) return [...data.gates].sort((a: any, b: any) => a.sequence - b.sequence);
+    return checkpoints.filter((g: any) => (data.locationId ? g.locationId === data.locationId : g.location?.organisationId === data.organisationId));
+  }
+  /** Gates this officer may operate on that route (gate officers only work assigned checkpoints). */
+  function operableGatesFor(data: any): any[] {
+    const route = routeGatesFor(data);
+    if (!Array.isArray(data?.gates)) return route;
+    const mine = new Set(checkpoints.map((g: any) => g.id));
+    return route.filter((g: any) => g.assigned !== false || mine.has(g.id));
+  }
 
   async function lookup(raw?: string, opts?: { silent?: boolean }) {
     const value = normalizeScannedCode(raw ?? codeRef.current);
@@ -157,9 +196,11 @@ export default function GatePage() {
       if (data?.kind === 'staff') {
         // Staff attendance QR — no visitor checkpoint workflow
       } else {
-        if (data?.expectedMode) setEntryMode(data.expectedMode);
+        if (data?.expectedMode && !opts?.silent) setEntryMode(data.expectedMode);
         if (!opts?.silent) {
-          const relevant = checkpoints.filter((g: any) => data?.locationId ? g.locationId === data.locationId : g.location?.organisationId === data?.organisationId);
+          setGatePlate(data?.vehiclePlate || '');
+          setGateVehicleDetails(data?.vehicleDetails || '');
+          const relevant = operableGatesFor(data);
           const passed = new Set((data?.visitors || []).flatMap((v: any) => (v.gateVisits || []).filter((event: any) => event.decision === 'PASSED').map((event: any) => event.gateId)));
           const next = [...relevant].sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
           if (next) setActiveGateId(next.id);
@@ -213,9 +254,10 @@ export default function GatePage() {
       ];
       const visitor = (result?.visitors || []).find((x: any) => x.id === visitorId) || (result?.appointments || []).flatMap((a: any) => a.visitors || []).find((x: any) => x.id === visitorId);
       const direction = visitor?.status === 'ARRIVED' ? 'EXIT' : 'ENTRY';
-      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, direction, notes: decision === 'DENIED' ? (denyReasons[visitorId] || denyReason) : '', particulars, particularsChecked: particularsChecked[visitorId] === true, evidencePhotos: uploadedEvidence });
-      const currentGate = checkpoints.find((g: any) => g.id === activeGateId);
-      const nextGate = currentGate && checkpoints.filter((g: any) => g.locationId === currentGate.locationId && (direction === 'EXIT' ? g.sequence < currentGate.sequence : g.sequence > currentGate.sequence)).sort((a: any,b: any)=> direction === 'EXIT' ? b.sequence-a.sequence : a.sequence-b.sequence)[0];
+      await api.recordCheckpoint({ visitorId, gateId: activeGateId, decision, entryMode, direction, notes: decision === 'DENIED' ? (denyReasons[visitorId] || denyReason) : '', particulars, particularsChecked: particularsChecked[visitorId] === true, evidencePhotos: uploadedEvidence, ...(isVehicleMode(entryMode) ? { vehiclePlate: gatePlate.trim() || undefined, vehicleDetails: gateVehicleDetails.trim() || undefined } : {}) });
+      const opGates = operableGatesFor(result);
+      const currentGate = opGates.find((g: any) => g.id === activeGateId);
+      const nextGate = currentGate && opGates.filter((g: any) => g.locationId === currentGate.locationId && (direction === 'EXIT' ? g.sequence < currentGate.sequence : g.sequence > currentGate.sequence)).sort((a: any,b: any)=> direction === 'EXIT' ? b.sequence-a.sequence : a.sequence-b.sequence)[0];
       if (nextGate) setActiveGateId(nextGate.id);
       setWithheldItems((c) => ({ ...c, [visitorId]: '' }));
       setAllowedItems((c) => ({ ...c, [visitorId]: '' }));
@@ -567,12 +609,22 @@ export default function GatePage() {
   const photo = (p: string) => `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/visitors/photo/${p}`;
   const particularPhoto = (p: string) => `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}${p}`;
   const currentRole = getUser()?.role;
-  const currentCheckpoints = checkpoints.filter((g: any) => result ? (result.locationId ? g.locationId === result.locationId : g.location?.organisationId === result.organisationId) : true);
-  const MODES = [
-    { v: 'PEDESTRIAN', l: 'On foot', icon: <Footprints size={16} /> },
-    { v: 'MOTORCYCLE', l: 'Motorcycle', icon: <Bike size={16} /> },
-    { v: 'VEHICLE', l: 'Vehicle', icon: <Car size={16} /> },
-  ];
+  // Route = every checkpoint on the visitor's way (tracker); currentCheckpoints = those this officer operates.
+  const routeGates = routeGatesFor(result);
+  const currentCheckpoints = operableGatesFor(result);
+  // Legacy one-tap entry/exit only exists for agencies with no checkpoints at all.
+  const legacyAllowed = !!result && Array.isArray(result.gates) ? result.gates.length === 0 : !checkpointsFailed && routeGates.length === 0 && checkpoints.length === 0;
+  const gateById = (id: string) => currentCheckpoints.find((g: any) => g.id === id) || checkpoints.find((g: any) => g.id === id);
+  const activeGate = gateById(activeGateId);
+  const MODES = useEntryModes(result?.allowedEntryModes);
+  const cancelled = !!result?.cancelled;
+  const noContactGuests = (result?.visitors || []).filter((v: any) => isNoContact(v) && (v.gatePhotoPath || (!v.photoPath && v.status === 'INVITED')));
+  const refreshSilently = async () => { await lookup(undefined, { silent: true }); };
+  const modeKey = MODES.map((m) => m.v).join(',');
+  useEffect(() => {
+    if (MODES.length && !MODES.some((m) => m.v === entryMode)) setEntryMode(MODES[0].v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeKey, entryMode]);
 
   return (
     <div className="page">
@@ -737,8 +789,23 @@ export default function GatePage() {
             </div>
           )}
 
-          {currentCheckpoints.length > 0 && (result.visitors || [])[0] && (
-            <CheckpointTracker gates={currentCheckpoints} visits={(result.visitors || []).flatMap((v: any) => v.gateVisits || [])} direction={(result.visitors || []).some((v: any) => v.status === 'ARRIVED') ? 'both' : 'ENTRY'} activeGateId={activeGateId} />
+          {cancelled && (
+            <div className="flex items-center gap-2.5 rounded-2xl border border-slate-200 bg-slate-100 px-3.5 py-3" data-testid="gate-cancelled">
+              <XCircle size={18} className="shrink-0 text-slate-500" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-800">Cancelled by the host</p>
+                <p className="text-xs text-slate-500">Entry is blocked{result.cancelReason ? ` · ${result.cancelReason}` : ''}. Guests already inside can still be checked out.</p>
+              </div>
+              <StatusPill status="CANCELLED" />
+            </div>
+          )}
+
+          {checkpointsFailed && !Array.isArray(result.gates) && (
+            <Notice tone="warn">Could not load checkpoints. Check your connection and reload — entry and exit stay locked until the gates load.</Notice>
+          )}
+
+          {routeGates.length > 0 && (result.visitors || [])[0] && (
+            <CheckpointTracker gates={routeGates} visits={(result.visitors || []).flatMap((v: any) => v.gateVisits || [])} direction={(result.visitors || []).some((v: any) => v.status === 'ARRIVED') ? 'both' : 'ENTRY'} activeGateId={activeGateId} />
           )}
 
           <div>
@@ -754,6 +821,13 @@ export default function GatePage() {
               ))}
             </div>
           </div>
+          <Collapse open={isVehicleMode(entryMode)}>
+            <VehicleFields mode={entryMode} plate={gatePlate} details={gateVehicleDetails} onPlate={setGatePlate} onDetails={setGateVehicleDetails} />
+          </Collapse>
+
+          {noContactGuests.length > 0 && (
+            <NoContactCapture guests={noContactGuests} photoUrl={photo} onChanged={refreshSilently} onError={setError} disabled={cancelled} />
+          )}
 
           {result.visitors?.length > 1 && (
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-100 bg-white/80 px-3 py-2">
@@ -762,7 +836,7 @@ export default function GatePage() {
                 Select all
               </label>
               <div className="ml-auto flex min-w-0 flex-wrap gap-2">
-                <button type="button" className="btn-success !px-3 !py-1.5 text-[11px]" disabled={!!actionLoading || !Object.values(selectedGuests).some(Boolean)} onClick={() => result.visitors.filter((v: any) => selectedGuests[v.id]).forEach((v: any) => doCheckpoint(v.id, 'PASSED'))}>Pass selected</button>
+                <button type="button" className="btn-success !px-3 !py-1.5 text-[11px]" disabled={!!actionLoading || !Object.values(selectedGuests).some(Boolean)} onClick={() => result.visitors.filter((v: any) => selectedGuests[v.id] && v.photoPath).forEach((v: any) => doCheckpoint(v.id, 'PASSED'))}>Pass selected</button>
                 <button type="button" className="btn-danger !px-3 !py-1.5 text-[11px]" disabled={!!actionLoading || !Object.values(selectedGuests).some(Boolean)} onClick={() => { const first = result.visitors.find((v: any) => selectedGuests[v.id]); if (first) setDenyFor(first.id); }}>Decline selected</button>
               </div>
             </div>
@@ -774,7 +848,7 @@ export default function GatePage() {
             const openItems = (v.gateVisits || []).flatMap((ev: any) => (ev.particulars || []).filter((x: any) => x.kind === 'WITHHELD' && !x.resolvedAt && !x.returnedAt).map((x: any) => ({ ...x, gateId: ev.gateId || ev.gate?.id, gateName: ev.gate?.name || 'a checkpoint' })));
             const heldHere = openItems.filter((x: any) => x.gateId === activeGateId);
             const heldElsewhere = openItems.filter((x: any) => x.gateId !== activeGateId);
-            const showInspect = (v.status === 'INVITED' || v.status === 'ARRIVED') && currentCheckpoints.length > 0;
+            const showInspect = ((v.status === 'INVITED' && !cancelled && !!v.photoPath) || v.status === 'ARRIVED') && currentCheckpoints.length > 0;
             return (
             <div key={v.id} className={`card p-4 ${result.scannedVisitorId === v.id ? '!border-brand-300 ring-2 ring-brand-200' : ''}`}>
               <div className="flex items-start gap-3">
@@ -789,8 +863,9 @@ export default function GatePage() {
                   <Avatar name={v.fullName} size={64} className="!rounded-2xl" />
                 )}
                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setExpandedGuests((c) => ({ ...c, [v.id]: !open }))}>
-                  <p className="truncate text-base font-bold text-slate-900">{v.fullName}</p>
-                  <StatusPill status={v.status} className="mt-1" />
+                  <p className="flex items-center gap-1.5 text-base font-bold text-slate-900"><span className="truncate">{v.fullName}</span>{isNoContact(v) && <NoContactIcon size={13} />}</p>
+                  <StatusPill status={cancelled && v.status === 'INVITED' ? 'CANCELLED' : v.status} className="mt-1" />
+                  {(v.vehiclePlate || v.vehicleDetails) && <p className="mt-1 text-xs"><VehicleLine plate={v.vehiclePlate} details={v.vehicleDetails} /></p>}
                   {result.scannedVisitorId === v.id && result.visitors?.length > 1 && <p className="mt-1 text-[10px] font-semibold text-brand-700">Scanned pass</p>}
                 </button>
                 {result.visitors.length > 1 && <span className="text-xs font-semibold text-slate-400">{open ? 'Hide' : 'Open'}</span>}
@@ -798,7 +873,7 @@ export default function GatePage() {
 
               <Collapse open={open}>
               <div className="mt-3 space-y-2">
-              {currentCheckpoints.length > 0 && <CheckpointTracker gates={currentCheckpoints} visits={v.gateVisits || []} direction={v.status === 'ARRIVED' || v.status === 'EXITED' ? 'both' : 'ENTRY'} activeGateId={activeGateId} />}
+              {routeGates.length > 0 && <CheckpointTracker gates={routeGates} visits={v.gateVisits || []} direction={v.status === 'ARRIVED' || v.status === 'EXITED' ? 'both' : 'ENTRY'} activeGateId={activeGateId} />}
 
               {(v.transfers || []).length > 0 && (
                 <div className="rounded-xl bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
@@ -853,8 +928,15 @@ export default function GatePage() {
                     <PhoneCallLink phone={result.host?.phone} className="flex-1 !py-2 text-xs" />
                   </div>
                 </div>}
-                {v.status === 'INVITED' && !v.photoPath && (
-                  <p className="tile-muted !py-2 text-center text-xs font-medium text-amber-700">Photo not captured yet — entry unlocks once the visitor adds a photo</p>
+                {v.status === 'INVITED' && !v.photoPath && !cancelled && (
+                  isNoContact(v) ? (
+                    <button type="button" className="chip-action w-full !py-2.5" onClick={() => document.querySelector('[data-testid="no-contact-capture"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+                      <span className="chip-action-icon"><Camera size={13} /></span>
+                      {v.identityStatus === 'PENDING' ? 'Waiting for host to confirm photo' : v.gatePhotoPath ? 'Photo taken — send to host to confirm' : 'Take photo'}
+                    </button>
+                  ) : (
+                    <p className="tile-muted !py-2 text-center text-xs font-medium text-amber-700">Photo not captured yet — entry unlocks once the visitor adds a photo</p>
+                  )
                 )}
                 {showInspect && (
                   <div className="w-full space-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
@@ -882,18 +964,21 @@ export default function GatePage() {
                       {evidenceCameraError && evidenceGuestId === v.id && <p className="text-[11px] text-rose-600">{evidenceCameraError}</p>}
                       {draftPhotos.length > 0 && <CaptureThumbGrid photos={draftPhotos.map((item, index) => ({ preview: item.preview, alt: `Checkpoint evidence ${index + 1}` }))} onRemove={(index) => removeEvidencePhoto(v.id, index)} />}
                     </div>
-                    {checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={!!particularsChecked[v.id]} onChange={e=>setParticularsChecked((c)=>({...c,[v.id]:e.target.checked}))}/> I have completed the particulars check (including confirming there are no items to record).</label>}
+                    {activeGate?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={!!particularsChecked[v.id]} onChange={e=>setParticularsChecked((c)=>({...c,[v.id]:e.target.checked}))}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || (v.status!=='ARRIVED' && checkpoints.find((g:any)=>g.id===activeGateId)?.admissionsEnabled===false) || (checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false && !particularsChecked[v.id]) || (v.status==='ARRIVED' && heldHere.length>0)} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…': v.status==='ARRIVED' && heldHere.length>0 ? 'Resolve items at this gate first' : v.status==='ARRIVED' ? 'Pass exit checkpoint' : 'Pass checkpoint'}</button>
+                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || (v.status!=='ARRIVED' && activeGate?.admissionsEnabled===false) || (activeGate?.particularsCheckEnabled!==false && !particularsChecked[v.id]) || (v.status==='ARRIVED' && heldHere.length>0)} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…': v.status==='ARRIVED' && heldHere.length>0 ? 'Resolve items at this gate first' : v.status==='ARRIVED' ? 'Pass exit checkpoint' : 'Pass checkpoint'}</button>
                       <button type="button" onClick={() => { setDenyFor(denyFor===v.id?null:v.id); }} disabled={!!actionLoading} className="btn-danger !px-4"><Ban size={17}/></button>
                     </div>
-                    <Collapse open={denyFor === v.id}><textarea value={denyReasons[v.id] || ''} onChange={e=>setDenyReasons((c)=>({...c,[v.id]:e.target.value}))} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!(denyReasons[v.id]||'').trim()||(checkpoints.find((g:any)=>g.id===activeGateId)?.particularsCheckEnabled!==false&&!particularsChecked[v.id])} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
+                    <Collapse open={denyFor === v.id}><textarea value={denyReasons[v.id] || ''} onChange={e=>setDenyReasons((c)=>({...c,[v.id]:e.target.value}))} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!(denyReasons[v.id]||'').trim()||(activeGate?.particularsCheckEnabled!==false&&!particularsChecked[v.id])} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
                   </div>
                 )}
-                {v.status === 'INVITED' && currentCheckpoints.length === 0 && ['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
+                {(v.status === 'INVITED' || v.status === 'ARRIVED') && !cancelled && routeGates.length > 0 && currentCheckpoints.length === 0 && (
+                  <Notice tone="warn">No checkpoint on this route is assigned to your account. Contact an administrator.</Notice>
+                )}
+                {v.status === 'INVITED' && currentCheckpoints.length === 0 && !legacyAllowed && routeGates.length === 0 && ['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
                   <Notice tone="warn">No checkpoint is assigned to your account for this agency or destination. Contact an administrator.</Notice>
                 )}
-                {v.status === 'INVITED' && currentCheckpoints.length === 0 && !['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
+                {v.status === 'INVITED' && !cancelled && legacyAllowed && !['GATE', 'GLOBAL_GATE'].includes(currentRole) && (
                   <div className="flex w-full gap-2">
                     <button type="button" onClick={() => doEntry(v.id)} disabled={!!actionLoading || !v.photoPath} className="btn-success flex-1 !py-3">Permit entry</button>
                   </div>
@@ -901,7 +986,7 @@ export default function GatePage() {
                 {v.status === 'DENIED' && (
                   <Notice tone="error">Entry declined{v.deniedReason ? `: ${v.deniedReason}` : ''}</Notice>
                 )}
-                {v.status === 'ARRIVED' && currentCheckpoints.length === 0 && (
+                {v.status === 'ARRIVED' && legacyAllowed && (
                   <button onClick={() => doExit(v.id)} disabled={!!actionLoading || openItems.length > 0} className="btn w-full bg-gradient-to-br from-amber-400 to-amber-600 !py-3 text-white">
                     <LogOut size={18} />
                     {openItems.length > 0 ? 'Resolve withheld items first' : actionLoading === v.id + '-out' ? '…' : 'Record exit'}

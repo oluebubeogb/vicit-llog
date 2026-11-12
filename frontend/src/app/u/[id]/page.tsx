@@ -127,6 +127,11 @@ export default function PublicUserPage() {
               <Phone size={12} /> Phone call · {profile.phone}
             </a>
           )}
+          {(profile.customFields || []).map((f: any) => (
+            <span key={f.key} className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 ring-1 ring-on-brand/20 backdrop-blur" data-testid="custom-field-chip">
+              <span className="opacity-75">{f.label}:</span> {Array.isArray(f.value) ? f.value.join(', ') : f.value === true ? 'Yes' : String(f.value)}
+            </span>
+          ))}
           {profile.subjectIsGate && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-300/30 px-2.5 py-1 ring-1 ring-white/20">
               <ShieldCheck size={12} /> Gate officer

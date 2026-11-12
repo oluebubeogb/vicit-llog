@@ -24,6 +24,7 @@ function esc(v: unknown): string {
 function fmtWhen(iso?: string | null) {
   const d = iso ? new Date(iso) : new Date();
   return d.toLocaleString('en-GB', {
+    timeZone: process.env.APP_TIMEZONE || 'Africa/Lagos',
     weekday: 'short',
     year: 'numeric',
     month: 'short',
@@ -261,36 +262,103 @@ export class MailService {
       return { ok: false, error: 'no recipient' };
     }
     if (!this.enabled()) {
-      this.logger.log(`[mail:disabled] to=${opts.to} subject=${opts.subject}\n${opts.text}`);
+      this.logger.log(`[mail:disabled] SMTP_HOST/SMTP_FROM not set — skipped mail to=${opts.to} subject=${opts.subject}`);
       return { ok: false, error: 'SMTP not configured' };
     }
-    try {
-      const nodemailer = require('nodemailer');
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: process.env.SMTP_USER
-          ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' }
-          : undefined,
-      });
-      const b = await this.brand();
-      const info = await transporter.sendMail({
-        from: process.env.SMTP_FROM,
-        to: opts.to,
-        subject: opts.subject,
-        text: opts.text,
-        html:
-          opts.html ||
-          this.layout(b, opts.subject, `<p>${esc(opts.text).replace(/\n/g, '<br/>')}</p>`),
-        attachments: opts.attachments || [],
-      });
-      this.logger.log(`Mail sent to ${opts.to} id=${info.messageId}`);
-      return { ok: true, id: info.messageId };
-    } catch (e: any) {
-      this.logger.error(`Mail failed: ${e.message}`);
-      return { ok: false, error: e.message };
+    const b = opts.html ? null : await this.brand();
+    const payload = {
+      from: process.env.SMTP_FROM,
+      to: opts.to,
+      subject: opts.subject,
+      text: opts.text,
+      html:
+        opts.html ||
+        this.layout(b as MailBrand, opts.subject, `<p>${esc(opts.text).replace(/\n/g, '<br/>')}</p>`),
+      attachments: opts.attachments || [],
+    };
+    // Bulk enrolment sends many messages back to back. Reuse one pooled SMTP connection and
+    // retry transient failures (rate limits, 421/45x, dropped sockets) so no welcome email is lost.
+    const attempts = Math.max(1, parseInt(process.env.SMTP_RETRIES || '3', 10) || 3);
+    let lastError = '';
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const info = await this.transport().sendMail(payload);
+        this.logger.log(`Mail sent to ${opts.to} id=${info.messageId}${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+        return { ok: true, id: info.messageId };
+      } catch (e: any) {
+        lastError = e?.message || String(e);
+        this.logger.warn(`Mail attempt ${attempt}/${attempts} to ${opts.to} failed: ${lastError}`);
+        // Drop a broken pooled connection so the next attempt opens a fresh one.
+        try { this.transporter?.close?.(); } catch { /* ignore */ }
+        this.transporter = null;
+        if (attempt < attempts) await new Promise((r) => setTimeout(r, 800 * attempt * attempt));
+      }
     }
+    this.logger.error(`Mail failed: ${lastError}`);
+    return { ok: false, error: lastError };
+  }
+
+  private transporter: any = null;
+
+  private transport() {
+    if (this.transporter) return this.transporter;
+    const nodemailer = require('nodemailer');
+    this.transporter = nodemailer.createTransport({
+      pool: true,
+      maxConnections: 1,
+      maxMessages: 50,
+      rateDelta: 1000,
+      rateLimit: Math.max(1, parseInt(process.env.SMTP_RATE_PER_SECOND || '3', 10) || 3),
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: process.env.SMTP_USER
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' }
+        : undefined,
+    });
+    return this.transporter;
+  }
+
+  /** Whether outgoing mail is configured (SMTP_HOST + SMTP_FROM). */
+  isEnabled() {
+    return this.enabled();
+  }
+
+  /**
+   * Generic branded notice: cancellations, postponements, reminders, identity confirmations.
+   * Paragraph strings are escaped here.
+   */
+  async sendNotice(opts: {
+    to: string;
+    organisationId?: string;
+    subject: string;
+    eyebrow: string;
+    title: string;
+    paragraphs: string[];
+    facts?: Array<[string, string | null | undefined]>;
+    button?: { href: string; label: string } | null;
+    preheader?: string;
+  }) {
+    const b = await this.brand(opts.organisationId);
+    const subject = `${b.name} — ${opts.subject}`;
+    const text = [opts.title, '', ...opts.paragraphs, '', ...(opts.facts || []).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`), opts.button ? `${opts.button.label}: ${opts.button.href}` : '']
+      .filter((l) => l !== undefined)
+      .join('\n');
+    const html = this.layout(
+      b,
+      subject,
+      `${this.heading(b, opts.eyebrow, opts.title)}
+      ${opts.paragraphs.map((t) => this.p(esc(t))).join('')}
+      ${opts.facts?.length ? this.facts(b, opts.facts) : ''}
+      ${opts.button ? this.btn(b, opts.button.href, opts.button.label) : ''}`,
+      opts.preheader || opts.title,
+    );
+    return this.sendMail({ to: opts.to, subject, text, html });
+  }
+
+  /** Format a date/time in APP_TIMEZONE (default Africa/Lagos) for emails and notifications. */
+  when(iso?: string | Date | null) {
+    return fmtWhen(iso ? new Date(iso).toISOString() : null);
   }
 
   // ------------------------------------------------------------------ templates

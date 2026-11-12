@@ -20,6 +20,9 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { isValidEmail } from '../../common/utils/email';
 import { AuditService } from '../audit/audit.service';
+import { cleanCustomFields } from '../../common/utils/custom-fields';
+
+const APPROVER_ROLES = ['ADMIN', 'SUPER_ADMIN', 'GLOBAL_ADMIN'];
 
 const userSelect = {
   id: true,
@@ -34,6 +37,7 @@ const userSelect = {
   createdAt: true,
   organisationId: true,
   staffBadgePhotoPath: true,
+  customFields: true,
 } as const;
 
 function showTempInAdmin(): boolean {
@@ -49,7 +53,7 @@ export class UsersService {
     private audit: AuditService,
   ) {}
 
-  async create(dto: CreateUserDto, orgId: string) {
+  async create(dto: CreateUserDto, orgId: string, actorId?: string) {
     if (!isValidEmail(dto.email)) {
       throw new BadRequestException('Please enter a valid email address that can receive mail.');
     }
@@ -58,6 +62,7 @@ export class UsersService {
     });
     if (existing) throw new ConflictException('Email already registered');
 
+    const customFields = await cleanCustomFields(this.prisma, orgId, (dto as any).customFields, { enforceRequired: true });
     const initialPassword = generateNigerianPassword(); // lowercase 5-letter
     const passwordHash = await bcrypt.hash(initialPassword, 12);
 
@@ -71,18 +76,21 @@ export class UsersService {
         phone: dto.phone,
         organisationId: orgId,
         mustChangePassword: true,
+        ...(customFields && Object.keys(customFields).length ? { customFields } : {}),
       },
       select: userSelect,
     });
 
     // Always try welcome email
-    await this.mail.sendWelcome(user.email, user.fullName, initialPassword, undefined, orgId);
+    const mailResult = await this.mail.sendWelcome(user.email, user.fullName, initialPassword, undefined, orgId);
+    await this.audit.log({ action: 'USER_CREATED', entity: 'User', entityId: user.id, userId: actorId, details: { role: user.role, welcomeEmailSent: !!mailResult?.ok } });
 
     return {
       user,
       // Only include plaintext password in API when env allows admin UI display
       ...(showTempInAdmin() ? { initialPassword } : {}),
-      emailSent: true,
+      emailSent: !!mailResult?.ok,
+      mailError: mailResult?.ok ? undefined : (mailResult as any)?.error,
     };
   }
 
@@ -113,6 +121,7 @@ export class UsersService {
       hasStaffPin: Boolean(staffPinHash),
       hasStaffQr: Boolean(staffQrToken),
       staffPinLockedUntil: user.staffPinLockedUntil,
+      customFieldsList: await this.labelledCustomFields(user.organisationId, user.customFields),
     };
   }
 
@@ -155,6 +164,7 @@ export class UsersService {
       portfolio?: string | null;
       role?: Role;
       isActive?: boolean;
+      customFields?: Record<string, any>;
     },
     actorId?: string,
   ) {
@@ -193,6 +203,10 @@ export class UsersService {
       next.role = data.role;
     }
     if (data.isActive !== undefined) next.isActive = Boolean(data.isActive);
+    if (data.customFields !== undefined) {
+      const cf = await cleanCustomFields(this.prisma, orgId, data.customFields, { existing: user.customFields });
+      if (JSON.stringify(cf || {}) !== JSON.stringify(user.customFields || {})) next.customFields = cf || {};
+    }
 
     if (actorId && actorId === userId) {
       if (next.isActive === false) throw new BadRequestException('You cannot deactivate your own account');
@@ -202,6 +216,7 @@ export class UsersService {
     const changes: Record<string, { from: any; to: any }> = {};
     for (const [k, v] of Object.entries(next)) {
       const before = (user as any)[k] ?? null;
+      if (k === 'customFields') { changes[k] = { from: before, to: v }; continue; }
       if (before !== v) changes[k] = { from: before, to: v };
       else delete next[k];
     }
@@ -240,6 +255,7 @@ export class UsersService {
       initialPassword: string;
     }> = [];
     const errors: Array<{ row: number; email: string; error: string }> = [];
+    const mailFailures: Array<{ row: number; email: string; error: string }> = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -274,13 +290,14 @@ export class UsersService {
             mustChangePassword: true,
           },
         });
-        await this.mail.sendWelcome(
+        const mailResult = await this.mail.sendWelcome(
           row.email.toLowerCase().trim(),
           row.fullName.trim(),
           initialPassword,
           undefined,
           orgId,
         );
+        if (!mailResult?.ok) mailFailures.push({ row: i + 1, email: row.email.toLowerCase().trim(), error: (mailResult as any)?.error || 'Email not sent' });
         created.push({
           fullName: row.fullName.trim(),
           email: row.email.toLowerCase().trim(),
@@ -308,20 +325,22 @@ export class UsersService {
       createdCount: created.length,
       errorCount: errors.length,
       errors,
-      emailSent: true,
+      emailSent: mailFailures.length === 0,
+      emailSentCount: created.length - mailFailures.length,
+      mailFailures,
       ...(showTempInAdmin()
         ? { credentialsCsv, credentials: created }
         : {}),
     };
   }
 
-  async requestProfileEdit(userId: string, orgId: string, after: Record<string, any>) {
+  async requestProfileEdit(userId: string, orgId: string, after: Record<string, any>, actorRole?: string) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, organisationId: orgId } });
     if (!user) throw new NotFoundException('User not found');
     if (after.email && !isValidEmail(after.email)) {
       throw new BadRequestException('Invalid email address');
     }
-    const before = {
+    const before: Record<string, any> = {
       fullName: user.fullName,
       phone: user.phone,
       portfolio: user.portfolio,
@@ -334,10 +353,40 @@ export class UsersService {
         cleaned[k] = after[k];
       }
     }
+    if (after.customFields !== undefined) {
+      const cf = await cleanCustomFields(this.prisma, orgId, after.customFields, { existing: user.customFields });
+      if (JSON.stringify(cf || {}) !== JSON.stringify(user.customFields || {})) {
+        before.customFields = user.customFields || {};
+        cleaned.customFields = cf || {};
+      }
+    }
     if (!Object.keys(cleaned).length) {
       throw new BadRequestException('No changes detected');
     }
-    return (this.prisma as any).profileEditRequest.create({
+    if (cleaned.email && cleaned.email !== user.email) {
+      const taken = await this.prisma.user.findUnique({ where: { email: String(cleaned.email).toLowerCase() } });
+      if (taken && taken.id !== userId) throw new ConflictException('Email already registered');
+    }
+    const role = actorRole || user.role;
+    // Admins and Super Admins are the approvers — their own edits apply immediately.
+    if (APPROVER_ROLES.includes(role)) {
+      await this.applyProfileChanges(userId, { ...before, ...cleaned });
+      const req = await this.prisma.profileEditRequest.create({
+        data: {
+          userId,
+          organisationId: orgId,
+          before,
+          after: { ...before, ...cleaned },
+          status: 'APPROVED',
+          reviewedById: userId,
+          reviewedAt: new Date(),
+          reviewNote: 'Applied immediately (approver self-edit)',
+        },
+      });
+      await this.audit.log({ action: 'PROFILE_EDIT_AUTO_APPLIED', entity: 'User', entityId: userId, userId, details: { requestId: req.id, changes: this.diff(before, cleaned) } });
+      return { ...req, applied: true };
+    }
+    const req = await this.prisma.profileEditRequest.create({
       data: {
         userId,
         organisationId: orgId,
@@ -346,47 +395,98 @@ export class UsersService {
         status: 'PENDING',
       },
     });
+    await this.audit.log({ action: 'PROFILE_EDIT_REQUESTED', entity: 'User', entityId: userId, userId, details: { requestId: req.id, changes: this.diff(before, cleaned) } });
+    const approvers = await this.prisma.user.findMany({ where: { organisationId: orgId, role: Role.ADMIN, isActive: true }, select: { id: true } });
+    for (const a of approvers) {
+      await this.notifications.create({ userId: a.id, title: 'Profile change awaiting approval', body: `${user.fullName} updated their profile. Review and approve or reject.`, meta: { type: 'PROFILE_EDIT_PENDING', requestId: req.id, url: '/approvals' }, channels: ['in_app'] }).catch(() => {});
+    }
+    return { ...req, applied: false };
   }
 
-  async listProfileEdits(orgId: string, status?: string) {
-    const where: any = { organisationId: orgId };
-    if (status) where.status = status;
-    return (this.prisma as any).profileEditRequest.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
+  private diff(before: Record<string, any>, after: Record<string, any>) {
+    const out: Record<string, { from: any; to: any }> = {};
+    for (const k of Object.keys(after)) if (k !== 'avatarPath' || after[k] !== before[k]) out[k] = { from: before[k] ?? null, to: after[k] ?? null };
+    return out;
+  }
+
+  private async applyProfileChanges(userId: string, after: any) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        fullName: after.fullName,
+        phone: after.phone || null,
+        portfolio: after.portfolio || null,
+        ...(after.email ? { email: String(after.email).toLowerCase() } : {}),
+        ...(after.avatarPath !== undefined ? { avatarPath: after.avatarPath } : {}),
+        ...(after.customFields !== undefined ? { customFields: after.customFields } : {}),
+      },
     });
   }
 
-  async reviewProfileEdit(id: string, orgId: string, adminId: string, approve: boolean, note?: string) {
-    const req = await (this.prisma as any).profileEditRequest.findFirst({
-      where: { id, organisationId: orgId },
+  private scopeWhere(actor: { role?: string; orgId?: string } | string) {
+    if (typeof actor === 'string') return { organisationId: actor };
+    if (actor.role === 'SUPER_ADMIN' || actor.role === 'GLOBAL_ADMIN') return {};
+    return { organisationId: actor.orgId };
+  }
+
+  async listProfileEdits(actor: { role?: string; orgId?: string } | string, status?: string) {
+    const where: any = { ...this.scopeWhere(actor) };
+    if (status) where.status = status;
+    const rows = await this.prisma.profileEditRequest.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const ids = Array.from(new Set(rows.flatMap((r) => [r.userId, r.reviewedById].filter(Boolean) as string[])));
+    const people = ids.length
+      ? await this.prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true, email: true, role: true, avatarPath: true, organisation: { select: { name: true, code: true } } } })
+      : [];
+    const byId = new Map(people.map((p) => [p.id, p]));
+    return rows.map((r) => ({ ...r, user: byId.get(r.userId) || null, reviewedBy: r.reviewedById ? byId.get(r.reviewedById) || null : null }));
+  }
+
+  /** Orange "Pending approvals" card: pending count, invite approvals and a recent decision timeline. */
+  async approvalsSummary(actor: { role?: string; orgId?: string }) {
+    const scope = this.scopeWhere(actor);
+    const since = new Date(Date.now() - 30 * 86400000);
+    const [pendingEdits, approved, declined, pendingInvites, recent] = await Promise.all([
+      this.prisma.profileEditRequest.count({ where: { ...scope, status: 'PENDING' } }),
+      this.prisma.profileEditRequest.count({ where: { ...scope, status: 'APPROVED', reviewedAt: { gte: since } } }),
+      this.prisma.profileEditRequest.count({ where: { ...scope, status: 'DECLINED', reviewedAt: { gte: since } } }),
+      this.prisma.invite.count({ where: { ...scope, status: { in: ['OFFLINE_PENDING', 'AWAITING_APPROVAL'] } } }),
+      this.listProfileEdits(actor).then((rows) => rows.slice(0, 8)),
+    ]);
+    return { pendingEdits, pendingInvites, pending: pendingEdits + pendingInvites, approved30d: approved, declined30d: declined, recent };
+  }
+
+  async reviewProfileEdit(id: string, actorOrOrg: { id?: string; role?: string; orgId?: string } | string, adminId: string, approve: boolean, note?: string) {
+    const req = await this.prisma.profileEditRequest.findFirst({
+      where: { id, ...this.scopeWhere(actorOrOrg as any) },
     });
     if (!req) throw new NotFoundException('Edit request not found');
     if (req.status !== 'PENDING') throw new BadRequestException('Already reviewed');
+    if (req.userId === adminId) throw new BadRequestException('You cannot review your own request');
 
     if (approve) {
-      const after = req.after as any;
-      await this.prisma.user.update({
-        where: { id: req.userId },
-        data: {
-          fullName: after.fullName,
-          phone: after.phone || null,
-          portfolio: after.portfolio || null,
-          ...(after.email ? { email: String(after.email).toLowerCase() } : {}),
-          ...(after.avatarPath !== undefined ? { avatarPath: after.avatarPath } : {}),
-        },
-      });
+      await this.applyProfileChanges(req.userId, req.after as any);
     }
 
-    const updated = await (this.prisma as any).profileEditRequest.update({
+    const updated = await this.prisma.profileEditRequest.update({
       where: { id },
       data: {
         status: approve ? 'APPROVED' : 'DECLINED',
         reviewedById: adminId,
         reviewedAt: new Date(),
-        reviewNote: note || null,
+        reviewNote: note ? String(note).slice(0, 500) : null,
       },
+    });
+
+    await this.audit.log({
+      action: approve ? 'PROFILE_EDIT_APPROVED' : 'PROFILE_EDIT_REJECTED',
+      entity: 'User',
+      entityId: req.userId,
+      userId: adminId,
+      details: { requestId: id, note: note || null, changes: this.diff((req.before || {}) as any, (req.after || {}) as any) },
     });
 
     // Notify the user of the decision (works for GATE, STAFF, ADMIN, etc.)
@@ -402,10 +502,12 @@ export class UsersService {
     return updated;
   }
 
-
+  async customFieldsFor(orgId: string) {
+    return this.prisma.agencyCustomField.findMany({ where: { organisationId: orgId, isActive: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
+  }
 
   async bulkReviewProfileEdits(
-    orgId: string,
+    orgId: any,
     adminId: string,
     ids: string[],
     approve: boolean,
@@ -437,6 +539,7 @@ export class UsersService {
         avatarPath: true,
         role: true,
         organisationId: true,
+        customFields: true,
         organisation: { select: { name: true } },
       },
     });
@@ -473,6 +576,7 @@ export class UsersService {
       portfolio: user.portfolio,
       avatarPath: user.avatarPath,
       organisationName: user.organisation?.name,
+      customFields: await this.labelledCustomFields(user.organisationId, user.customFields),
       // isGate subject (for UI tabs) — not the viewer's role
       subjectIsGate: user.role === Role.GATE,
       guests,
@@ -552,6 +656,14 @@ export class UsersService {
     }
 
     return result;
+  }
+
+  async labelledCustomFields(orgId: string, values: any) {
+    if (!values || typeof values !== 'object') return [];
+    const defs = await this.prisma.agencyCustomField.findMany({ where: { organisationId: orgId }, orderBy: { sortOrder: 'asc' } });
+    return defs
+      .filter((d) => values[d.key] !== undefined && values[d.key] !== '' && values[d.key] !== null)
+      .map((d) => ({ key: d.key, label: d.label, type: d.type, value: values[d.key] }));
   }
 
   async uploadAvatar(userId: string, file: Express.Multer.File) {

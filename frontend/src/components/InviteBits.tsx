@@ -22,7 +22,15 @@ import {
   UserRound,
   ArrowRightLeft,
   Users,
+  PhoneOff,
+  XCircle,
+  CalendarPlus,
+  Loader2,
 } from 'lucide-react';
+import SleekOverlay from '@/components/ui/SleekOverlay';
+import { Notice } from '@/components/ui/Bits';
+import { VehicleLine } from '@/components/VehicleFields';
+import { api, getUser } from '@/lib/api';
 import StatusPill from '@/components/ui/StatusPill';
 import Avatar from '@/components/ui/Avatar';
 import Tooltip from '@/components/ui/Tooltip';
@@ -35,6 +43,29 @@ export const MODE_ICON: Record<string, ReactNode> = {
   MOTORCYCLE: <Bike size={14} />,
   VEHICLE: <Car size={14} />,
 };
+
+/** Tiny gray marker for guests with neither email nor phone (no link — photographed at the gate). */
+export function NoContactIcon({ size = 12, className = '' }: { size?: number; className?: string }) {
+  return (
+    <Tooltip content="No email or phone — gate takes the photo">
+      <span role="img" aria-label="No email or phone" className={`inline-flex shrink-0 items-center text-slate-400 ${className}`}>
+        <PhoneOff size={size} />
+      </span>
+    </Tooltip>
+  );
+}
+
+export const isNoContact = (v: any) => !!v && (v.noContact ?? (!v.email && !v.phone));
+
+/** Transfer visit — icon on a light chip, label right beside it. Same everywhere it appears. */
+export function TransferButton({ onClick, className = '' }: { onClick: () => void; className?: string }) {
+  return (
+    <button type="button" className={`chip-action ${className}`} onClick={onClick} data-testid="transfer-visit">
+      <span className="chip-action-icon"><ArrowRightLeft size={13} /></span>
+      <span>Transfer visit</span>
+    </button>
+  );
+}
 
 /** Names for an invite, without repeating status or counts. */
 export function guestLabel(inv: any): string {
@@ -162,10 +193,14 @@ export function VisitorCard({ v }: { v: any }) {
       <div className="flex items-center gap-3">
         <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={42} />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold text-slate-800">{v.fullName}</p>
-          <p className="truncate text-xs text-slate-500">
-            {[v.phone, v.entryMode && MODE_LABEL[v.entryMode]].filter(Boolean).join(' · ') || 'No contact on file'}
+          <p className="flex items-center gap-1.5 truncate font-semibold text-slate-800">
+            <span className="truncate">{v.fullName}</span>
+            {isNoContact(v) && <NoContactIcon />}
           </p>
+          <p className="truncate text-xs text-slate-500">
+            {[v.phone, v.email, v.entryMode && MODE_LABEL[v.entryMode]].filter(Boolean).join(' · ') || 'No email or phone'}
+          </p>
+          {(v.vehiclePlate || v.vehicleDetails) && <p className="mt-0.5 text-xs"><VehicleLine plate={v.vehiclePlate} details={v.vehicleDetails} /></p>}
         </div>
         <StatusPill status={v.status} />
       </div>
@@ -204,9 +239,9 @@ export function VisitorCard({ v }: { v: any }) {
         </ul>
       )}
       {v.status !== 'EXITED' && v.status !== 'CANCELLED' && (
-        <button type="button" className="btn-quiet mt-3 w-full !py-2 text-xs" onClick={() => setTransfer(true)}>
-          <ArrowRightLeft size={13} /> Transfer visit
-        </button>
+        <div className="mt-3 flex">
+          <TransferButton onClick={() => setTransfer(true)} />
+        </div>
       )}
       <TransferVisit open={transfer} onClose={() => setTransfer(false)} visitor={v} onDone={() => window.location.reload()} />
     </div>
@@ -296,7 +331,20 @@ export function InviteDetail({ inv, children }: { inv: any; children?: ReactNode
         )}
         {inv.expectedMode && (
           <Field icon={MODE_ICON[inv.expectedMode] || <Car size={14} />} label="Arriving by">
-            {MODE_LABEL[inv.expectedMode] || titleCase(inv.expectedMode)}
+            <span className="flex flex-wrap items-center gap-2">
+              {MODE_LABEL[inv.expectedMode] || titleCase(inv.expectedMode)}
+              <VehicleLine plate={inv.vehiclePlate} details={inv.vehicleDetails} />
+            </span>
+          </Field>
+        )}
+        {inv.cancelledAt && (
+          <Field icon={<XCircle size={14} />} label="Cancelled">
+            {fmtDate(inv.cancelledAt)}{inv.cancelReason ? <span className="text-slate-500"> · {inv.cancelReason}</span> : null}
+          </Field>
+        )}
+        {inv.postponeCount > 0 && !inv.cancelledAt && (
+          <Field icon={<CalendarPlus size={14} />} label="Postponed">
+            {inv.postponeCount}× · last {relTime(inv.postponedAt)}
           </Field>
         )}
         <Field icon={<Hourglass size={14} />} label={st === 'EXPIRED' ? 'Expired' : 'Link expires'}>
@@ -323,6 +371,8 @@ export function InviteDetail({ inv, children }: { inv: any; children?: ReactNode
         </Field>
       </Fields>
 
+      <InviteActions inv={inv} />
+
       <ItemsSummary visitors={visitors} />
       <div>
         <p className="eyebrow mb-2 flex items-center gap-1.5">
@@ -346,5 +396,94 @@ export function InviteDetail({ inv, children }: { inv: any; children?: ReactNode
       </div>
       {children}
     </div>
+  );
+}
+
+function toLocalInput(d: Date) {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Host / admin actions: cancel (any stage) and postpone (active or expired). */
+export function InviteActions({ inv, onChanged }: { inv: any; onChanged?: () => void }) {
+  const me = typeof window !== 'undefined' ? getUser() : null;
+  const [mode, setMode] = useState<null | 'cancel' | 'postpone'>(null);
+  const [reason, setReason] = useState('');
+  const [when, setWhen] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const st = inviteStatus(inv);
+  const canManage = !!me && (inv.host?.id === me.id || inv.hostId === me.id || ['ADMIN', 'SUPER_ADMIN', 'GLOBAL_ADMIN'].includes(me.role));
+  const openGuests = (inv.visitors || []).some((v: any) => v.status === 'INVITED' || v.status === 'ARRIVED');
+  if (!canManage || st === 'CANCELLED' || st === 'REVOKED') return null;
+  const canPostpone = ['ACTIVE', 'EXPIRED', 'USED'].includes(st) && (inv.visitors || []).some((v: any) => v.status === 'INVITED');
+  const done = () => {
+    setMode(null);
+    if (onChanged) onChanged();
+    else window.location.reload();
+  };
+  const min = toLocalInput(new Date(Date.now() + 5 * 60000));
+  async function submit() {
+    setErr('');
+    setBusy(true);
+    try {
+      if (mode === 'cancel') await api.cancelInvite(inv.id, reason.trim() || undefined);
+      else {
+        if (!when) throw new Error('Choose the new date and time');
+        const d = new Date(when);
+        if (d.getTime() < Date.now()) throw new Error('The new date and time cannot be in the past');
+        await api.postponeInvite(inv.id, d.toISOString(), reason.trim() || undefined);
+      }
+      done();
+    } catch (e: any) {
+      setErr(e.message || 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!openGuests && !canPostpone) return null;
+  return (
+    <>
+      <div className="flex flex-wrap gap-2" data-testid="invite-actions">
+        {canPostpone && (
+          <button type="button" className="chip-action" onClick={() => { setMode('postpone'); setWhen(inv.expectedAt && new Date(inv.expectedAt) > new Date() ? toLocalInput(new Date(inv.expectedAt)) : ''); setReason(''); setErr(''); }}>
+            <span className="chip-action-icon"><CalendarPlus size={13} /></span> Postpone
+          </button>
+        )}
+        <button type="button" className="chip-action !text-rose-700 hover:!border-rose-200 hover:!bg-rose-50" onClick={() => { setMode('cancel'); setReason(''); setErr(''); }}>
+          <span className="chip-action-icon !bg-rose-50 !text-rose-600"><XCircle size={13} /></span> Cancel invite
+        </button>
+      </div>
+      <SleekOverlay
+        open={!!mode}
+        onClose={() => !busy && setMode(null)}
+        tone={mode === 'cancel' ? 'rose' : 'brand'}
+        icon={mode === 'cancel' ? <XCircle size={20} /> : <CalendarPlus size={20} />}
+        title={mode === 'cancel' ? 'Cancel this invite?' : 'Postpone visit'}
+        subtitle={mode === 'cancel' ? 'Guests are notified and the gate will show it as Cancelled.' : 'Guests and you get the new date and time.'}
+        footer={
+          <div className="flex w-full gap-2">
+            <button type="button" className="btn-ghost flex-1" onClick={() => setMode(null)} disabled={busy}>Back</button>
+            <button type="button" className={`${mode === 'cancel' ? 'btn-danger' : 'btn-primary'} flex-1`} onClick={submit} disabled={busy || (mode === 'postpone' && !when)}>
+              {busy ? <Loader2 size={16} className="animate-spin" /> : mode === 'cancel' ? 'Cancel invite' : 'Postpone'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {mode === 'postpone' && (
+            <label className="block">
+              <span className="label">New date & time</span>
+              <input type="datetime-local" className="input" min={min} value={when} onChange={(e) => setWhen(e.target.value)} data-testid="postpone-when" />
+            </label>
+          )}
+          <label className="block">
+            <span className="label">{mode === 'cancel' ? 'Reason (optional)' : 'Note to guests (optional)'}</span>
+            <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} placeholder={mode === 'cancel' ? 'e.g. Meeting called off' : 'e.g. Moved to the afternoon'} />
+          </label>
+          {err && <Notice tone="error">{err}</Notice>}
+        </div>
+      </SleekOverlay>
+    </>
   );
 }

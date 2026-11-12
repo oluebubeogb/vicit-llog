@@ -18,6 +18,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { RingModule } from './modules/rings/ring.module';
 import { ContractorsModule } from './modules/contractors/contractors.module';
 import { DispatchesModule } from './modules/dispatches/dispatches.module';
+import { RemindersModule } from './modules/reminders/reminders.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { DispatchesModule } from './modules/dispatches/dispatches.module';
     PlatformModule,
     RingModule,
     ContractorsModule,
+    RemindersModule,
     DispatchesModule,
   ],
 })

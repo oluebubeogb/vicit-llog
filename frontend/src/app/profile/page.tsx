@@ -165,9 +165,16 @@ export default function ProfilePage() {
       if (!blob) throw new Error('Could not capture image');
       const file = new File([blob], `avatar-${Date.now()}.jpg`, { type: 'image/jpeg' });
       const { avatarPath } = await api.uploadAvatar(file);
-      await api.requestProfileEdit({ avatarPath });
-      setPending(true);
-      setMsg('Profile photo submitted — pending admin approval.');
+      const res = await api.requestProfileEdit({ avatarPath });
+      if (res?.applied) {
+        setPending(false);
+        setLocal((cur: any) => ({ ...cur, avatarPath }));
+        setUser({ ...getUser(), avatarPath });
+        setMsg('Profile photo updated.');
+      } else {
+        setPending(true);
+        setMsg('Profile photo submitted — pending admin approval.');
+      }
       stopCamera();
       setPhotoOpen(false);
     } catch (err: any) {
@@ -186,14 +193,23 @@ export default function ProfilePage() {
     }
     setSaving(true);
     try {
-      await api.requestProfileEdit({
+      const res = await api.requestProfileEdit({
         fullName: form.fullName.trim(),
         phone: form.phone.trim() || null,
         portfolio: form.portfolio.trim() || null,
         email: form.email.trim().toLowerCase(),
       });
-      setPending(true);
-      setMsg('Changes submitted — pending admin approval.');
+      if (res?.applied) {
+        // Admins / Super Admins are the approvers: their edits apply straight away.
+        setPending(false);
+        const next = { ...getUser(), ...res.after };
+        setUser(next);
+        setLocal((cur: any) => ({ ...cur, ...res.after }));
+        setMsg('Your details were updated.');
+      } else {
+        setPending(true);
+        setMsg('Changes submitted — pending admin approval.');
+      }
     } catch (err: any) {
       setMsg(err.message || 'Could not submit changes');
     } finally {
@@ -208,6 +224,7 @@ export default function ProfilePage() {
     setPhotoOpen(false);
   };
   const isError = msg && !(pending || msg.includes('pending') || msg.includes('updated'));
+  const approver = ['ADMIN', 'SUPER_ADMIN', 'GLOBAL_ADMIN'].includes(user?.role);
 
   return (
     <div className="page">
@@ -245,7 +262,7 @@ export default function ProfilePage() {
       <form onSubmit={submitEdit} className="surface animate-in mb-5 space-y-3">
         <p className="flex items-center gap-1.5 font-semibold text-slate-800">
           Edit details
-          <InfoTip text="Changes require admin approval before they apply." />
+          <InfoTip text={approver ? 'As an approver, your changes apply immediately and are recorded in the approvals history.' : 'Changes require admin approval before they apply.'} />
           {pending && <StatusPill className="ml-auto" status="PENDING" label="Pending approval" />}
         </p>
         <label className="block">
@@ -266,9 +283,19 @@ export default function ProfilePage() {
             <input value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} placeholder="Department" className="input" />
           </label>
         </div>
-        {msg && <Notice tone={isError ? 'error' : 'warn'}>{msg}</Notice>}
+        {Array.isArray(user?.customFieldsList) && user.customFieldsList.length > 0 && (
+          <div className="tile-muted space-y-1.5" data-testid="profile-custom-fields">
+            {user.customFieldsList.map((f: any) => (
+              <p key={f.key} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">{f.label}</span>
+                <span className="text-right font-medium text-slate-800">{Array.isArray(f.value) ? f.value.join(', ') : f.value === true ? 'Yes' : f.value === false ? 'No' : String(f.value)}</span>
+              </p>
+            ))}
+          </div>
+        )}
+        {msg && <Notice tone={isError ? 'error' : msg.includes('updated') ? 'success' : 'warn'}>{msg}</Notice>}
         <button type="submit" disabled={saving} className="btn-primary w-full">
-          <Send size={15} /> {saving ? 'Submitting…' : 'Submit for approval'}
+          <Send size={15} /> {saving ? (approver ? 'Saving…' : 'Submitting…') : approver ? 'Save changes' : 'Submit for approval'}
         </button>
       </form>
 

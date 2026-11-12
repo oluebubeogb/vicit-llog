@@ -1,6 +1,6 @@
 /** Brand colour engine: turns one hex colour into a 50–950 scale of CSS variables. */
 
-export const APP_VERSION = '1.0.1-v18';
+export const APP_VERSION = '1.0.1-v19';
 
 export type LoginBranding = {
   logoUrl?: string | null;

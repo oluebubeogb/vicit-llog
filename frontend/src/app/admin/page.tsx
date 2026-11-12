@@ -1,5 +1,6 @@
 'use client';
 
+import { CustomFieldInputs, useCustomFields } from '@/components/CustomFields';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, getUser } from '@/lib/api';
@@ -71,6 +72,8 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tools');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '' });
+  const [formCustom, setFormCustom] = useState<Record<string, any>>({});
+  const customFields = useCustomFields(null, true);
   const [msg, setMsg] = useState<{ tone: 'success' | 'error' | 'brand'; text: string } | null>(null);
   const [oncePassword, setOncePassword] = useState<string | null>(null);
   const [health, setHealth] = useState<any>(null);
@@ -92,7 +95,7 @@ export default function AdminPage() {
   const [overlayMsg, setOverlayMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [userQ, setUserQ] = useState('');
   const [roleFilter, setRoleFilter] = useState<'ALL' | 'ADMIN' | 'STAFF' | 'GATE'>('ALL');
-  const [auditFilter, setAuditFilter] = useState<'all' | 'gate' | 'invites' | 'people' | 'security'>('all');
+  const [auditFilter, setAuditFilter] = useState<'all' | 'gate' | 'invites' | 'approvals' | 'people' | 'security'>('all');
 
   const ok = (text: string) => setMsg({ tone: 'success', text });
   const fail = (text: string) => setMsg({ tone: 'error', text });
@@ -121,11 +124,12 @@ export default function AdminPage() {
       return;
     }
     try {
-      const res = await api.createUser(form);
-      ok(`${form.fullName} was added`);
+      const res = await api.createUser({ ...form, ...(customFields.length ? { customFields: formCustom } : {}) });
+      ok(`${form.fullName} was added${res.emailSent ? ' — welcome email sent' : ' — welcome email NOT sent (check mail settings)'}`);
       setOncePassword(res.initialPassword);
       setShowForm(false);
       setForm({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '' });
+      setFormCustom({});
       loadUsers();
     } catch (err: any) {
       fail(err.message);
@@ -187,7 +191,7 @@ export default function AdminPage() {
     try {
       const res = await api.bulkUsers(rows);
       setBulkResult(res);
-      setMsg({ tone: res.errorCount ? 'brand' : 'success', text: `Bulk import: ${res.createdCount} created, ${res.errorCount} errors` });
+      setMsg({ tone: res.errorCount || res.mailFailures?.length ? 'brand' : 'success', text: `Bulk import: ${res.createdCount} created, ${res.errorCount} errors · welcome emails sent: ${res.emailSentCount ?? res.createdCount}/${res.createdCount}${res.mailFailures?.length ? ` (not sent: ${res.mailFailures.map((f: any) => f.email).join(', ')})` : ''}` });
       loadUsers();
     } catch (err: any) {
       fail(err.message);
@@ -226,7 +230,9 @@ export default function AdminPage() {
   }
 
   const EDIT_FIELDS = ['fullName', 'email', 'phone', 'portfolio', 'role', 'isActive'] as const;
-  const dirty = selected && original ? EDIT_FIELDS.filter((k) => (selected[k] ?? '') !== (original[k] ?? '')) : [];
+  const fieldDirty = selected && original ? EDIT_FIELDS.filter((k) => (selected[k] ?? '') !== (original[k] ?? '')) : [];
+  const customDirty = !!selected && !!original && JSON.stringify(selected.customFields || {}) !== JSON.stringify(original.customFields || {});
+  const dirty: string[] = [...fieldDirty, ...(customDirty ? ['customFields'] : [])];
   const isSelf = selected && me && selected.id === me.id;
 
   async function saveSelected(e: React.FormEvent) {
@@ -241,7 +247,7 @@ export default function AdminPage() {
       const patch: any = {};
       for (const k of dirty) patch[k] = selected[k];
       const updated = await api.updateUser(selected.id, patch);
-      setOverlayMsg({ tone: 'success', text: `Saved ${dirty.map((k) => fieldLabel(k).toLowerCase()).join(', ')}` });
+      setOverlayMsg({ tone: 'success', text: `Saved ${dirty.map((k) => (k === 'customFields' ? 'extra fields' : fieldLabel(k as any).toLowerCase())).join(', ')}` });
       setSelected({ ...selected, ...updated });
       setOriginal({ ...selected, ...updated });
       loadUsers();
@@ -554,6 +560,7 @@ export default function AdminPage() {
                 <option value="ADMIN">Admin</option>
               </select>
               <input placeholder="Portfolio / department" value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} className="input" />
+              <CustomFieldInputs fields={customFields} value={formCustom} onChange={setFormCustom} />
               <button type="submit" className="btn-primary w-full">
                 Create user
               </button>
@@ -664,6 +671,7 @@ export default function AdminPage() {
                   ['all', 'All'],
                   ['gate', 'Gate'],
                   ['invites', 'Invites'],
+                  ['approvals', 'Approvals'],
                   ['people', 'People'],
                   ['security', 'Security'],
                 ] as const
@@ -773,6 +781,7 @@ export default function AdminPage() {
                 <input value={selected.portfolio || ''} onChange={(e) => setSelected({ ...selected, portfolio: e.target.value })} className="input" placeholder="Department" />
               </label>
             </div>
+            <CustomFieldInputs fields={customFields} value={selected.customFields || {}} onChange={(v) => setSelected({ ...selected, customFields: v })} />
             <div>
               <span className="label">
                 Role

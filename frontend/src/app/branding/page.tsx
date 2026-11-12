@@ -24,6 +24,7 @@ import {
   Minus,
 } from 'lucide-react';
 import LoginAgencyGrid from '@/components/LoginAgencyGrid';
+import { ALL_MODES, resetEntryModesCache } from '@/lib/entry-modes';
 import SleekOverlay from '@/components/ui/SleekOverlay';
 import PageHeader from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/Tooltip';
@@ -176,6 +177,8 @@ export default function BrandingPage() {
   const isSa = viewer?.role === 'SUPER_ADMIN';
   const [contractorMinDurationDays, setContractorMinDurationDays] = useState(1);
   const [contractorMinDaysInitial, setContractorMinDaysInitial] = useState(1);
+  const [entryModes, setEntryModes] = useState<string[]>(['PEDESTRIAN', 'MOTORCYCLE', 'VEHICLE']);
+  const [entryModesInitial, setEntryModesInitial] = useState<string[]>(['PEDESTRIAN', 'MOTORCYCLE', 'VEHICLE']);
   const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -207,6 +210,9 @@ export default function BrandingPage() {
         const days = b.contractorMinDurationDays ?? 1;
         setContractorMinDurationDays(days);
         setContractorMinDaysInitial(days);
+        const modes = Array.isArray(b.allowedEntryModes) && b.allowedEntryModes.length ? b.allowedEntryModes : ['PEDESTRIAN', 'MOTORCYCLE', 'VEHICLE'];
+        setEntryModes(modes);
+        setEntryModesInitial(modes);
       }).catch(() => {});
     }
     // restore the saved brand if the admin leaves with an unsaved live preview
@@ -228,7 +234,7 @@ export default function BrandingPage() {
     }
   }, [form.primaryColor, form.secondaryColor, form.primaryTextColor, loading]);
 
-  const dirty = (initial && JSON.stringify(initial) !== JSON.stringify(form)) || (isSa && contractorMinDurationDays !== contractorMinDaysInitial);
+  const dirty = (initial && JSON.stringify(initial) !== JSON.stringify(form)) || (isSa && (contractorMinDurationDays !== contractorMinDaysInitial || entryModes.join() !== entryModesInitial.join()));
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -247,8 +253,10 @@ export default function BrandingPage() {
         photoRetentionDays: form.photoRetentionDays,
       });
       if (isSa) {
-        await api.updatePlatformBranding({ contractorMinDurationDays });
+        await api.updatePlatformBranding({ contractorMinDurationDays, allowedEntryModes: entryModes });
         setContractorMinDaysInitial(contractorMinDurationDays);
+        setEntryModesInitial(entryModes);
+        resetEntryModesCache();
       }
       setInitial(form);
       await refresh();
@@ -452,6 +460,34 @@ export default function BrandingPage() {
             </span>
           </button>
           {isSa && (
+            <div className="tile space-y-2" data-testid="entry-modes-setting">
+              <p className="flex items-center gap-1 text-sm font-semibold text-slate-800">
+                Modes of entry accepted
+                <InfoTip text="Platform-wide (Super Admin). Only the modes switched on appear on the New invite form and at the gate. At least one must stay on." size={12} />
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {ALL_MODES.map((m) => {
+                  const on = entryModes.includes(m.v);
+                  return (
+                    <button
+                      key={m.v}
+                      type="button"
+                      role="switch"
+                      aria-checked={on}
+                      onClick={() => setEntryModes((cur) => (on ? (cur.length > 1 ? cur.filter((x) => x !== m.v) : cur) : ALL_MODES.map((x) => x.v).filter((x) => x === m.v || cur.includes(x))))}
+                      className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-xs font-semibold transition ${on ? 'border-brand-300 bg-brand-50 text-brand-700 shadow-sm' : 'border-slate-200 bg-white text-slate-400'}`}
+                    >
+                      {m.icon}
+                      {m.l}
+                      <span className={`text-[10px] font-medium ${on ? 'text-brand-600' : 'text-slate-400'}`}>{on ? 'On' : 'Off'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-slate-500">Vehicle and motorcycle entries ask for a plate number and colour/brand.</p>
+            </div>
+          )}
+          {isSa && (
             <label className="block">
               <span className="label">
                 Minimum contractor pass (days)
@@ -482,7 +518,7 @@ export default function BrandingPage() {
 
         <div className="fixed inset-x-0 bottom-[calc(var(--nav-height)+max(0.6rem,var(--safe-bottom))+0.5rem)] z-40 px-4">
           <div className={`mx-auto flex max-w-lg gap-2 rounded-2xl border border-white/70 bg-white/85 p-2 shadow-lift backdrop-blur-xl transition duration-300 ${dirty ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-4 opacity-0'}`}>
-            <button type="button" className="btn-ghost" onClick={() => { if (initial) setForm(initial); setContractorMinDurationDays(contractorMinDaysInitial); }}>
+            <button type="button" className="btn-ghost" onClick={() => { if (initial) setForm(initial); setContractorMinDurationDays(contractorMinDaysInitial); setEntryModes(entryModesInitial); }}>
               <RotateCcw size={15} /> Reset
             </button>
             <button type="submit" disabled={saving} className="btn-primary flex-1">

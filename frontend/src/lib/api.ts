@@ -349,7 +349,20 @@ export const api = {
     }),
   requestProfileEdit: (data: any) =>
     request('/users/me/profile-edit', { method: 'POST', body: JSON.stringify(data) }),
-  listProfileEdits: () => request('/users/profile-edits'),
+  listProfileEdits: (status?: string) => request(`/users/profile-edits${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  approvalsSummary: () => request('/users/approvals/summary'),
+  myCustomFields: () => request('/users/custom-fields'),
+  agencyCustomFields: (agencyId: string) => request(`/platform/agencies/${agencyId}/custom-fields`),
+  createCustomField: (agencyId: string, data: any) => request(`/platform/agencies/${agencyId}/custom-fields`, { method: 'POST', body: JSON.stringify(data) }),
+  updateCustomField: (id: string, data: any) => request(`/platform/custom-fields/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteCustomField: (id: string) => request(`/platform/custom-fields/${id}`, { method: 'DELETE' }),
+  cancelInvite: (id: string, reason?: string) => request(`/invites/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  postponeInvite: (id: string, expectedAt: string, note?: string) => request(`/invites/${id}/postpone`, { method: 'POST', body: JSON.stringify({ expectedAt, note }) }),
+  confirmAvailability: (id: string) => request(`/invites/${id}/confirm-availability`, { method: 'POST' }),
+  pendingIdentity: () => request('/invites/identity/pending'),
+  reviewIdentity: (visitorId: string, confirm: boolean) => request(`/invites/visitors/${visitorId}/identity`, { method: 'POST', body: JSON.stringify({ confirm }) }),
+  uploadGatePhoto: async (visitorId: string, blob: Blob) => { const form = new FormData(); form.append('photo', blob, 'gate-photo.jpg'); return request(`/gate/visitors/${visitorId}/gate-photo`, { method: 'POST', body: form }); },
+  requestIdentity: (visitorIds: string[]) => request('/gate/identity-request', { method: 'POST', body: JSON.stringify({ visitorIds }) }),
   reviewProfileEdit: (id: string, approve: boolean, note?: string) =>
     request(`/users/profile-edits/${id}/review`, {
       method: 'POST',

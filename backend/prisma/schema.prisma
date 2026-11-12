@@ -100,6 +100,7 @@ model Organisation {
   contractors     Contractor[]
   contractorLinks ContractorOrganisation[]
   dispatchDestinations DispatchDestination[]
+  customFieldDefs AgencyCustomField[]
 }
 
 model Location {
@@ -167,6 +168,8 @@ model User {
   staffBadgePhotoPath  String?
   staffAttendances     StaffAttendance[] @relation("StaffAttendanceSubject")
   scannedAttendances   StaffAttendance[] @relation("StaffAttendanceScanner")
+  /// Values for the agency's custom user fields, keyed by AgencyCustomField.key
+  customFields         Json?
 }
 
 model Invite {
@@ -191,8 +194,23 @@ model Invite {
   isOffline      Boolean      @default(false)
   approvedById   String?
   workflowState  String?
+  /// Expected vehicle / motorcycle (only when expectedMode is VEHICLE or MOTORCYCLE)
+  vehiclePlate   String?
+  vehicleDetails String?
+  /// Host (or admin) cancelled the invite. Status becomes REVOKED; the gate shows "Cancelled".
+  cancelledAt    DateTime?
+  cancelledById  String?
+  cancelReason   String?
+  postponedAt    DateTime?
+  postponeCount  Int          @default(0)
+  /// Idempotent reminder flags (scheduler). Reset when the invite is postponed.
+  reminderDaySentAt  DateTime?
+  reminderHourSentAt DateTime?
+  hostConfirmedAt    DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+
+  @@index([expectedAt])
 }
 
 model Visitor {
@@ -222,6 +240,17 @@ model Visitor {
   idNumber    String?
   /// Shared same-day pass so one QR covers every invite for this person
   passToken   String?
+  /// Vehicle actually used at the gate
+  vehiclePlate   String?
+  vehicleDetails String?
+  /// No-contact guests (no email, no phone): photo taken by the gate officer, confirmed by the host
+  gatePhotoPath        String?
+  /// null | CAPTURED | PENDING | CONFIRMED | DECLINED
+  identityStatus       String?
+  identityRequestedAt  DateTime?
+  identityRequestedById String?
+  identityReviewedAt   DateTime?
+  identityReviewedById String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   gateVisits  GateVisit[]
@@ -453,6 +482,8 @@ model PlatformSettings {
   /// When false, an uploaded login logo is kept but not shown above the sign-in form.
   loginLogoVisible          Boolean  @default(true)
   contractorMinDurationDays Int      @default(1)
+  /// Modes of entry accepted on invites and at the gate (PEDESTRIAN, MOTORCYCLE, VEHICLE)
+  allowedEntryModes         String[] @default(["PEDESTRIAN", "MOTORCYCLE", "VEHICLE"])
   assetVersion              String   @default("1.0.1")
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
@@ -584,4 +615,24 @@ model VisitTransfer {
 
   @@index([visitorId, createdAt])
   @@index([toOrganisationId, createdAt])
+}
+
+/// Super Admin defined extra fields for user accounts, unique per agency (e.g. Rank on Army vs Air Force).
+model AgencyCustomField {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  key            String
+  label          String
+  /// text | textarea | radio | checkbox | date | dropdown
+  type           String       @default("text")
+  options        String[]     @default([])
+  required       Boolean      @default(false)
+  sortOrder      Int          @default(0)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organisationId, key])
+  @@index([organisationId, isActive])
 }

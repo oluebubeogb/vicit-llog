@@ -7,6 +7,7 @@ import { api, getUser, setUser } from '@/lib/api';
 import BrandMark from '@/components/BrandMark';
 import { InfoTip } from '@/components/ui/Tooltip';
 import { Notice } from '@/components/ui/Bits';
+import PasswordInput from '@/components/ui/PasswordInput';
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -73,10 +74,7 @@ export default function ChangePasswordPage() {
         ].map((f) => (
           <label key={f.l} className="block">
             <span className="label">{f.l}</span>
-            <span className="relative block">
-              <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">{f.icon}</span>
-              <input type="password" value={f.v} onChange={(e) => f.s(e.target.value)} autoComplete={f.ac} className="input pl-10" required />
-            </span>
+            <PasswordInput icon={f.icon} value={f.v} onChange={(e) => f.s(e.target.value)} autoComplete={f.ac} required />
           </label>
         ))}
         <div className="tile space-y-2">

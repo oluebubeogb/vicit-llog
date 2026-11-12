@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import StatusPill from '@/components/ui/StatusPill';
+import { NoContactIcon } from '@/components/InviteBits';
 import Avatar from '@/components/ui/Avatar';
 import Tooltip from '@/components/ui/Tooltip';
 import { Empty, SkeletonList } from '@/components/ui/Bits';
@@ -203,7 +204,7 @@ export default function GateVisitsPage() {
               <button type="button" onClick={() => open(v)} className="row-link group">
                 <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={42} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold text-slate-800">{v.fullName}</span>
+                  <span className="flex items-center gap-1.5 font-semibold text-slate-800"><span className="truncate">{v.fullName}</span>{v.noContact && <NoContactIcon />}</span>
                   <span className="block truncate text-xs text-slate-500">
                     {v.purpose}
                     {v.hostName ? <> · <span className="text-slate-600">{v.hostName}</span></> : null}
@@ -225,7 +226,7 @@ export default function GateVisitsPage() {
                     {v.passphrase ? ` · ${v.passphrase}` : ''}
                   </span>
                 </span>
-                <StatusPill status={v.status} />
+                <StatusPill status={v.cancelled && v.status !== 'ARRIVED' && v.status !== 'EXITED' ? 'CANCELLED' : v.status} />
                 <ChevronRight size={16} className="shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-500" />
               </button>
             </li>

@@ -22,7 +22,10 @@ import {
   UserCog,
   UserRound,
   Users,
+  CalendarPlus,
 } from 'lucide-react';
+import IdentityReview from '@/components/IdentityReview';
+import Link from 'next/link';
 import PageHeader from '@/components/ui/PageHeader';
 import Sheet from '@/components/ui/Sheet';
 import StatusPill from '@/components/ui/StatusPill';
@@ -46,6 +49,12 @@ const TYPE: Record<string, { label: string; icon: ReactNode; tone: Tone }> = {
   profile_edit: { label: 'Profile update', icon: <UserCog size={18} />, tone: 'amber' },
   INVITE_APPROVAL: { label: 'Approval needed', icon: <ClipboardCheck size={18} />, tone: 'amber' },
   INVITE_APPROVED: { label: 'Invite approved', icon: <CheckCircle2 size={18} />, tone: 'emerald' },
+  VISIT_REMINDER: { label: 'Visit reminder', icon: <Clock3 size={18} />, tone: 'amber' },
+  IDENTITY_CONFIRM: { label: 'Confirm guest identity', icon: <ShieldCheck size={18} />, tone: 'amber' },
+  IDENTITY_RESULT: { label: 'Identity answer', icon: <ShieldCheck size={18} />, tone: 'brand' },
+  INVITE_CANCELLED: { label: 'Invite cancelled', icon: <Ban size={18} />, tone: 'rose' },
+  INVITE_POSTPONED: { label: 'Visit postponed', icon: <CalendarPlus size={18} />, tone: 'violet' },
+  PROFILE_EDIT_PENDING: { label: 'Approval needed', icon: <ClipboardCheck size={18} />, tone: 'amber' },
 };
 const TONE_TILE: Record<Tone, string> = {
   brand: 'from-brand-100 to-brand-50 text-brand-600',
@@ -102,6 +111,53 @@ function Timeline({ v }: { v: any }) {
   );
 }
 
+function toLocalInput(d: Date) {
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Host answers a visit reminder: confirm availability, or postpone to a new date/time. */
+function ReminderActions({ inviteId, expectedAt }: { inviteId: string; expectedAt?: string }) {
+  const [state, setState] = useState<'idle' | 'postpone' | 'confirmed' | 'postponed'>('idle');
+  const [when, setWhen] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function confirm() {
+    setBusy(true); setErr('');
+    try { await api.confirmAvailability(inviteId); setState('confirmed'); } catch (e: any) { setErr(e.message || 'Could not confirm'); } finally { setBusy(false); }
+  }
+  async function postpone() {
+    setErr('');
+    const d = new Date(when);
+    if (!when || Number.isNaN(d.getTime())) { setErr('Choose the new date and time'); return; }
+    if (d.getTime() < Date.now()) { setErr('The new date and time cannot be in the past'); return; }
+    setBusy(true);
+    try { await api.postponeInvite(inviteId, d.toISOString()); setState('postponed'); } catch (e: any) { setErr(e.message || 'Could not postpone'); } finally { setBusy(false); }
+  }
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4" data-testid="reminder-actions">
+      <div className="flex items-center gap-2 text-amber-900"><Clock3 size={18} /><b className="text-sm">Will you be available{expectedAt ? ` at ${fmtDate(expectedAt)}` : ''}?</b></div>
+      {state === 'confirmed' && <p className="mt-3 rounded-xl bg-white p-3 text-sm font-semibold text-emerald-800">Thanks — your availability is confirmed.</p>}
+      {state === 'postponed' && <p className="mt-3 rounded-xl bg-white p-3 text-sm font-semibold text-violet-800">Postponed. Your guests have been told the new time.</p>}
+      {(state === 'idle' || state === 'postpone') && (
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" disabled={busy} onClick={confirm} className="btn-primary !py-2.5"><CheckCircle2 size={16} /> Confirm availability</button>
+            <button type="button" disabled={busy} onClick={() => setState(state === 'postpone' ? 'idle' : 'postpone')} className="btn-ghost !py-2.5"><CalendarPlus size={16} /> Postpone</button>
+          </div>
+          {state === 'postpone' && (
+            <div className="flex gap-2">
+              <input type="datetime-local" className="input min-w-0 flex-1" min={toLocalInput(new Date(Date.now() + 5 * 60000))} value={when} onChange={(e) => setWhen(e.target.value)} aria-label="New date and time" />
+              <button type="button" disabled={busy || !when} onClick={postpone} className="btn-primary !px-4">Save</button>
+            </div>
+          )}
+        </div>
+      )}
+      {err && <p className="mt-2 text-xs text-rose-600">{err}</p>}
+    </div>
+  );
+}
+
 function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
   const [responseBusy,setResponseBusy] = useState(false);
   const [waitMinutes,setWaitMinutes] = useState(10);
@@ -120,6 +176,16 @@ function Detail({ n, isStaffViewer }: { n: any; isStaffViewer: boolean }) {
           <InAppCallButton className="flex-1 !py-2 text-xs" label="Call back" onClick={async () => { try { const call = await api.ringCallback(m.callId); window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call })); } catch (e: any) { alert(e.message || 'Could not call back'); } }} />
           <PhoneCallLink phone={m.phone || v?.phone || inv?.host?.phone || n.context?.from?.phone || n.context?.other?.phone} className="flex-1 !py-2 text-xs" />
         </div>
+      )}
+      {m.type === 'VISIT_REMINDER' && m.inviteId && <ReminderActions inviteId={m.inviteId} expectedAt={m.expectedAt} />}
+      {m.type === 'IDENTITY_CONFIRM' && (
+        <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-3">
+          <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-900"><ShieldCheck size={17} /> Is this your guest?</p>
+          <IdentityReview visitorIds={m.visitorIds} compact />
+        </div>
+      )}
+      {(m.type === 'PROFILE_EDIT_PENDING' || m.type === 'INVITE_APPROVAL') && (
+        <Link href="/approvals" className="btn-primary w-full"><ClipboardCheck size={16} /> Open approvals</Link>
       )}
       {m.type === 'HOST_ARRIVAL_CONFIRMATION' && v && (
         <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4">

@@ -61,6 +61,19 @@ export class GateController {
     return this.gateService.requestHostAvailability(visitorId, user);
   }
 
+  @Post('visitors/:visitorId/gate-photo')
+  @ApiOperation({ summary: 'Gate takes a live photo of a guest without email/phone' })
+  @UseInterceptors(FileInterceptor('photo', { storage: memoryStorage(), limits: { fileSize: 6 * 1024 * 1024 } }))
+  gatePhoto(@Param('visitorId') visitorId: string, @UploadedFile() file: Express.Multer.File, @CurrentUser() user: any) {
+    return this.gateService.uploadGatePhoto(visitorId, file, user);
+  }
+
+  @Post('identity-request')
+  @ApiOperation({ summary: 'Send gate photos to the host to confirm identity' })
+  identityRequest(@Body() body: { visitorIds: string[] }, @CurrentUser() user: any) {
+    return this.gateService.requestIdentityConfirmation(body?.visitorIds || [], user);
+  }
+
   @Post('checkpoint')
   @ApiOperation({ summary: 'Record a visitor checkpoint decision and inspection particulars' })
   checkpoint(@Body() body: any, @CurrentUser() user: any) {

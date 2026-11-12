@@ -68,7 +68,8 @@ export const MODE_LABEL: Record<string, string> = {
 };
 
 /** Effective invite status (an ACTIVE invite past expiry is shown as Expired). */
-export function inviteStatus(inv: { status: string; expiresAt?: string | null }): string {
+export function inviteStatus(inv: { status: string; expiresAt?: string | null; cancelledAt?: string | null }): string {
+  if (inv.cancelledAt) return 'CANCELLED';
   if (
     inv.status === 'EXPIRED' ||
     (inv.status === 'ACTIVE' && inv.expiresAt && new Date(inv.expiresAt) < new Date())

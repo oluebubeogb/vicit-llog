@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, UseGuards, UploadedFile, UseInterceptors, BadRequestException, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, UploadedFile, UseInterceptors, BadRequestException, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ApiConsumes } from '@nestjs/swagger';
@@ -32,6 +32,10 @@ export class PlatformController {
   @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), limits: { fileSize: 3 * 1024 * 1024 }, fileFilter: (_req, file, cb) => file.mimetype.startsWith('image/') ? cb(null, true) : cb(new BadRequestException('Only image files are allowed') as any, false) }))
   uploadAgencyLogo(@Param('agencyId') agencyId: string, @UploadedFile() file: Express.Multer.File, @CurrentUser() user: any) { return this.service.uploadAgencyLogo(user, agencyId, file); }
   @Post('agencies/:agencyId/users') createAgencyUser(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.createAgencyUser(user, agencyId, body); }
+  @Get('agencies/:agencyId/custom-fields') customFields(@Param('agencyId') agencyId: string, @CurrentUser() user: any) { return this.service.listCustomFields(user, agencyId); }
+  @Post('agencies/:agencyId/custom-fields') createCustomField(@Param('agencyId') agencyId: string, @Body() body: any, @CurrentUser() user: any) { return this.service.createCustomField(user, agencyId, body || {}); }
+  @Patch('custom-fields/:id') updateCustomField(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) { return this.service.updateCustomField(user, id, body || {}); }
+  @Delete('custom-fields/:id') deleteCustomField(@Param('id') id: string, @CurrentUser() user: any) { return this.service.deleteCustomField(user, id); }
   @Get('locations') locations(@CurrentUser() user: any) { return this.service.locations(user); }
   @Patch('locations/:id/shared') setLocationShared(@Param('id') id: string, @Body('isShared') isShared: boolean, @CurrentUser() user: any) { return this.service.setLocationShared(user, id, !!isShared); }
   @Get('gates') gates(@CurrentUser() user: any) { return this.service.gates(user); }

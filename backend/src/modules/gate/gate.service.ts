@@ -15,6 +15,10 @@ import { linkSameDayVisits, visitorsForPassToken } from '../../common/utils/visi
 import { currentAttendanceDay, localDayKey, attendanceTimeZone, startOfNextLocalDay } from '../../common/utils/attendance-day';
 import { roleLabel } from '../../common/utils/role-labels';
 import { ContractorsService } from '../contractors/contractors.service';
+import { allowedEntryModes, cleanPlate, cleanVehicleDetails, vehicleMode } from '../../common/utils/entry-modes';
+import { v4 as uuidv4 } from 'uuid';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class GateService {
@@ -114,6 +118,14 @@ export class GateService {
       phone: v.phone,
       photoPath: v.photoPath,
       status: v.status,
+      // No email and no phone: no registration link reached them, so the gate takes the photo
+      noContact: !v.email && !v.phone,
+      gatePhotoPath: v.gatePhotoPath || null,
+      identityStatus: v.identityStatus || null,
+      identityRequestedAt: v.identityRequestedAt || null,
+      identityReviewedAt: v.identityReviewedAt || null,
+      vehiclePlate: v.vehiclePlate || null,
+      vehicleDetails: v.vehicleDetails || null,
       hostAvailabilityStatus: v.hostAvailabilityStatus,
       hostWaitUntil: v.hostWaitUntil,
       hostRespondedAt: v.hostRespondedAt,
@@ -139,10 +151,36 @@ export class GateService {
       organisation: invite.organisation,
       organisationId: invite.organisationId,
       locationId: invite.locationId,
+      inviteStatus: invite.status,
+      cancelled: !!invite.cancelledAt || invite.status === 'REVOKED',
+      cancelledAt: invite.cancelledAt || null,
+      cancelReason: invite.cancelReason || null,
+      expectedAt: invite.expectedAt || null,
+      vehiclePlate: invite.vehiclePlate || null,
+      vehicleDetails: invite.vehicleDetails || null,
+      allowedEntryModes: await allowedEntryModes(this.prisma),
+      // The route this visitor must follow. The gate page uses this even if its own checkpoint
+      // list failed to load (the v18 mobile bypass), so legacy entry/exit never shows when gates exist.
+      gates: await this.routeGates(invite, actor),
       passToken: linked.passToken,
       appointments,
-      visitors: (linked.visitors?.length ? linked.visitors.filter((v: any) => v.inviteId === invite.id) : invite.visitors).map(presentVisitor),
+      visitors: this.lookupVisitors(invite, linked, !seedVisitorId && !scannedVisitorId).map(presentVisitor),
     };
+  }
+
+  /**
+   * Which guests the gate sees. An invite-level code (passphrase / invite link) shows every guest on
+   * the invite. A personal code shows that person's same-day visits on this invite, plus any guest on
+   * the invite with no email and no phone (they never got a personal code, so the gate reaches them
+   * through a companion's or the host's code).
+   */
+  private lookupVisitors(invite: any, linked: any, inviteLevel: boolean) {
+    const all: any[] = invite.visitors || [];
+    if (inviteLevel || !linked.visitors?.length) return all;
+    const mine = linked.visitors.filter((v: any) => v.inviteId === invite.id);
+    const ids = new Set(mine.map((v: any) => v.id));
+    const extra = all.filter((v: any) => !ids.has(v.id) && !v.email && !v.phone);
+    return [...mine, ...extra];
   }
 
   private groupAppointments(visitors: any[]) {
@@ -182,6 +220,99 @@ export class GateService {
     return [...byInvite.values()];
   }
 
+  /** Active checkpoints on this invite's route: its location, or every location of its agency. */
+  async routeGates(invite: { organisationId: string; locationId?: string | null }, actor?: any) {
+    const where: any = { isActive: true };
+    if (invite.locationId) where.locationId = invite.locationId;
+    else where.location = { organisationId: invite.organisationId };
+    const gates = await this.prisma.gate.findMany({
+      where,
+      include: { location: { select: { id: true, name: true, organisationId: true, organisation: { select: { name: true } } } }, assignments: { select: { userId: true } } },
+      orderBy: [{ locationId: 'asc' }, { sequence: 'asc' }],
+    });
+    return gates.map(({ assignments, ...g }: any) => ({
+      ...g,
+      assigned: !actor || !['GATE', 'GLOBAL_GATE'].includes(actor.role) || assignments.some((a: any) => a.userId === actor.id),
+    }));
+  }
+
+  private photoDir() {
+    return process.env.PHOTO_STORAGE_PATH || '/data/photos';
+  }
+
+  private async assertGateCanHandle(visitorId: string, actor: any) {
+    const visitor = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: { include: { host: { select: { id: true, fullName: true, email: true } } } } } });
+    if (!visitor) throw new NotFoundException('Guest not found');
+    const global = ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
+    if (!global && visitor.invite.organisationId !== actor.orgId) throw new NotFoundException('Guest not found');
+    if (actor.role === 'GLOBAL_ADMIN') throw new ForbiddenException('Super Admin II accounts provide oversight, not checkpoint operations');
+    return visitor;
+  }
+
+  /** Gate officer takes a live photo of a guest who had no email/phone (no registration link). */
+  async uploadGatePhoto(visitorId: string, file: Express.Multer.File, actor: any) {
+    if (!file?.buffer?.length) throw new BadRequestException('No photo received');
+    if (!/^image\/(jpeg|png|webp)$/.test(file.mimetype || '')) throw new BadRequestException('Photo must be JPEG, PNG or WebP');
+    const visitor = await this.assertGateCanHandle(visitorId, actor);
+    if (visitor.invite.cancelledAt || visitor.invite.status === 'REVOKED') throw new BadRequestException('This visit was cancelled by the host');
+    if (visitor.photoPath) throw new BadRequestException('This guest already has a photo');
+    if (['DENIED', 'CANCELLED', 'EXITED'].includes(visitor.status)) throw new BadRequestException('This visit is already closed');
+    if (visitor.identityStatus === 'PENDING') throw new BadRequestException('Waiting for the host — retake after they respond');
+    const ext = file.mimetype === 'image/png' ? '.png' : file.mimetype === 'image/webp' ? '.webp' : '.jpg';
+    const dir = this.photoDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const name = `${visitorId}-gate-${uuidv4()}${ext}`;
+    fs.writeFileSync(path.join(dir, name), file.buffer);
+    const updated = await this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: { gatePhotoPath: name, identityStatus: 'CAPTURED', identityReviewedAt: null, identityReviewedById: null },
+    });
+    await this.audit.log({ action: 'GATE_GUEST_PHOTO_TAKEN', entity: 'Visitor', entityId: visitorId, userId: actor.id, details: { guest: visitor.fullName } });
+    return { id: updated.id, gatePhotoPath: updated.gatePhotoPath, identityStatus: updated.identityStatus };
+  }
+
+  /** Send the captured photos to the host, who ticks or crosses each guest. */
+  async requestIdentityConfirmation(visitorIds: string[], actor: any) {
+    const ids = Array.from(new Set((visitorIds || []).map(String))).slice(0, 30);
+    if (!ids.length) throw new BadRequestException('Choose at least one guest');
+    const visitors = [] as any[];
+    for (const id of ids) visitors.push(await this.assertGateCanHandle(id, actor));
+    const ready = visitors.filter((v) => v.gatePhotoPath && v.identityStatus === 'CAPTURED' && !v.photoPath);
+    if (!ready.length) throw new BadRequestException('Take a photo of each guest first');
+    const now = new Date();
+    await this.prisma.visitor.updateMany({ where: { id: { in: ready.map((v) => v.id) } }, data: { identityStatus: 'PENDING', identityRequestedAt: now, identityRequestedById: actor.id } });
+    const byHost = new Map<string, any[]>();
+    for (const v of ready) {
+      const k = v.invite.hostId;
+      byHost.set(k, [...(byHost.get(k) || []), v]);
+    }
+    for (const [hostId, list] of byHost) {
+      const host = list[0].invite.host;
+      const names = list.map((v) => v.fullName).join(', ');
+      await this.notifications.create({
+        userId: hostId,
+        title: 'Confirm your guest' + (list.length > 1 ? 's' : ''),
+        body: `The gate photographed ${names}. Tick the people you are expecting.`,
+        meta: { type: 'IDENTITY_CONFIRM', visitorIds: list.map((v) => v.id), inviteId: list[0].inviteId, url: '/identity' },
+        channels: ['in_app'],
+      }).catch(() => {});
+      if (host?.email) {
+        const base = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+        await this.mail.sendNotice({
+          to: host.email,
+          organisationId: list[0].invite.organisationId,
+          subject: `Confirm guest identity: ${names}`,
+          eyebrow: 'At the gate',
+          title: `Please confirm ${list.length > 1 ? 'these guests' : 'this guest'}`,
+          paragraphs: [`${names} ${list.length > 1 ? 'are' : 'is'} at the gate for "${list[0].invite.purpose}" without a registered photo. Open the app to confirm each person with a tick, or decline with an X.`],
+          button: base ? { href: `${base}/identity`, label: 'Confirm identity' } : null,
+        }).catch(() => null);
+      }
+    }
+    await this.audit.log({ action: 'GUEST_IDENTITY_REQUESTED', entity: 'Invite', entityId: ready[0].inviteId, userId: actor.id, details: { guests: ready.map((v) => v.fullName) } });
+    return { requested: ready.map((v) => v.id) };
+  }
+
   async listCheckpoints(actor: any) {
     if (actor.role === 'GLOBAL_ADMIN' && !(actor.permissions || []).includes('gates.manage')) throw new ForbiddenException('Gate oversight permission is required');
     const global = ['SUPER_ADMIN', 'GLOBAL_GATE', 'GLOBAL_ADMIN'].includes(actor.role);
@@ -198,6 +329,7 @@ export class GateService {
     if (!visitorId || !gateId || !['PASSED', 'DENIED'].includes(decision)) throw new BadRequestException('Visitor, gate and a PASSED or DENIED decision are required');
     const visitor = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: true } });
     if (!visitor) throw new NotFoundException('Visitor not found');
+    if ((visitor.status === VisitStatus.INVITED || visitor.status === VisitStatus.CANCELLED) && (visitor.invite.cancelledAt || visitor.invite.status === 'REVOKED')) throw new BadRequestException('This visit was cancelled by the host — entry is not allowed');
     if (decision === 'PASSED' && !visitor.photoPath) throw new BadRequestException('Visitor has not completed photo capture');
     if (decision === 'DENIED' && !String(body.notes || '').trim()) throw new BadRequestException('A reason is required when denying entry');
     const gate = await this.prisma.gate.findFirst({ where: { id: gateId, isActive: true }, include: { location: true, assignments: true } });
@@ -213,6 +345,12 @@ export class GateService {
     if (visitor.status === VisitStatus.EXITED || visitor.status === VisitStatus.CANCELLED) throw new BadRequestException('This visit is already closed');
     if (visitor.status === VisitStatus.DENIED) throw new BadRequestException('This visitor has already been denied');
     const direction = String(body.direction || '').toUpperCase() === 'EXIT' || visitor.status === VisitStatus.ARRIVED ? 'EXIT' : 'ENTRY';
+    if (direction === 'ENTRY' && (visitor.invite.cancelledAt || visitor.invite.status === 'REVOKED')) throw new BadRequestException('This visit was cancelled by the host — entry is not allowed');
+    if (direction === 'ENTRY' && decision === 'PASSED' && visitor.invite.status !== 'ACTIVE' && visitor.invite.status !== 'USED' && visitor.invite.status !== 'EXPIRED') throw new BadRequestException('This invite is not active');
+    const modes = await allowedEntryModes(this.prisma);
+    if (direction === 'ENTRY' && body.entryMode && !modes.includes(String(body.entryMode))) throw new BadRequestException(`${String(body.entryMode).toLowerCase()} entry is not accepted`);
+    const plate = vehicleMode(body.entryMode) ? cleanPlate(body.vehiclePlate) : null;
+    const vDetails = vehicleMode(body.entryMode) ? cleanVehicleDetails(body.vehicleDetails) : null;
     if (direction === 'EXIT' && visitor.status !== VisitStatus.ARRIVED) throw new BadRequestException('Exit checkpoints start after the visitor has arrived');
     if (direction === 'EXIT' && decision === 'PASSED') await this.assertParticularsResolved(visitorId, { gateId });
     const currentEvent = await this.prisma.gateVisit.findFirst({ where: { visitorId, gateId, direction }, orderBy: { occurredAt: 'desc' } });
@@ -244,7 +382,7 @@ export class GateService {
       if (decision === 'DENIED' && direction === 'ENTRY') await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.DENIED, deniedAt: new Date(), deniedReason: String(body.notes || 'Denied at checkpoint').slice(0, 1000), entryById: actor.id } });
       else if (decision === 'PASSED' && direction === 'ENTRY') {
         const remaining = await tx.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { gt: gate.sequence } } });
-        if (remaining === 0) await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.ARRIVED, hostAvailabilityStatus: 'PENDING', hostWaitUntil: null, hostRespondedAt: null, lastHostPromptAt: new Date(), enteredAt: visitor.enteredAt || new Date(), entryById: actor.id, gateId, entryMode: Object.values(EntryMode).includes(body.entryMode) ? body.entryMode : EntryMode.PEDESTRIAN } });
+        if (remaining === 0) await tx.visitor.update({ where: { id: visitorId }, data: { status: VisitStatus.ARRIVED, hostAvailabilityStatus: 'PENDING', hostWaitUntil: null, hostRespondedAt: null, lastHostPromptAt: new Date(), enteredAt: visitor.enteredAt || new Date(), entryById: actor.id, gateId, entryMode: Object.values(EntryMode).includes(body.entryMode) ? body.entryMode : EntryMode.PEDESTRIAN, vehiclePlate: plate || (vehicleMode(body.entryMode) ? visitor.invite.vehiclePlate : null), vehicleDetails: vDetails || (vehicleMode(body.entryMode) ? visitor.invite.vehicleDetails : null) } });
       } else if (decision === 'PASSED' && direction === 'EXIT') {
         const remaining = await tx.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { lt: gate.sequence } } });
         if (remaining === 0) {
@@ -378,9 +516,20 @@ export class GateService {
     if (visitor.status === VisitStatus.EXITED) {
       throw new BadRequestException('Visitor has already exited');
     }
+    if (visitor.invite.cancelledAt || visitor.invite.status === 'REVOKED') {
+      throw new BadRequestException('This visit was cancelled by the host — entry is not allowed');
+    }
     if (!visitor.photoPath) {
       throw new BadRequestException('Visitor has not completed photo capture');
     }
+    if (visitor.status !== VisitStatus.INVITED) throw new BadRequestException('This visit is closed');
+    // Gate passes are mandatory whenever the route has checkpoints (fixes the v18 mobile bypass).
+    const route = await this.routeGates(visitor.invite);
+    if (route.length) {
+      throw new BadRequestException(`Entry must go through the checkpoints: ${route.map((g: any) => g.name).join(' → ')}`);
+    }
+    const modes = await allowedEntryModes(this.prisma);
+    if (dto.entryMode && !modes.includes(dto.entryMode)) throw new BadRequestException(`${dto.entryMode.toLowerCase()} entry is not accepted`);
 
     const updated = await this.prisma.visitor.update({
       where: { id: dto.visitorId },
@@ -645,6 +794,12 @@ export class GateService {
       phone: v.phone,
       status: v.status,
       photoPath: v.photoPath,
+      noContact: !v.email && !v.phone,
+      identityStatus: v.identityStatus || null,
+      cancelled: !!v.invite.cancelledAt,
+      inviteStatus: v.invite.status,
+      entryMode: v.entryMode,
+      vehiclePlate: v.vehiclePlate || v.invite.vehiclePlate || null,
       enteredAt: v.enteredAt,
       exitedAt: v.exitedAt,
       deniedAt: v.deniedAt,
@@ -793,10 +948,16 @@ export class GateService {
     }
   }
 
-  private async assertExitCheckpointsComplete(visitor: { id: string; invite: { locationId?: string | null } }) {
+  private async assertExitCheckpointsComplete(visitor: { id: string; invite: { locationId?: string | null; organisationId?: string } }) {
+    // Every checkpoint the visitor entered through (plus the whole destination route when set)
+    // must record a passed exit — the legacy "Record exit" can never skip gate passes.
+    const entered = await this.prisma.gateVisit.findMany({ where: { visitorId: visitor.id, direction: 'ENTRY', decision: 'PASSED' }, select: { gateId: true } });
+    const ids = new Set(entered.map((e) => e.gateId));
     const locationId = visitor.invite.locationId;
-    if (!locationId) return;
-    const gates = await this.prisma.gate.findMany({ where: { locationId, isActive: true }, orderBy: { sequence: 'desc' } });
+    const gates = await this.prisma.gate.findMany({
+      where: { isActive: true, OR: [{ id: { in: [...ids] } }, ...(locationId ? [{ locationId }] : [])] },
+      orderBy: { sequence: 'desc' },
+    });
     if (!gates.length) return;
     for (const g of gates) {
       const ev = await this.prisma.gateVisit.findFirst({ where: { visitorId: visitor.id, gateId: g.id, direction: 'EXIT' }, orderBy: { occurredAt: 'desc' } });

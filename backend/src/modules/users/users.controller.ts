@@ -5,6 +5,7 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   UseGuards,
   UploadedFile,
   UseInterceptors,
@@ -55,7 +56,7 @@ export class UsersController {
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Admin: onboard staff' })
   create(@Body() dto: CreateUserDto, @CurrentUser() user: any) {
-    return this.usersService.create(dto, user.orgId);
+    return this.usersService.create(dto, user.orgId, user.id);
   }
 
   @Post('bulk')
@@ -107,7 +108,7 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Request profile change (pending admin approval)' })
   requestEdit(@Body() body: any, @CurrentUser() user: any) {
-    return this.usersService.requestProfileEdit(user.id, user.orgId, body);
+    return this.usersService.requestProfileEdit(user.id, user.orgId, body, user.role);
   }
 
   @Post('me/avatar')
@@ -131,22 +132,39 @@ export class UsersController {
   @Get('profile-edits')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  listEdits(@CurrentUser() user: any) {
-    return this.usersService.listProfileEdits(user.orgId);
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
+  listEdits(@CurrentUser() user: any, @Query('status') status?: string) {
+    return this.usersService.listProfileEdits(user, status);
+  }
+
+  @Get('approvals/summary')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
+  @ApiOperation({ summary: 'Pending approvals count + recent approve/reject timeline' })
+  approvalsSummary(@CurrentUser() user: any) {
+    return this.usersService.approvalsSummary(user);
+  }
+
+  @Get('custom-fields')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Active custom user fields for your agency' })
+  myCustomFields(@CurrentUser() user: any) {
+    return this.usersService.customFieldsFor(user.orgId);
   }
 
   @Post('profile-edits/bulk-review')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
   @ApiOperation({ summary: 'Bulk approve/decline profile edits' })
   bulkReview(
     @Body() body: { ids: string[]; approve: boolean; note?: string },
     @CurrentUser() user: any,
   ) {
     return this.usersService.bulkReviewProfileEdits(
-      user.orgId,
+      user,
       user.id,
       body.ids || [],
       !!body.approve,
@@ -157,7 +175,7 @@ export class UsersController {
   @Post('profile-edits/:id/review')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN)
   reviewEdit(
     @Param('id') id: string,
     @Body() body: { approve: boolean; note?: string },
@@ -165,7 +183,7 @@ export class UsersController {
   ) {
     return this.usersService.reviewProfileEdit(
       id,
-      user.orgId,
+      user,
       user.id,
       !!body.approve,
       body.note,
