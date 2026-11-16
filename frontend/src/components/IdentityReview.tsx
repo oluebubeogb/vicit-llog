@@ -45,7 +45,7 @@ export default function IdentityReview({ visitorIds, compact }: { visitorIds?: s
   if (!rows) return <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 size={14} className="animate-spin" /> Loading photos…</p>;
   const shown = rows.length ? rows : [];
   if (!shown.length && !Object.keys(done).length) {
-    return compact ? <p className="text-sm text-slate-500">Nothing waiting — already answered.</p> : <Empty icon={<PhoneOff size={22} />} title="No guests waiting" hint="When the gate photographs a guest without email or phone, they appear here for you to confirm." />;
+    return compact ? <p className="text-sm text-slate-500">Nothing waiting — already answered.</p> : <Empty icon={<PhoneOff size={22} />} title="No guests waiting" hint="When the gate photographs a no phone guest (no email), they appear here for you to confirm." />;
   }
   return (
     <div className="space-y-2" data-testid="identity-review">

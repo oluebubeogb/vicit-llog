@@ -187,9 +187,9 @@ export default function NewInvitePage() {
 
   const guestName = (g: Guest, i: number) => g.fullName.trim() || `Guest ${i + 1}`;
 
-  /** Guests with neither an email nor a phone — they get no link and are photographed at the gate. */
+  /** Guests without an email are marked 'no phone' — the registration link (face capture + QR) only goes by email, so the gate photographs them. */
   function noContactGuests() {
-    return guests.map((g, i) => ({ g, i })).filter(({ g }) => !g.email.trim() && !g.phone.trim()).map(({ g, i }) => ({ i, name: guestName(g, i) }));
+    return guests.map((g, i) => ({ g, i })).filter(({ g }) => !g.email.trim()).map(({ g, i }) => ({ i, name: guestName(g, i) }));
   }
 
   function goBackAndFill() {
@@ -361,7 +361,7 @@ export default function NewInvitePage() {
               <span className="flex items-start gap-2">
                 <PhoneOff size={16} className="mt-0.5 shrink-0 text-slate-400" />
                 <span>
-                  <strong>{result.noContactGuests.map((g: any) => g.fullName).join(', ')}</strong> {result.noContactGuests.length === 1 ? 'has' : 'have'} no email or phone. The gate will take {result.noContactGuests.length === 1 ? 'their' : 'each'} photo and send it to you to confirm.
+                  <strong>{result.noContactGuests.map((g: any) => g.fullName).join(', ')}</strong> {result.noContactGuests.length === 1 ? 'has' : 'have'} no email, so {result.noContactGuests.length === 1 ? 'is' : 'are'} marked no phone. The gate will take {result.noContactGuests.length === 1 ? 'their' : 'each'} photo and send it to you to confirm.
                 </span>
               </span>
             </Notice>
@@ -482,9 +482,9 @@ export default function NewInvitePage() {
                     )}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{summary}</span>
                     {g.email && <Mail size={14} className="text-emerald-500" />}
-                    {!g.email.trim() && !g.phone.trim() && (g.fullName.trim() || i > 0) && (
-                      <Tooltip content="No email or phone — gate will photograph this guest">
-                        <span className="inline-flex" role="img" aria-label="No email or phone"><PhoneOff size={13} className="text-slate-400" /></span>
+                    {!g.email.trim() && (g.fullName.trim() || i > 0) && (
+                      <Tooltip content="No email — marked no phone; the gate will photograph this guest">
+                        <span className="inline-flex" role="img" aria-label="No email — no phone guest"><PhoneOff size={13} className="text-slate-400" /></span>
                       </Tooltip>
                     )}
                     <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 group-hover:text-brand-500 ${open ? 'rotate-180' : ''}`} />
@@ -520,8 +520,8 @@ export default function NewInvitePage() {
         onClose={() => setMissing([])}
         tone="amber"
         icon={<UserX size={20} />}
-        title={missing.length === 1 ? `${missing[0].name} has no email or phone number set` : `${missing.length} guests have no email or phone number set`}
-        subtitle={missing.length === 1 ? 'They will not receive an invite link.' : 'They will not receive an invite link.'}
+        title={missing.length === 1 ? `${missing[0].name} has no email address` : `${missing.length} guests have no email address`}
+        subtitle={missing.length === 1 ? 'They will be marked no phone — the invite link to capture their face and get a QR code only goes by email.' : 'They will be marked no phone — the invite link to capture their face and get a QR code only goes by email.'}
         footer={
           <div className="flex w-full flex-col gap-2 sm:flex-row">
             <button type="button" className="btn-ghost flex-1" onClick={goBackAndFill}>
@@ -539,7 +539,7 @@ export default function NewInvitePage() {
               <li key={m.i} className="flex items-center gap-2.5 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2 text-sm">
                 <Avatar name={m.name} size={26} />
                 <span className="min-w-0 flex-1 truncate font-medium text-slate-800">{m.name}</span>
-                <PhoneOff size={13} className="text-slate-400" aria-label="No email or phone" />
+                <PhoneOff size={13} className="text-slate-400" aria-label="No email — no phone guest" />
               </li>
             ))}
           </ul>
@@ -548,7 +548,7 @@ export default function NewInvitePage() {
           {guests.length - missing.length > 0
             ? 'Guests with an email get their link now. '
             : ''}
-          {missing.length === 1 ? 'This guest will be added as a no-contact guest' : 'These guests will be added as no-contact guests'}: the gate takes {missing.length === 1 ? 'their' : 'each'} photo on arrival and sends it to you to confirm.
+          {missing.length === 1 ? 'This guest will be added as a no phone guest' : 'These guests will be added as no phone guests'} (a phone number alone is not enough): the gate takes {missing.length === 1 ? 'their' : 'each'} photo on arrival and sends it to you to confirm.
         </p>
       </SleekOverlay>
     </div>

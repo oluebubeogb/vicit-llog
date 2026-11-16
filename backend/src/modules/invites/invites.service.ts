@@ -171,7 +171,7 @@ export class InvitesService {
         purpose: dto.purpose,
         guestCount: guests.length,
         guests: guests.map((g) => g.fullName),
-        noContactGuests: guests.filter((g) => !g.email && !g.phone).map((g) => g.fullName),
+        noContactGuests: guests.filter((g) => !g.email).map((g) => g.fullName),
         expectedAt: expectedAt ? expectedAt.toISOString() : null,
         expectedMode: dto.expectedMode || null,
         awaitingApproval: needsApproval,
@@ -209,7 +209,7 @@ export class InvitesService {
       link,
       expiresInMinutes: ttl,
       emailsSent,
-      noContactGuests: createdVisitors.filter((v) => !v.email && !v.phone).map((v) => ({ id: v.id, fullName: v.fullName })),
+      noContactGuests: createdVisitors.filter((v) => !v.email).map((v) => ({ id: v.id, fullName: v.fullName })),
       awaitingApproval: needsApproval,
     };
   }

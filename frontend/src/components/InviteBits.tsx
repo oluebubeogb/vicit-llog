@@ -44,18 +44,18 @@ export const MODE_ICON: Record<string, ReactNode> = {
   VEHICLE: <Car size={14} />,
 };
 
-/** Tiny gray marker for guests with neither email nor phone (no link — photographed at the gate). */
+/** Tiny gray 'no phone' marker for guests without an email (no registration link — photographed at the gate). */
 export function NoContactIcon({ size = 12, className = '' }: { size?: number; className?: string }) {
   return (
-    <Tooltip content="No email or phone — gate takes the photo">
-      <span role="img" aria-label="No email or phone" className={`inline-flex shrink-0 items-center text-slate-400 ${className}`}>
+    <Tooltip content="No phone — no email for the invite link, gate takes the photo">
+      <span role="img" aria-label="No phone — no email" className={`inline-flex shrink-0 items-center text-slate-400 ${className}`}>
         <PhoneOff size={size} />
       </span>
     </Tooltip>
   );
 }
 
-export const isNoContact = (v: any) => !!v && (v.noContact ?? (!v.email && !v.phone));
+export const isNoContact = (v: any) => !!v && (v.noContact ?? !v.email);
 
 /** Transfer visit — icon on a light chip, label right beside it. Same everywhere it appears. */
 export function TransferButton({ onClick, className = '' }: { onClick: () => void; className?: string }) {

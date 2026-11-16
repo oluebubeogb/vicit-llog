@@ -243,7 +243,7 @@ model Visitor {
   /// Vehicle actually used at the gate
   vehiclePlate   String?
   vehicleDetails String?
-  /// No-contact guests (no email, no phone): photo taken by the gate officer, confirmed by the host
+  /// No-contact ("no phone") guests = no email: photo taken by the gate officer, confirmed by the host
   gatePhotoPath        String?
   /// null | CAPTURED | PENDING | CONFIRMED | DECLINED
   identityStatus       String?
@@ -324,8 +324,11 @@ model RingCall {
   createdAt         DateTime  @default(now())
   answeredAt        DateTime?
   endedAt           DateTime?
+  /// Talk time in seconds (endedAt - answeredAt); 0 when the call never connected.
+  durationSec       Int?
 
   @@index([toUserId, status])
+  @@index([calleeUserId, createdAt])
   @@index([fromUserId, status])
   @@index([visitorId, createdAt])
   @@index([dispatchId])

@@ -23,6 +23,7 @@ import {
   UserRound,
   Users,
   CalendarPlus,
+  ChevronRight,
 } from 'lucide-react';
 import IdentityReview from '@/components/IdentityReview';
 import Link from 'next/link';
@@ -35,7 +36,7 @@ import { Empty, Field, Fields, SkeletonList } from '@/components/ui/Bits';
 import PersonLink from '@/components/PersonLink';
 import { fmtDate, fmtDuration, fmtTime, MODE_LABEL, photoUrl, relTime, titleCase } from '@/lib/format';
 import { MODE_ICON } from '@/components/InviteBits';
-import RecentCalls from '@/components/RecentCalls';
+import RecentCalls, { useRecentCalls } from '@/components/RecentCalls';
 import { InAppCallButton, PhoneCallLink } from '@/components/CallButtons';
 
 type Tone = 'brand' | 'emerald' | 'amber' | 'rose' | 'violet';
@@ -63,6 +64,22 @@ const TONE_TILE: Record<Tone, string> = {
   rose: 'from-rose-100 to-rose-50 text-rose-600',
   violet: 'from-violet-100 to-violet-50 text-violet-600',
 };
+type Filter = 'all' | 'gate' | 'other' | 'calls';
+const GATE_TYPES = ['ARRIVAL', 'EXIT', 'ENTRY_DENIED'];
+/** On the All tab each section shows at most this many items, then "View more". */
+const ALL_LIMIT = 5;
+
+function groupByDay(list: any[]) {
+  const out: { label: string; items: any[] }[] = [];
+  for (const n of list) {
+    const l = dayLabel(new Date(n.createdAt));
+    const g = out[out.length - 1];
+    if (g && g.label === l) g.items.push(n);
+    else out.push({ label: l, items: [n] });
+  }
+  return out;
+}
+
 const CHANNEL: Record<string, string> = { in_app: 'In-app', sms: 'SMS', whatsapp: 'WhatsApp', email: 'Email' };
 
 function meta(n: any) {
@@ -388,7 +405,8 @@ export default function NotificationsPage() {
   const [selected, setSelected] = useState<any | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [role, setRole] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'gate' | 'other'>('all');
+  const [filter, setFilter] = useState<Filter>('all');
+  const calls = useRecentCalls();
 
   useEffect(() => {
     setRole(getUser()?.role ?? null);
@@ -410,22 +428,62 @@ export default function NotificationsPage() {
     })();
   }, []);
 
-  const groups = useMemo(() => {
-    const out: { label: string; items: any[] }[] = [];
-    for (const n of items) {
-      const t = n.meta?.type;
-      const isGate = ['ARRIVAL', 'EXIT', 'ENTRY_DENIED'].includes(t);
-      if (filter === 'gate' && !isGate) continue;
-      if (filter === 'other' && isGate) continue;
-      const l = dayLabel(new Date(n.createdAt));
-      const g = out[out.length - 1];
-      if (g && g.label === l) g.items.push(n);
-      else out.push({ label: l, items: [n] });
-    }
-    return out;
-  }, [items, filter]);
+  const isGate = (n: any) => GATE_TYPES.includes(n?.meta?.type);
+  const isCall = (n: any) => n?.meta?.type === 'RING';
+  const gateItems = useMemo(() => items.filter(isGate), [items]);
+  const requestItems = useMemo(() => items.filter((n) => !isGate(n) && !isCall(n)), [items]);
+  const groups = useMemo(() => groupByDay(filter === 'gate' ? gateItems : requestItems), [filter, gateItems, requestItems]);
 
   const sel = selected ? meta(selected) : null;
+
+  const renderRow = (n: any) => {
+    const t = meta(n);
+    const v = n.context?.visitor;
+    const s = summary(n);
+    return (
+      <li key={n.id}>
+        <button type="button" onClick={() => setSelected(n)} className="row-link group items-start">
+          <span className="relative">
+            {v ? (
+              <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={42} />
+            ) : (
+              <span className={`flex h-[42px] w-[42px] items-center justify-center rounded-full bg-gradient-to-br ${TONE_TILE[t.tone]}`}>{t.icon}</span>
+            )}
+            {v && (
+              <span className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ring-2 ring-white [&>svg]:h-3 [&>svg]:w-3 ${TONE_TILE[t.tone]}`}>
+                {t.icon}
+              </span>
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="truncate font-semibold text-slate-800">{n.title}</span>
+              {fresh.has(n.id) && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-500 shadow-[0_0_0_3px_rgb(var(--brand-100))]" />}
+              <span className="ml-auto shrink-0 text-[11px] text-slate-400">{relTime(n.createdAt)}</span>
+            </span>
+            <span className="mt-0.5 line-clamp-2 block text-sm text-slate-600">{n.body}</span>
+            {s && <span className="mt-1 block truncate text-xs font-medium text-brand-700/80">{s}</span>}
+          </span>
+        </button>
+      </li>
+    );
+  };
+
+  const sectionHead = (icon: ReactNode, label: string, count: number, tab: Filter) => (
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <p className="section-title !mb-0 flex items-center gap-1.5">{icon} {label}{count ? <span className="text-slate-400"> · {count}</span> : null}</p>
+      {count > 0 && (
+        <button type="button" onClick={() => switchTab(tab)} className="inline-flex items-center gap-0.5 rounded-full px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50" data-testid={`view-more-${tab}`}>
+          View more <ChevronRight size={14} />
+        </button>
+      )}
+    </div>
+  );
+
+  function switchTab(tab: Filter) {
+    setFilter(tab);
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   return (
     <div className="page">
@@ -434,67 +492,60 @@ export default function NotificationsPage() {
         icon={<Bell size={20} />}
         title="Alerts"
         subtitle={loading ? 'Loading…' : fresh.size ? `${fresh.size} new since your last visit` : 'You are all caught up'}
-        info="Arrivals, exits and approvals for your guests. Tap an alert for the full visit story."
+        info="Arrivals, exits, approvals and calls. Tap an alert for the full visit story."
       />
-      <div className="animate-in mb-4 segmented">
+      <div className="animate-in mb-4 segmented" role="tablist" aria-label="Alert sections">
         {(
           [
             ['all', 'All'],
             ['gate', 'Gate activity'],
             ['other', 'Requests'],
+            ['calls', 'Calls'],
           ] as const
         ).map(([k, l]) => (
-          <button key={k} type="button" data-active={filter === k} onClick={() => setFilter(k)}>
+          <button key={k} type="button" role="tab" aria-selected={filter === k} data-active={filter === k} onClick={() => switchTab(k)} className="!px-2 text-xs sm:text-sm">
             {l}
           </button>
         ))}
       </div>
 
-      <RecentCalls />
-
-      {loading ? (
+      {filter === 'calls' ? (
+        <RecentCalls rows={calls} title={false} emptyHint="No calls yet. In-app calls you make or receive appear here." />
+      ) : loading ? (
         <SkeletonList rows={6} h={72} />
+      ) : filter === 'all' ? (
+        items.length === 0 && !(calls && calls.length) ? (
+          <Empty icon={<Bell size={24} />} title="No alerts yet" hint="You'll be notified here the moment a guest arrives or leaves." />
+        ) : (
+          <div className="space-y-6">
+            {gateItems.length > 0 && (
+              <section className="animate-in" data-testid="all-gate">
+                {sectionHead(<DoorOpen size={13} />, "Gate activity", gateItems.length, "gate")}
+                <ul className="rows stagger">{gateItems.slice(0, ALL_LIMIT).map(renderRow)}</ul>
+              </section>
+            )}
+            {requestItems.length > 0 && (
+              <section className="animate-in" data-testid="all-requests">
+                {sectionHead(<ClipboardCheck size={13} />, "Requests", requestItems.length, "other")}
+                <ul className="rows stagger">{requestItems.slice(0, ALL_LIMIT).map(renderRow)}</ul>
+              </section>
+            )}
+            {calls && calls.length > 0 && (
+              <section className="animate-in" data-testid="all-calls">
+                {sectionHead(<Phone size={13} />, "Calls", calls.length, "calls")}
+                <RecentCalls rows={calls} limit={ALL_LIMIT} title={false} />
+              </section>
+            )}
+          </div>
+        )
       ) : groups.length === 0 ? (
-        <Empty icon={<Bell size={24} />} title="No alerts yet" hint="You'll be notified here the moment a guest arrives or leaves." />
+        <Empty icon={<Bell size={24} />} title={filter === 'gate' ? 'No gate activity yet' : 'No requests yet'} hint="You'll be notified here the moment something needs you." />
       ) : (
         <div className="space-y-5">
           {groups.map((g) => (
             <section key={g.label} className="animate-in">
               <p className="section-title">{g.label}</p>
-              <ul className="rows stagger">
-                {g.items.map((n) => {
-                  const t = meta(n);
-                  const v = n.context?.visitor;
-                  const s = summary(n);
-                  return (
-                    <li key={n.id}>
-                      <button type="button" onClick={() => setSelected(n)} className="row-link group items-start">
-                        <span className="relative">
-                          {v ? (
-                            <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={42} />
-                          ) : (
-                            <span className={`flex h-[42px] w-[42px] items-center justify-center rounded-full bg-gradient-to-br ${TONE_TILE[t.tone]}`}>{t.icon}</span>
-                          )}
-                          {v && (
-                            <span className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ring-2 ring-white [&>svg]:h-3 [&>svg]:w-3 ${TONE_TILE[t.tone]}`}>
-                              {t.icon}
-                            </span>
-                          )}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-2">
-                            <span className="truncate font-semibold text-slate-800">{n.title}</span>
-                            {fresh.has(n.id) && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-500 shadow-[0_0_0_3px_rgb(var(--brand-100))]" />}
-                            <span className="ml-auto shrink-0 text-[11px] text-slate-400">{relTime(n.createdAt)}</span>
-                          </span>
-                          <span className="mt-0.5 line-clamp-2 block text-sm text-slate-600">{n.body}</span>
-                          {s && <span className="mt-1 block truncate text-xs font-medium text-brand-700/80">{s}</span>}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+              <ul className="rows stagger">{g.items.map(renderRow)}</ul>
             </section>
           ))}
         </div>

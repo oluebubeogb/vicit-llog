@@ -51,16 +51,7 @@ export default function LoginAgencyGrid({
       ? 'mt-1.5 max-w-[5.5rem] truncate text-center text-[10px] font-semibold text-slate-600'
       : 'mt-2.5 max-w-[10rem] truncate text-center text-sm font-semibold text-on-brand/85';
 
-  return (
-    <div
-      className={
-        mobile
-          ? 'flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
-          : 'mx-auto grid max-w-md grid-cols-2 place-items-center gap-x-6 gap-y-7'
-      }
-      aria-label="Agencies"
-    >
-      {visible.map((a, i) => {
+  const items = visible.map((a, i) => {
         const src = logoSrc(a.logoUrl, { fallback: false });
         const custom = a.loginTileColor && a.loginTileColor.trim() ? a.loginTileColor.trim() : '';
         const color = custom || a.primaryColor || 'rgb(var(--brand-600))';
@@ -71,7 +62,7 @@ export default function LoginAgencyGrid({
         return (
           <motion.div
             key={a.id}
-            className={mobile ? 'shrink-0' : 'flex flex-col items-center'}
+            className={mobile ? 'flex shrink-0 flex-col items-center' : 'flex flex-col items-center'}
             initial={reduce ? false : { opacity: 0, scale: 0.72, y: 14 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={reduce ? { duration: 0 } : { delay: i * 0.09, type: 'spring', stiffness: 280, damping: 20 }}
@@ -107,7 +98,23 @@ export default function LoginAgencyGrid({
             <p className={labelCls} title={a.name}>{a.shortName || a.name}</p>
           </motion.div>
         );
-      })}
+  });
+
+  if (mobile) {
+    // Centre the logo group on phones. The inner row is w-max + mx-auto: centred while it fits,
+    // and it falls back to a left-anchored horizontal scroll only when there are too many logos.
+    return (
+      <div className="w-full overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Agencies">
+        <div className="mx-auto flex w-max items-start justify-center gap-3 px-1" data-testid="login-agency-row">
+          {items}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto grid max-w-md grid-cols-2 place-items-center gap-x-6 gap-y-7" aria-label="Agencies">
+      {items}
     </div>
   );
 }

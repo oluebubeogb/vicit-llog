@@ -17,7 +17,7 @@ type Guest = {
 };
 
 /**
- * Gate photo capture for guests who had no email or phone (so never got a registration link).
+ * Gate photo capture for guests who had no email (so never got a registration link).
  * Grid of placeholder cards → live camera → "Send to host to confirm identity" → the host ticks / crosses
  * each person. Polls every 5 s while anyone is waiting. Each guest is independent.
  */
@@ -160,7 +160,7 @@ export default function NoContactCapture({
           <PhoneOff size={17} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-800">{guests.length === 1 ? 'Guest without email or phone' : 'Guests without email or phone'}</p>
+          <p className="text-sm font-semibold text-slate-800">{guests.length === 1 ? 'No phone guest (no email)' : 'No phone guests (no email)'}</p>
           <p className="text-xs text-slate-500">No registration link reached {guests.length === 1 ? 'them' : 'these guests'}. Take a live photo, then send to the host to confirm who they are.</p>
         </div>
       </div>

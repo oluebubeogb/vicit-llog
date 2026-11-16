@@ -54,8 +54,8 @@ export class RingController {
   @Get('recent')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  recent(@CurrentUser() user: any) {
-    return this.rings.recent(user);
+  recent(@CurrentUser() user: any, @Query('limit') limit?: string) {
+    return this.rings.recent(user, limit ? Number(limit) || 50 : 50);
   }
 
   @Post('callback')

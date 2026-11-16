@@ -118,8 +118,9 @@ export class GateService {
       phone: v.phone,
       photoPath: v.photoPath,
       status: v.status,
-      // No email and no phone: no registration link reached them, so the gate takes the photo
-      noContact: !v.email && !v.phone,
+      // No email: the registration link (face capture + QR) never reached them, so the gate takes
+      // the photo and the host confirms it — even when a phone number was given.
+      noContact: !v.email,
       gatePhotoPath: v.gatePhotoPath || null,
       identityStatus: v.identityStatus || null,
       identityRequestedAt: v.identityRequestedAt || null,
@@ -171,7 +172,7 @@ export class GateService {
   /**
    * Which guests the gate sees. An invite-level code (passphrase / invite link) shows every guest on
    * the invite. A personal code shows that person's same-day visits on this invite, plus any guest on
-   * the invite with no email and no phone (they never got a personal code, so the gate reaches them
+   * the invite with no email (they never got a personal code, so the gate reaches them
    * through a companion's or the host's code).
    */
   private lookupVisitors(invite: any, linked: any, inviteLevel: boolean) {
@@ -179,7 +180,7 @@ export class GateService {
     if (inviteLevel || !linked.visitors?.length) return all;
     const mine = linked.visitors.filter((v: any) => v.inviteId === invite.id);
     const ids = new Set(mine.map((v: any) => v.id));
-    const extra = all.filter((v: any) => !ids.has(v.id) && !v.email && !v.phone);
+    const extra = all.filter((v: any) => !ids.has(v.id) && !v.email);
     return [...mine, ...extra];
   }
 
@@ -232,7 +233,9 @@ export class GateService {
     });
     return gates.map(({ assignments, ...g }: any) => ({
       ...g,
-      assigned: !actor || !['GATE', 'GLOBAL_GATE'].includes(actor.role) || assignments.some((a: any) => a.userId === actor.id),
+      // Only agency gate officers are limited to their assigned checkpoints. Super Gate Officers
+      // (GLOBAL_GATE) are on every checkpoint of every agency, like the Super Admin.
+      assigned: !actor || actor.role !== 'GATE' || assignments.some((a: any) => a.userId === actor.id),
     }));
   }
 
@@ -249,7 +252,7 @@ export class GateService {
     return visitor;
   }
 
-  /** Gate officer takes a live photo of a guest who had no email/phone (no registration link). */
+  /** Gate officer takes a live photo of a guest who had no email (no registration link). */
   async uploadGatePhoto(visitorId: string, file: Express.Multer.File, actor: any) {
     if (!file?.buffer?.length) throw new BadRequestException('No photo received');
     if (!/^image\/(jpeg|png|webp)$/.test(file.mimetype || '')) throw new BadRequestException('Photo must be JPEG, PNG or WebP');
@@ -317,7 +320,8 @@ export class GateService {
     if (actor.role === 'GLOBAL_ADMIN' && !(actor.permissions || []).includes('gates.manage')) throw new ForbiddenException('Gate oversight permission is required');
     const global = ['SUPER_ADMIN', 'GLOBAL_GATE', 'GLOBAL_ADMIN'].includes(actor.role);
     const where: any = global ? {} : { location: { organisationId: actor.orgId } };
-    if (actor.role === 'GATE' || actor.role === 'GLOBAL_GATE') where.assignments = { some: { userId: actor.id } };
+    // Super Gate Officers are automatically on every checkpoint across agencies (same as Super Admin).
+    if (actor.role === 'GATE') where.assignments = { some: { userId: actor.id } };
     return this.prisma.gate.findMany({ where: { ...where, isActive: true }, include: { location: { select: { name: true, organisationId: true, organisation: { select: { name: true } } } } }, orderBy: [{ locationId: 'asc' }, { sequence: 'asc' }] });
   }
 
@@ -341,7 +345,7 @@ export class GateService {
     if (!global && gate.location.organisationId !== actor.orgId) throw new NotFoundException('Gate not found');
     if (visitor.invite.organisationId !== gate.location.organisationId) throw new BadRequestException('This visitor is not invited to this agency');
     if (visitor.invite.locationId && visitor.invite.locationId !== gate.locationId) throw new BadRequestException('This gate is outside the visitor destination');
-    if (['GATE', 'GLOBAL_GATE'].includes(actor.role) && !gate.assignments.some(a => a.userId === actor.id)) throw new BadRequestException('You are not assigned to this checkpoint');
+    if (actor.role === 'GATE' && !gate.assignments.some(a => a.userId === actor.id)) throw new BadRequestException('You are not assigned to this checkpoint');
     if (visitor.status === VisitStatus.EXITED || visitor.status === VisitStatus.CANCELLED) throw new BadRequestException('This visit is already closed');
     if (visitor.status === VisitStatus.DENIED) throw new BadRequestException('This visitor has already been denied');
     const direction = String(body.direction || '').toUpperCase() === 'EXIT' || visitor.status === VisitStatus.ARRIVED ? 'EXIT' : 'ENTRY';
@@ -436,7 +440,7 @@ export class GateService {
     if (!['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN'].includes(actor.role)) throw new ForbiddenException('Only checkpoint officers can request host availability');
     const visitor = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: { include: { host: true } } } });
     if (!visitor || visitor.status !== VisitStatus.ARRIVED) throw new NotFoundException('Arrived visitor not found');
-    const platformAdmin = actor.role === 'SUPER_ADMIN';
+    const platformAdmin = actor.role === 'SUPER_ADMIN' || actor.role === 'GLOBAL_GATE';
     const assignments = await this.prisma.gateOfficerAssignment.findMany({ where: { userId: actor.id, gate: { location: { organisationId: visitor.invite.organisationId } } }, select: { gateId: true } });
     if (!platformAdmin && (!assignments.length || (actor.role === 'GATE' && visitor.invite.organisationId !== actor.orgId))) throw new NotFoundException('Visitor not found');
     if (visitor.lastHostPromptAt && Date.now() - visitor.lastHostPromptAt.getTime() < 60000) throw new BadRequestException('Please wait at least one minute before asking the host again');
@@ -456,7 +460,7 @@ export class GateService {
     const gate = item.gateVisit.gate;
     const global = ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
     if (!global && gate.location.organisationId !== actor.orgId) throw new NotFoundException('Particular record not found');
-    if (['GATE', 'GLOBAL_GATE'].includes(actor.role) && !gate.assignments.some(a => a.userId === actor.id)) throw new ForbiddenException(`This item can only be returned or seized at ${gate.name}`);
+    if (actor.role === 'GATE' && !gate.assignments.some(a => a.userId === actor.id)) throw new ForbiddenException(`This item can only be returned or seized at ${gate.name}`);
     return this.resolveParticular(particularId, actor, { resolution: 'RETURNED' });
   }
 
@@ -473,7 +477,7 @@ export class GateService {
     const gate = item.gateVisit.gate;
     const global = ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
     if (!global && gate.location.organisationId !== actor.orgId) throw new NotFoundException('Particular record not found');
-    if (['GATE', 'GLOBAL_GATE'].includes(actor.role) && !gate.assignments.some((a: any) => a.userId === actor.id)) throw new ForbiddenException(`This item can only be returned or seized at ${gate.name}`);
+    if (actor.role === 'GATE' && !gate.assignments.some((a: any) => a.userId === actor.id)) throw new ForbiddenException(`This item can only be returned or seized at ${gate.name}`);
     const now = new Date();
     const updated = await this.prisma.gateParticular.update({
       where: { id: particularId },
@@ -794,7 +798,7 @@ export class GateService {
       phone: v.phone,
       status: v.status,
       photoPath: v.photoPath,
-      noContact: !v.email && !v.phone,
+      noContact: !v.email,
       identityStatus: v.identityStatus || null,
       cancelled: !!v.invite.cancelledAt,
       inviteStatus: v.invite.status,

@@ -61,9 +61,20 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
       include: { invite: { include: { host: true, organisation: { select: { id: true, name: true } } } } },
     });
     if (!visitor) throw new NotFoundException('Visitor not found');
-    if (visitor.status !== 'ARRIVED') throw new BadRequestException('Ring once the visitor is on site');
+    // Calls are allowed before any guest is checked in (the gate may need the host first).
+    if (['CANCELLED'].includes(visitor.status) && input.direction === 'HOST_TO_GATE') {
+      throw new BadRequestException('This visit was cancelled');
+    }
 
     const gateInfo = await this.gateContext(visitor, actor);
+    if (!gateInfo.assigned && actor.role === 'GATE') {
+      // Before check-in the guest has no gate yet: any checkpoint of the host agency counts.
+      const anyGate = await this.prisma.gateOfficerAssignment.findFirst({
+        where: { userId: actor.id, gate: { isActive: true, location: { organisationId: visitor.invite.organisationId } } },
+        select: { id: true },
+      });
+      gateInfo.assigned = !!anyGate;
+    }
     const last = await this.lastCall({ visitorId: visitor.id });
 
     if (input.direction === 'GATE_TO_HOST') {
@@ -124,75 +135,53 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     return view;
   }
 
+  /**
+   * Call back = ring the OTHER logged-in party of the original call, by user id.
+   * No role, gate-assignment or page-state checks: only the two people on the original call
+   * (caller and callee accounts) may call back, and they always reach each other.
+   */
   async callback(actor: any, callId: string) {
     const parent = await this.prisma.ringCall.findUnique({ where: { id: callId } });
     if (!parent) throw new NotFoundException('Call not found');
-    if (!this.canView(actor, parent)) throw new ForbiddenException('This call is not for you');
+    const { callerId, calleeId } = this.parties(parent);
+    if (actor.id !== callerId && actor.id !== calleeId) throw new ForbiddenException('Only the two people on this call can call back');
     if (['RINGING', 'ACCEPTED'].includes(parent.status)) {
       throw new BadRequestException('Finish the current call before calling back');
     }
+    const targetId = actor.id === callerId ? calleeId : callerId;
+    if (!targetId || targetId === actor.id) throw new BadRequestException('No one is available to call back.');
+    const target = await this.prisma.user.findUnique({ where: { id: targetId }, select: { id: true, isActive: true } });
+    if (!target?.isActive) throw new BadRequestException('That account is no longer active.');
+    // Same direction when the original caller rings again; reversed when the callee calls back.
+    const direction = (actor.id === callerId
+      ? parent.direction
+      : parent.direction === 'GATE_TO_HOST' ? 'HOST_TO_GATE' : 'GATE_TO_HOST') as 'GATE_TO_HOST' | 'HOST_TO_GATE';
     const rootId = parent.parentCallId || parent.id;
-    const hostId = await this.hostIdFromCall(parent);
-    const actorIsHost = !!hostId && hostId === actor.id;
-    const actorIsGateSide = [parent.callerUserId, parent.fromUserId, parent.gateOfficerUserId].includes(actor.id)
-      || INITIATOR_ROLES.includes(actor.role);
-
-    let chain: string[] = [];
-    let direction: 'GATE_TO_HOST' | 'HOST_TO_GATE';
-    if (actorIsHost && !actorIsGateSide) {
-      direction = 'HOST_TO_GATE';
-      chain = await this.returnTargetIds({
-        actorId: actor.id,
-        visitorId: parent.visitorId,
-        dispatchId: parent.dispatchId,
-        gateId: parent.gateId,
-        last: parent,
-      });
-    } else if (actorIsGateSide || PLATFORM.includes(actor.role)) {
-      direction = 'GATE_TO_HOST';
-      if (hostId && hostId !== actor.id) chain = [hostId];
-      // If the original call was already host→gate, the host is the original caller.
-      if (parent.direction === 'HOST_TO_GATE' && parent.callerUserId && parent.callerUserId !== actor.id) {
-        chain = [parent.callerUserId, ...chain];
-      }
-    } else {
-      throw new ForbiddenException('You cannot call back on this ring');
-    }
-    const picked = this.pickTarget(chain, actor.id, true);
-    if (!picked.target) {
-      throw new BadRequestException('No one is available to call back.');
-    }
-    const officerId = await this.resolveGateOfficerId(actor, parent.gateId, parent);
     const subject = parent.visitorId
       ? (await this.prisma.visitor.findUnique({ where: { id: parent.visitorId }, select: { fullName: true } }))?.fullName
       : parent.dispatchId
         ? (await this.prisma.dispatch.findUnique({ where: { id: parent.dispatchId }, select: { courierName: true } }))?.courierName
         : 'Call back';
-    const view = await this.placeRing({
+    // A fresh call-back cancels any older fallback cascade on this thread.
+    this.cascades.delete(rootId);
+    return this.placeRing({
       actor,
-      toUserId: picked.target,
+      toUserId: targetId,
       direction,
       visitorId: parent.visitorId,
       dispatchId: parent.dispatchId,
       gateId: parent.gateId,
       callerUserId: actor.id,
-      calleeUserId: picked.target,
-      gateOfficerUserId: officerId,
+      calleeUserId: targetId,
+      gateOfficerUserId: parent.gateOfficerUserId,
       parentCallId: rootId,
       subject: subject || 'Call back',
     });
-    if (picked.rest.length) {
-      this.cascades.set(rootId, {
-        actorId: actor.id,
-        remaining: picked.rest,
-        visitorId: parent.visitorId,
-        dispatchId: parent.dispatchId,
-        gateId: parent.gateId,
-        hostId,
-        parentCallId: rootId,
-      });
-    }
-    return view;
+  }
+
+  /** The two logged-in accounts on a call (caller placed it, callee was rung). */
+  private parties(call: { fromUserId: string; toUserId: string; callerUserId?: string | null; calleeUserId?: string | null }) {
+    return { callerId: call.callerUserId || call.fromUserId, calleeId: call.calleeUserId || call.toUserId };
   }
 
   async act(actor: any, id: string, action: 'accept' | 'decline' | 'busy' | 'cancel' | 'hangup') {
@@ -290,22 +279,20 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     return this.present(call.id, actor.id);
   }
 
-  async recent(actor: any) {
-    const where: any = PLATFORM.includes(actor.role)
-      ? {}
-      : {
-          OR: [
-            { fromUserId: actor.id },
-            { toUserId: actor.id },
-            { callerUserId: actor.id },
-            { calleeUserId: actor.id },
-            { gateOfficerUserId: actor.id },
-          ],
-        };
+  async recent(actor: any, limit = 50) {
+    // Calls this account placed or received (mapped by logged-in user id, not by role).
+    const where: any = {
+      OR: [
+        { fromUserId: actor.id },
+        { toUserId: actor.id },
+        { callerUserId: actor.id },
+        { calleeUserId: actor.id },
+      ],
+    };
     const rows = await this.prisma.ringCall.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: 40,
+      take: Math.min(100, Math.max(1, limit || 50)),
     });
     return Promise.all(rows.map((row) => this.present(row.id, actor.id)));
   }
@@ -459,9 +446,15 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     if (!current) return;
     const closable = current.status === 'RINGING' || (current.status === 'ACCEPTED' && ['ENDED', 'CANCELLED'].includes(status));
     if (!closable) return;
+    // Root cause of the "Call ended · 00:00" bug: hanging up a connected call used to overwrite
+    // answeredAt with the hang-up time, so (endedAt - answeredAt) was always ~0. Keep the real
+    // answer time and store the duration on the record.
+    const endedAt = new Date();
+    const answeredAt = current.answeredAt || (answered ? endedAt : null);
+    const durationSec = answeredAt ? Math.max(0, Math.round((endedAt.getTime() - answeredAt.getTime()) / 1000)) : 0;
     await this.prisma.ringCall.update({
       where: { id },
-      data: { status, endedAt: new Date(), answeredAt: answered ? new Date() : current.answeredAt },
+      data: { status, endedAt, answeredAt, durationSec },
     });
     const [caller, callee] = await Promise.all([this.present(id, current.fromUserId), this.present(id, current.toUserId)]);
     this.hub.publish(current.fromUserId, { type: 'ring', call: caller });
@@ -674,9 +667,14 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
     const caller = (call.callerUserId && byId.get(call.callerUserId)) || from;
     const callee = (call.calleeUserId && byId.get(call.calleeUserId)) || to;
     const officer = (call.gateOfficerUserId && byId.get(call.gateOfficerUserId)) || null;
-    const other = viewerId === call.fromUserId ? to : from;
+    const { callerId, calleeId } = this.parties(call);
+    const viewerIsCallee = viewerId === calleeId || (viewerId === call.toUserId && viewerId !== callerId);
+    const other = viewerIsCallee ? caller : callee;
     const ended = !['RINGING', 'ACCEPTED'].includes(call.status);
-    const canCallback = ended && [call.fromUserId, call.toUserId, call.callerUserId, call.calleeUserId, call.gateOfficerUserId].includes(viewerId);
+    const canCallback = ended && (viewerId === callerId || viewerId === calleeId);
+    const durationSec = call.durationSec ?? (call.answeredAt && call.endedAt
+      ? Math.max(0, Math.round((call.endedAt.getTime() - call.answeredAt.getTime()) / 1000))
+      : call.answeredAt && call.status === 'ACCEPTED' ? null : 0);
     const stub = (u: any) => (u ? { id: u.id, fullName: u.fullName, role: u.role, phone: u.phone } : null);
     return {
       id: call.id,
@@ -686,7 +684,10 @@ export class RingService implements OnModuleInit, OnModuleDestroy {
       answeredAt: call.answeredAt,
       endedAt: call.endedAt,
       expiresAt: new Date(call.createdAt.getTime() + RING_MS).toISOString(),
-      youAre: viewerId === call.toUserId ? 'callee' : 'caller',
+      youAre: viewerIsCallee ? 'callee' : 'caller',
+      durationSec,
+      connected: !!call.answeredAt,
+      other: stub(other),
       parentCallId: call.parentCallId,
       canCallback,
       visitor: call.visitor ? { id: call.visitor.id, fullName: call.visitor.fullName, status: call.visitor.status, purpose: call.visitor.invite?.purpose || null } : null,

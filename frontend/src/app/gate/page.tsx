@@ -78,6 +78,9 @@ export default function GatePage() {
   const [ringNote, setRingNote] = useState<Record<string, string>>({});
   const [checkpointsFailed, setCheckpointsFailed] = useState(false);
   const [gatePlate, setGatePlate] = useState('');
+  const [ringBusy, setRingBusy] = useState(false);
+  const [scrollNonce, setScrollNonce] = useState(0);
+  const guestInfoRef = useRef<HTMLDivElement>(null);
   const [gateVehicleDetails, setGateVehicleDetails] = useState('');
 
   const [photoDecoding, setPhotoDecoding] = useState(false);
@@ -136,6 +139,7 @@ export default function GatePage() {
         try {
           const data = await api.gateLookup(q);
           setResult(data);
+          if (data) setScrollNonce((n) => n + 1);
           if (data?.expectedMode) setEntryMode(data.expectedMode);
           setGatePlate(data?.vehiclePlate || '');
           setGateVehicleDetails(data?.vehicleDetails || '');
@@ -163,6 +167,17 @@ export default function GatePage() {
     const next = relevant.sort((a: any,b: any)=>a.sequence-b.sequence).find((g: any) => !passed.has(g.id));
     if (next && !relevant.some((g: any) => g.id === activeGateId && !passed.has(g.id))) setActiveGateId(next.id);
   }, [result, checkpoints, activeGateId]);
+
+  useEffect(() => {
+    if (!scrollNonce) return;
+    const t = window.setTimeout(() => {
+      const el = guestInfoRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top + window.scrollY - 76;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [scrollNonce]);
 
   const codeRef = useRef(code);
   const resultRef = useRef(result);
@@ -193,6 +208,8 @@ export default function GatePage() {
     try {
       const data = await api.gateLookup(value);
       setResult((prev: any) => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
+      // Successful scan / passphrase: glide down to the guest information.
+      if (!opts?.silent && data) setScrollNonce((n) => n + 1);
       if (data?.kind === 'staff') {
         // Staff attendance QR — no visitor checkpoint workflow
       } else {
@@ -221,7 +238,7 @@ export default function GatePage() {
       const call = (ev as CustomEvent).detail;
       const id = call?.visitor?.id;
       if (!id) return;
-      const label = call.status === 'RINGING' ? 'Ringing' : call.status === 'ACCEPTED' ? 'Answered' : call.status === 'DECLINED' ? 'Declined' : call.status === 'BUSY' ? 'Busy' : call.status === 'MISSED' ? 'No answer' : '';
+      const label = call.status === 'RINGING' ? 'Ringing' : call.status === 'ACCEPTED' ? 'Answered' : call.status === 'DECLINED' ? 'Declined' : call.status === 'BUSY' ? 'Busy' : call.status === 'MISSED' ? 'No answer' : call.status === 'ENDED' ? 'Call ended' : '';
       setRingNote((m) => ({ ...m, [id]: label }));
     };
     window.addEventListener('vicit:ring', onRing);
@@ -620,6 +637,14 @@ export default function GatePage() {
   const cancelled = !!result?.cancelled;
   const noContactGuests = (result?.visitors || []).filter((v: any) => isNoContact(v) && (v.gatePhotoPath || (!v.photoPath && v.status === 'INVITED')));
   const refreshSilently = async () => { await lookup(undefined, { silent: true }); };
+  // One call row per visit, next to the host — works before any guest is checked in.
+  const canCallHost = ['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN', 'GLOBAL_ADMIN'].includes(String(currentRole)) && !!result?.host?.id;
+  const visitGuests: any[] = result?.visitors || [];
+  const ringVisitor = visitGuests.find((v: any) => v.status === 'ARRIVED') || visitGuests.find((v: any) => !['CANCELLED', 'DENIED'].includes(v.status)) || visitGuests[0] || null;
+  const arrivedGuest = visitGuests.find((v: any) => v.status === 'ARRIVED');
+  const hostAvail = arrivedGuest?.hostAvailabilityStatus;
+  const hostStatus = (ringVisitor && ringNote[ringVisitor.id]) || (hostAvail === 'AVAILABLE' ? 'Available' : hostAvail === 'WAITING' ? 'Waiting' : arrivedGuest ? 'No answer yet' : 'Not called');
+  const hostTone = hostStatus === 'Available' || hostStatus === 'Answered' ? 'bg-emerald-100 text-emerald-800' : hostStatus === 'Waiting' || hostStatus === 'Ringing' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600';
   const modeKey = MODES.map((m) => m.v).join(',');
   useEffect(() => {
     if (MODES.length && !MODES.some((m) => m.v === entryMode)) setEntryMode(MODES[0].v);
@@ -708,7 +733,7 @@ export default function GatePage() {
       {error && <Notice tone="error">{error}</Notice>}
 
       {result && result.kind === 'staff' && (
-        <div className="card card-art space-y-3 p-4">
+        <div className="card card-art scroll-mt-20 space-y-3 p-4" ref={guestInfoRef}>
           <div className="flex items-start gap-3">
             <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white shadow ${result.action === 'ARRIVAL' ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' : 'bg-gradient-to-br from-sky-500 to-indigo-600'}`}>
               <UserRound size={22} />
@@ -732,7 +757,7 @@ export default function GatePage() {
       )}
 
       {result && result.kind === 'contractor' && (
-        <div className="surface space-y-3 p-4">
+        <div className="surface scroll-mt-20 space-y-3 p-4" ref={guestInfoRef}>
           <div className="flex items-start gap-3">
             {result.contractor?.photoPath ? <img src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/contractors/photo/${result.contractor.photoPath}`} alt="" className="h-16 w-16 rounded-2xl object-cover" /> : <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><UserRound size={24} /></span>}
             <div className="min-w-0 flex-1">
@@ -758,7 +783,7 @@ export default function GatePage() {
       )}
 
       {result && result.kind !== 'staff' && result.kind !== 'contractor' && (
-        <div className="space-y-3">
+        <div className="scroll-mt-20 space-y-3" ref={guestInfoRef} id="gate-guest-info" data-testid="gate-guest-info">
           <div className="card card-art p-4">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 text-brand-600">
@@ -773,6 +798,33 @@ export default function GatePage() {
               </div>
               {result.category && <StatusPill status={result.category} />}
             </div>
+            {canCallHost && ringVisitor && (
+              <div className="mt-3 border-t border-slate-100 pt-3" data-testid="host-call-row">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Call the host</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${hostTone}`}>{hostStatus}</span>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <InAppCallButton
+                    className="flex-1 !py-2 text-xs"
+                    disabled={ringBusy}
+                    label={ringBusy ? 'Calling…' : 'In-app call'}
+                    onClick={async () => {
+                      setRingBusy(true);
+                      try {
+                        const call = await api.startRing(ringVisitor.id, 'GATE_TO_HOST');
+                        window.dispatchEvent(new CustomEvent('vicit:ring-local', { detail: call }));
+                      } catch (e: any) {
+                        setError(e.message || 'Could not start the in-app call');
+                      } finally {
+                        setRingBusy(false);
+                      }
+                    }}
+                  />
+                  <PhoneCallLink phone={result.host?.phone} className="flex-1 !py-2 text-xs" />
+                </div>
+              </div>
+            )}
           </div>
 
           {(result.appointments || []).length > 1 && (
@@ -918,16 +970,6 @@ export default function GatePage() {
                 </div>)}
               </div>}
 
-                {v.status === 'ARRIVED' && ['GATE','GLOBAL_GATE','SUPER_ADMIN'].includes(currentRole) && <div className={`rounded-2xl border p-3 ${v.hostAvailabilityStatus==='AVAILABLE'?'border-emerald-200 bg-emerald-50':v.hostAvailabilityStatus==='WAITING'?'border-amber-200 bg-amber-50':'border-slate-200 bg-slate-50'}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <b className="text-xs text-slate-800">Host</b>
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${v.hostAvailabilityStatus==='AVAILABLE'?'bg-emerald-100 text-emerald-800':'bg-slate-200 text-slate-700'}`}>{ringNote[v.id] || (v.hostAvailabilityStatus==='AVAILABLE'?'Available':v.hostAvailabilityStatus==='WAITING'?'Waiting':'No answer')}</span>
-                  </div>
-                  <div className="mt-2 flex gap-2">
-                    <InAppCallButton className="flex-1 !py-2 text-xs" onClick={async()=>{try{const call=await api.startRing(v.id,'GATE_TO_HOST');window.dispatchEvent(new CustomEvent('vicit:ring-local',{detail:call}));}catch(e:any){setError(e.message||'Could not start the in-app call')}}} />
-                    <PhoneCallLink phone={result.host?.phone} className="flex-1 !py-2 text-xs" />
-                  </div>
-                </div>}
                 {v.status === 'INVITED' && !v.photoPath && !cancelled && (
                   isNoContact(v) ? (
                     <button type="button" className="chip-action w-full !py-2.5" onClick={() => document.querySelector('[data-testid="no-contact-capture"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>

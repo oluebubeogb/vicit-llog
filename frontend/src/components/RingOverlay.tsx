@@ -21,6 +21,8 @@ type Call = {
   phone?: string | null;
   answeredAt?: string | null;
   endedAt?: string | null;
+  durationSec?: number | null;
+  connected?: boolean;
   canCallback?: boolean;
 };
 
@@ -44,16 +46,27 @@ function formatElapsed(ms: number) {
   return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function endedCaption(call: Call, lastMs: number) {
-  const answered = !!call.answeredAt || lastMs > 0;
+/** Talk time of a finished call: the server's stored duration wins; the local timer is a fallback. */
+export function endedCaption(call: Call, lastMs: number) {
+  const answered = !!call.connected || !!call.answeredAt || lastMs > 0;
   let ms = lastMs;
-  if (call.answeredAt && call.endedAt) {
+  if (typeof call.durationSec === 'number' && call.durationSec > 0) ms = Math.max(ms, call.durationSec * 1000);
+  else if (call.answeredAt && call.endedAt) {
     const computed = new Date(call.endedAt).getTime() - new Date(call.answeredAt).getTime();
-    if (Number.isFinite(computed) && computed >= 0) ms = computed;
+    if (Number.isFinite(computed) && computed > ms) ms = computed;
   }
-  if (call.status === 'ENDED' && answered) return `Call ended · ${formatElapsed(ms)}`;
-  if (call.status === 'ENDED' || call.status === 'MISSED') return 'Not answered';
+  if (answered && ['ENDED', 'CANCELLED'].includes(call.status)) return `Call ended · ${formatElapsed(ms)}`;
+  if (!answered && ['ENDED', 'MISSED', 'CANCELLED'].includes(call.status)) return 'Not answered';
   return LABEL[call.status] || call.status;
+}
+
+function clearCallParams() {
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    for (const k of ['answerCall', 'declineCall']) if (url.searchParams.has(k)) { url.searchParams.delete(k); changed = true; }
+    if (changed) window.history.replaceState(window.history.state, '', url.pathname + (url.search ? url.search : '') + url.hash);
+  } catch { /* ignore */ }
 }
 
 export default function RingOverlay() {
@@ -71,6 +84,10 @@ export default function RingOverlay() {
   const callRef = useRef<Call | null>(null);
   const lastElapsedRef = useRef(0);
   const lastElapsedFor = useRef<string | null>(null);
+  /** Local clock time when this device first saw the call connected (avoids server/device clock skew). */
+  const localStart = useRef<{ id: string; at: number } | null>(null);
+  const pendingAnswer = useRef<string | null>(null);
+  const actRef = useRef<((action: 'accept' | 'decline' | 'busy' | 'cancel' | 'hangup', target?: Call | null) => Promise<void>) | null>(null);
   callRef.current = call;
 
   const focus = useCallback(async (id: string) => {
@@ -163,6 +180,10 @@ export default function RingOverlay() {
       const data = ev.data || {};
       if (data.type === 'PUSH' && data.callId) focus(String(data.callId));
       if (data.type === 'RING' && data.callId) focus(String(data.callId));
+      // From a notification click (sw.js): show / answer / decline the call on the page you are on.
+      if (data.type === 'RING_OPEN' && data.callId) focus(String(data.callId));
+      if (data.type === 'RING_ANSWER' && data.callId) window.dispatchEvent(new CustomEvent('vicit:ring-answer', { detail: String(data.callId) }));
+      if (data.type === 'RING_DECLINE' && data.callId) window.dispatchEvent(new CustomEvent('vicit:ring-decline', { detail: String(data.callId) }));
     };
     const onLocal = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
@@ -180,6 +201,35 @@ export default function RingOverlay() {
     const id = new URLSearchParams(window.location.search).get('call');
     if (pathname === '/ring' && id) focus(id);
   }, [pathname, focus]);
+
+  /** Answer / decline a call by id (notification action, ?answerCall= or ?declineCall=). */
+  const answerById = useCallback(async (id: string, how: 'accept' | 'decline') => {
+    if (!getToken()) return;
+    try {
+      const next: Call = await api.ring(id);
+      setCall(next);
+      publish(next);
+      if (next.status === 'RINGING' && next.youAre === 'callee') await actRef.current?.(how, next);
+    } catch {
+      /* the call may have ended already */
+    }
+  }, []);
+
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const a = q.get('answerCall');
+    const d = q.get('declineCall');
+    if (a && pendingAnswer.current !== a) { pendingAnswer.current = a; clearCallParams(); answerById(a, 'accept'); }
+    else if (d && pendingAnswer.current !== d) { pendingAnswer.current = d; clearCallParams(); answerById(d, 'decline'); }
+    const onAnswer = (ev: Event) => answerById(String((ev as CustomEvent).detail), 'accept');
+    const onDecline = (ev: Event) => answerById(String((ev as CustomEvent).detail), 'decline');
+    window.addEventListener('vicit:ring-answer', onAnswer);
+    window.addEventListener('vicit:ring-decline', onDecline);
+    return () => {
+      window.removeEventListener('vicit:ring-answer', onAnswer);
+      window.removeEventListener('vicit:ring-decline', onDecline);
+    };
+  }, [pathname, answerById]);
 
   useEffect(() => {
     if (call?.status === 'RINGING') {
@@ -205,7 +255,16 @@ export default function RingOverlay() {
       lastElapsedFor.current = call.id;
     }
     if (call?.status !== 'ACCEPTED') return;
-    const started = call.answeredAt ? new Date(call.answeredAt).getTime() : Date.now();
+    // The old timer used the server's answeredAt against the device clock: a device whose clock
+    // ran behind the server showed 00:00 for the whole call. Count from when THIS device saw the
+    // answer, corrected by the server's answeredAt only when that is earlier and plausible.
+    if (!localStart.current || localStart.current.id !== call.id) {
+      const server = call.answeredAt ? new Date(call.answeredAt).getTime() : NaN;
+      const now = Date.now();
+      const at = Number.isFinite(server) && server <= now && now - server < 15_000 ? server : now;
+      localStart.current = { id: call.id, at };
+    }
+    const started = localStart.current.at;
     const tick = () => {
       const ms = Math.max(0, Date.now() - started);
       lastElapsedRef.current = ms;
@@ -218,7 +277,8 @@ export default function RingOverlay() {
 
   useEffect(() => () => hangupVoice(), [hangupVoice]);
 
-  async function act(action: 'accept' | 'decline' | 'busy' | 'cancel' | 'hangup') {
+  async function act(action: 'accept' | 'decline' | 'busy' | 'cancel' | 'hangup', target?: Call | null) {
+    const call = target || callRef.current;
     if (!call) return;
     setBusy(action);
     try {
@@ -235,6 +295,8 @@ export default function RingOverlay() {
       setBusy('');
     }
   }
+
+  actRef.current = act;
 
   function toggleMic() {
     const next = !micMuted;
