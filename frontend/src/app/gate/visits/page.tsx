@@ -15,7 +15,11 @@ import {
   X,
   CalendarClock,
   Loader2,
+  Tag,
+  IdCard,
+  CheckSquare,
 } from 'lucide-react';
+import { OutstandingPassSheet, PassPdfButtons, PassPreviewSheet, useOutstandingPassItems } from '@/components/GatePass';
 import PageHeader from '@/components/ui/PageHeader';
 import StatusPill from '@/components/ui/StatusPill';
 import { NoContactIcon } from '@/components/InviteBits';
@@ -37,6 +41,17 @@ export default function GateVisitsPage() {
   const [q, setQ] = useState('');
   const [term, setTerm] = useState('');
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // v22 gate pass protocol
+  const [operator, setOperator] = useState(false);
+  useEffect(() => { setOperator(['GATE', 'GLOBAL_GATE', 'SUPER_ADMIN', 'ADMIN'].includes(String(getUser()?.role))); }, []);
+  const [protocol, setProtocol] = useState<string>('NONE');
+  const [selectMode, setSelectMode] = useState(false);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [previewIds, setPreviewIds] = useState<string[]>([]);
+  const [outOpen, setOutOpen] = useState(false);
+  const [passError, setPassError] = useState('');
+  const outstanding = useOutstandingPassItems(operator);
+  useEffect(() => { if (operator) api.passProtocol().then((r: any) => setProtocol(r.protocol)).catch(() => {}); }, [operator]);
 
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
@@ -85,6 +100,11 @@ export default function GateVisitsPage() {
   const onSite = visits.filter((v) => v.status === 'ARRIVED').length;
   const exited = visits.filter((v) => v.status === 'EXITED').length;
   const pending = visits.filter((v) => v.status === 'INVITED').length;
+
+  const printable = (v: any) => !!v.photoPath && (v.status === 'INVITED' || v.status === 'ARRIVED') && !v.cancelled;
+  const pickedIds = sortedVisits.filter((v) => picked[v.visitorId]).map((v) => v.visitorId);
+  const canBulkPass = operator && protocol === 'PRINTED_PASS';
+  const outCount = outstanding.data?.count || 0;
 
   const open = (v: any) => {
     if (v.passphrase) router.push(`/gate?code=${encodeURIComponent(v.passphrase)}`);
@@ -159,6 +179,25 @@ export default function GateVisitsPage() {
         </div>
       )}
 
+      {operator && (protocol !== 'NONE' || outCount > 0) && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setOutOpen(true)} className="card flex min-w-0 flex-1 items-center gap-3 border-amber-200 bg-gradient-to-br from-amber-50 to-white !p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md" data-testid="visits-tags-out">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">{protocol === 'PRINTED_PASS' ? <IdCard size={17} /> : <Tag size={17} />}</span>
+            <span className="min-w-0 flex-1">
+              <b className="block text-sm text-slate-900">Tags / passes out</b>
+              <span className="block truncate text-[11px] text-slate-500">{protocol === 'PLAIN_TAGS' ? 'Option 1 · plain tags' : protocol === 'PRINTED_PASS' ? 'Option 2 · printed passes' : 'Issued before the protocol changed'} · exit is blocked until returned or lost</span>
+            </span>
+            <span className="text-xl font-bold text-amber-700">{outCount}</span>
+          </button>
+          {canBulkPass && (
+            <button type="button" onClick={() => { setSelectMode((m) => !m); setPicked({}); }} className={`${selectMode ? 'btn-primary' : 'btn-ghost'} !px-3 !py-2.5 text-xs`} data-testid="visits-select-toggle">
+              <CheckSquare size={15} /> {selectMode ? 'Done' : 'Select passes'}
+            </button>
+          )}
+        </div>
+      )}
+      {passError && <p className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">{passError}</p>}
+
       <div className="mb-4 flex items-center gap-2">
         {period === 'current' ? (
           <div className="min-w-0 flex-1">
@@ -200,11 +239,20 @@ export default function GateVisitsPage() {
       ) : (
         <ul className="rows">
           {sortedVisits.map((v) => (
-            <li key={v.visitorId}>
-              <button type="button" onClick={() => open(v)} className="row-link group">
+            <li key={v.visitorId} className={selectMode ? 'flex items-center gap-1' : ''}>
+              {selectMode && (
+                <label className={`flex h-11 w-6 shrink-0 items-center justify-center ${printable(v) ? '' : 'opacity-30'}`} aria-label={`Select ${v.fullName}`}>
+                  <input type="checkbox" disabled={!printable(v)} checked={!!picked[v.visitorId]} onChange={(e) => setPicked((c) => ({ ...c, [v.visitorId]: e.target.checked }))} />
+                </label>
+              )}
+              <button type="button" onClick={() => open(v)} className="row-link group min-w-0 flex-1">
                 <Avatar name={v.fullName} src={photoUrl(v.photoPath)} size={42} />
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5 font-semibold text-slate-800"><span className="truncate">{v.fullName}</span>{v.noContact && <NoContactIcon />}</span>
+                  <span className="flex items-center gap-1.5 font-semibold text-slate-800"><span className="truncate">{v.fullName}</span>{v.noContact && <NoContactIcon />}{v.openPassItems > 0 && (
+                    <span title={`${v.openPassGates.map((g: any) => `${g.kind === 'PASS' ? 'Pass' : 'Tag'}${g.tagNumber ? ` ${g.tagNumber}` : ''} · ${g.gateName}`).join(', ')} — collect before exit`} className="flex shrink-0 items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800" data-testid="visit-pass-badge">
+                      {v.openPassKinds.includes('PASS') ? <IdCard size={11} /> : <Tag size={11} />}{v.openPassItems}
+                    </span>
+                  )}</span>
                   <span className="block truncate text-xs text-slate-500">
                     {v.purpose}
                     {v.hostName ? <> · <span className="text-slate-600">{v.hostName}</span></> : null}
@@ -233,6 +281,21 @@ export default function GateVisitsPage() {
           ))}
         </ul>
       )}
+
+      {selectMode && (
+        <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] z-30 mt-3 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-2.5 shadow-lift backdrop-blur md:bottom-4" data-testid="visits-bulk-bar">
+          <label className="flex items-center gap-2 pl-1 text-xs font-semibold text-slate-700">
+            <input type="checkbox" checked={pickedIds.length > 0 && pickedIds.length === sortedVisits.filter(printable).length} onChange={(e) => setPicked(e.target.checked ? Object.fromEntries(sortedVisits.filter(printable).map((v) => [v.visitorId, true])) : {})} />
+            {pickedIds.length ? `${pickedIds.length} selected` : 'Select all'}
+          </label>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button type="button" className="btn-ghost !px-3 !py-2 text-xs" disabled={!pickedIds.length} onClick={() => setPreviewIds(pickedIds)}><IdCard size={15} /> Preview</button>
+            <PassPdfButtons visitorIds={pickedIds} compact disabled={!pickedIds.length} onDone={() => { setPassError(''); loadVisits(); outstanding.reload(); }} onError={setPassError} />
+          </div>
+        </div>
+      )}
+      <PassPreviewSheet open={previewIds.length > 0} visitorIds={previewIds} onClose={() => setPreviewIds([])} onPrinted={() => { loadVisits(); outstanding.reload(); }} />
+      <OutstandingPassSheet open={outOpen} onClose={() => setOutOpen(false)} onOpen={(p) => p && router.push(`/gate?code=${encodeURIComponent(p)}`)} />
     </div>
   );
 }

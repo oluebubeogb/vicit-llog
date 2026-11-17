@@ -33,6 +33,7 @@ import PhotoGallery, { GalleryImage } from '@/components/PhotoGallery';
 import CaptureThumbGrid from '@/components/CaptureThumbGrid';
 import { InAppCallButton, PhoneCallLink } from '@/components/CallButtons';
 import CheckpointTracker from '@/components/CheckpointTracker';
+import { GatePassPanel, TagsOutPanel, PassItemHistory, PassPdfButtons, PassPreviewSheet, hostDestination, type GatePassProtocol } from '@/components/GatePass';
 import { fmtDate, MODE_LABEL } from '@/lib/format';
 import {
   cameraSupport,
@@ -80,6 +81,7 @@ export default function GatePage() {
   const [gatePlate, setGatePlate] = useState('');
   const [ringBusy, setRingBusy] = useState(false);
   const [scrollNonce, setScrollNonce] = useState(0);
+  const [passPreviewIds, setPassPreviewIds] = useState<string[]>([]);
   const guestInfoRef = useRef<HTMLDivElement>(null);
   const [gateVehicleDetails, setGateVehicleDetails] = useState('');
 
@@ -645,6 +647,17 @@ export default function GatePage() {
   const hostAvail = arrivedGuest?.hostAvailabilityStatus;
   const hostStatus = (ringVisitor && ringNote[ringVisitor.id]) || (hostAvail === 'AVAILABLE' ? 'Available' : hostAvail === 'WAITING' ? 'Waiting' : arrivedGuest ? 'No answer yet' : 'Not called');
   const hostTone = hostStatus === 'Available' || hostStatus === 'Answered' ? 'bg-emerald-100 text-emerald-800' : hostStatus === 'Waiting' || hostStatus === 'Ringing' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600';
+  // v22 gate pass protocol
+  const passProtocol: GatePassProtocol = (result?.gatePassProtocol as GatePassProtocol) || 'NONE';
+  const isFirstGateOfRoute = (g: any) => !!g && !routeGates.some((o: any) => o.locationId === g.locationId && o.sequence < g.sequence);
+  const activeIsFirst = isFirstGateOfRoute(activeGate);
+  const activeIsLast = !!activeGate && !routeGates.some((o: any) => o.locationId === activeGate.locationId && o.sequence < activeGate.sequence) ;
+  const passBlockFor = (v: any) => {
+    if (v.status !== 'ARRIVED') return [] as any[];
+    const open = (v.passItems || []).filter((i: any) => i.status === 'ISSUED');
+    return activeIsLast ? open : open.filter((i: any) => i.gateId === activeGateId);
+  };
+  const selectedIds = (result?.visitors || []).filter((v: any) => selectedGuests[v.id]).map((v: any) => v.id);
   const modeKey = MODES.map((m) => m.v).join(',');
   useEffect(() => {
     if (MODES.length && !MODES.some((m) => m.v === entryMode)) setEntryMode(MODES[0].v);
@@ -890,6 +903,12 @@ export default function GatePage() {
               <div className="ml-auto flex min-w-0 flex-wrap gap-2">
                 <button type="button" className="btn-success !px-3 !py-1.5 text-[11px]" disabled={!!actionLoading || !Object.values(selectedGuests).some(Boolean)} onClick={() => result.visitors.filter((v: any) => selectedGuests[v.id] && v.photoPath).forEach((v: any) => doCheckpoint(v.id, 'PASSED'))}>Pass selected</button>
                 <button type="button" className="btn-danger !px-3 !py-1.5 text-[11px]" disabled={!!actionLoading || !Object.values(selectedGuests).some(Boolean)} onClick={() => { const first = result.visitors.find((v: any) => selectedGuests[v.id]); if (first) setDenyFor(first.id); }}>Decline selected</button>
+                {passProtocol === 'PRINTED_PASS' && (
+                  <span className="flex items-center gap-1 rounded-xl bg-slate-50 pl-2 ring-1 ring-slate-200" data-testid="gate-bulk-pass">
+                    <button type="button" className="text-[11px] font-semibold text-brand-700 disabled:text-slate-400" disabled={!selectedIds.length} onClick={() => setPassPreviewIds(selectedIds)}>{selectedIds.length ? `${selectedIds.length} pass${selectedIds.length === 1 ? '' : 'es'}` : 'Passes'}</button>
+                    <PassPdfButtons visitorIds={selectedIds} compact disabled={!selectedIds.length} onDone={refreshSilently} onError={setError} />
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -926,6 +945,8 @@ export default function GatePage() {
               <Collapse open={open}>
               <div className="mt-3 space-y-2">
               {routeGates.length > 0 && <CheckpointTracker gates={routeGates} visits={v.gateVisits || []} direction={v.status === 'ARRIVED' || v.status === 'EXITED' ? 'both' : 'ENTRY'} activeGateId={activeGateId} />}
+
+              <PassItemHistory items={v.passItems || []} />
 
               {(v.transfers || []).length > 0 && (
                 <div className="rounded-xl bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
@@ -992,6 +1013,7 @@ export default function GatePage() {
                     <select className="input !py-2 text-sm" value={activeGateId} onChange={e => setActiveGateId(e.target.value)}>
                       {currentCheckpoints.map((g: any) => <option key={g.id} value={g.id}>{g.location?.organisation?.name ? `${g.location.organisation.name} · ` : ''}{g.location?.name} · {g.sequence + 1}. {g.name}</option>)}
                     </select>
+                    <GatePassPanel guest={v} protocol={passProtocol} gate={activeGate} gateNumber={activeGate ? routeGates.filter((o: any) => o.locationId === activeGate.locationId && o.sequence <= activeGate.sequence).length : undefined} passGateId={result.passGateId} isFirstGate={passProtocol === 'PRINTED_PASS' ? (result.passGateId ? result.passGateId === activeGateId : activeIsFirst) : activeIsFirst} defaultDestination={hostDestination(result.host, result.purpose)} onChanged={refreshSilently} onError={setError} onPreview={setPassPreviewIds} />
                     <div className="overflow-hidden rounded-xl border border-rose-100 bg-rose-50/40">
                       <button type="button" onClick={() => setShowWithheld((c) => ({ ...c, [v.id]: !c[v.id] }))} className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-rose-800">Withheld <span className="font-medium normal-case tracking-normal text-rose-600">{showWithheld[v.id] ? 'Hide' : (withheldItems[v.id] || '').trim() ? 'Edit' : 'Add'}</span></button>
                       <Collapse open={!!showWithheld[v.id]}><div className="px-3 pb-3"><textarea rows={2} value={withheldItems[v.id] || ''} onChange={e=>setWithheldItems((c)=>({...c,[v.id]:e.target.value}))} className="input !border-rose-100 !bg-white !py-2 font-sans text-sm" placeholder="One item per line"/></div></Collapse>
@@ -1008,7 +1030,7 @@ export default function GatePage() {
                     </div>
                     {activeGate?.particularsCheckEnabled!==false&&<label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-700"><input type="checkbox" checked={!!particularsChecked[v.id]} onChange={e=>setParticularsChecked((c)=>({...c,[v.id]:e.target.checked}))}/> I have completed the particulars check (including confirming there are no items to record).</label>}
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || (v.status!=='ARRIVED' && activeGate?.admissionsEnabled===false) || (activeGate?.particularsCheckEnabled!==false && !particularsChecked[v.id]) || (v.status==='ARRIVED' && heldHere.length>0)} className="btn-success flex-1 !py-3">{actionLoading===v.id+'-checkpoint'?'Saving…': v.status==='ARRIVED' && heldHere.length>0 ? 'Resolve items at this gate first' : v.status==='ARRIVED' ? 'Pass exit checkpoint' : 'Pass checkpoint'}</button>
+                      <button type="button" onClick={() => doCheckpoint(v.id, 'PASSED')} disabled={!!actionLoading || !v.photoPath || (v.status!=='ARRIVED' && activeGate?.admissionsEnabled===false) || (activeGate?.particularsCheckEnabled!==false && !particularsChecked[v.id]) || (v.status==='ARRIVED' && heldHere.length>0) || passBlockFor(v).length>0} className="btn-success flex-1 !py-3" data-testid="pass-checkpoint-btn">{actionLoading===v.id+'-checkpoint'?'Saving…': v.status==='ARRIVED' && heldHere.length>0 ? 'Resolve items at this gate first' : passBlockFor(v).length>0 ? `Collect ${passBlockFor(v)[0].kind === 'PASS' ? 'pass' : 'tag'} first` : v.status==='ARRIVED' ? 'Pass exit checkpoint' : 'Pass checkpoint'}</button>
                       <button type="button" onClick={() => { setDenyFor(denyFor===v.id?null:v.id); }} disabled={!!actionLoading} className="btn-danger !px-4"><Ban size={17}/></button>
                     </div>
                     <Collapse open={denyFor === v.id}><textarea value={denyReasons[v.id] || ''} onChange={e=>setDenyReasons((c)=>({...c,[v.id]:e.target.value}))} rows={2} className="input text-sm" placeholder="Reason for denial (required)…"/><button type="button" onClick={()=>doCheckpoint(v.id,'DENIED')} disabled={!!actionLoading||!(denyReasons[v.id]||'').trim()||(activeGate?.particularsCheckEnabled!==false&&!particularsChecked[v.id])} className="btn-danger mt-2 w-full">Confirm denial at this checkpoint</button></Collapse>
@@ -1029,9 +1051,9 @@ export default function GatePage() {
                   <Notice tone="error">Entry declined{v.deniedReason ? `: ${v.deniedReason}` : ''}</Notice>
                 )}
                 {v.status === 'ARRIVED' && legacyAllowed && (
-                  <button onClick={() => doExit(v.id)} disabled={!!actionLoading || openItems.length > 0} className="btn w-full bg-gradient-to-br from-amber-400 to-amber-600 !py-3 text-white">
+                  <button onClick={() => doExit(v.id)} disabled={!!actionLoading || openItems.length > 0 || (v.passItems || []).some((i: any) => i.status === 'ISSUED')} className="btn w-full bg-gradient-to-br from-amber-400 to-amber-600 !py-3 text-white">
                     <LogOut size={18} />
-                    {openItems.length > 0 ? 'Resolve withheld items first' : actionLoading === v.id + '-out' ? '…' : 'Record exit'}
+                    {openItems.length > 0 ? 'Resolve withheld items first' : (v.passItems || []).some((i: any) => i.status === 'ISSUED') ? 'Collect tag / pass first' : actionLoading === v.id + '-out' ? '…' : 'Record exit'}
                   </button>
                 )}
                 {v.status === 'EXITED' && <p className="tile-muted !py-2 text-center text-sm text-slate-500">Already signed out</p>}
@@ -1041,6 +1063,8 @@ export default function GatePage() {
           );})}
         </div>
       )}
+
+      {!result && <TagsOutPanel className="mb-4" onOpen={(p) => p && onDecoded(p)} />}
 
       {!result && !error && !scanning && (
         <div className="animate-in mt-8 flex flex-col items-center text-center">
@@ -1073,6 +1097,7 @@ export default function GatePage() {
           <p className="mt-4 text-xs text-white/60">Tap outside to close</p>
         </div>
       )}
+      <PassPreviewSheet open={passPreviewIds.length > 0} visitorIds={passPreviewIds} onClose={() => setPassPreviewIds([])} onPrinted={refreshSilently} />
       {gallery && <PhotoGallery images={gallery.images} index={gallery.index} onIndex={(index) => setGallery((g) => (g ? { ...g, index } : g))} onClose={() => setGallery(null)} />}
     </div>
   );

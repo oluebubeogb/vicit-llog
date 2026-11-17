@@ -15,6 +15,7 @@ import { linkSameDayVisits, visitorsForPassToken } from '../../common/utils/visi
 import { currentAttendanceDay, localDayKey, attendanceTimeZone, startOfNextLocalDay } from '../../common/utils/attendance-day';
 import { roleLabel } from '../../common/utils/role-labels';
 import { ContractorsService } from '../contractors/contractors.service';
+import { GatePassService } from './gate-pass.service';
 import { allowedEntryModes, cleanPlate, cleanVehicleDetails, vehicleMode } from '../../common/utils/entry-modes';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
@@ -28,6 +29,7 @@ export class GateService {
     private notifications: NotificationsService,
     private mail: MailService,
     private contractors: ContractorsService,
+    private passes: GatePassService,
   ) {}
 
   async lookup(passphraseOrQr: string, actor?: any) {
@@ -46,7 +48,7 @@ export class GateService {
 
     const include = {
       visitors: { include: { gateVisits: { include: { gate: { select: { name: true, sequence: true, locationId: true } }, officer: { select: { fullName: true } }, particulars: true }, orderBy: { occurredAt: 'asc' } }, transfers: { orderBy: { createdAt: 'asc' } } } },
-      host: { select: { id: true, fullName: true, email: true, phone: true } },
+      host: { select: { id: true, fullName: true, email: true, phone: true, portfolio: true } },
       organisation: { select: { id: true, name: true, code: true } },
     } as const;
 
@@ -165,8 +167,28 @@ export class GateService {
       gates: await this.routeGates(invite, actor),
       passToken: linked.passToken,
       appointments,
-      visitors: this.lookupVisitors(invite, linked, !seedVisitorId && !scannedVisitorId).map(presentVisitor),
+      visitors: await this.withPassItems(this.lookupVisitors(invite, linked, !seedVisitorId && !scannedVisitorId).map(presentVisitor)),
+      gatePassProtocol: await this.passes.protocol(),
+      passGateId: (await this.passes.firstGateFor({ invite }))?.id || null,
     };
+  }
+
+  /** v22: every tag / printed pass issued to these guests (open and closed), for the guest card + history. */
+  private async withPassItems(list: any[]) {
+    const map = await this.passes.itemsForVisitors(list.map((v) => v.id));
+    return list.map((v) => {
+      const passItems = map.get(v.id) || [];
+      return { ...v, passItems, openPassItems: passItems.filter((i: any) => i.status === 'ISSUED').length };
+    });
+  }
+
+  /** Which of these visitor ids the actor may see (org scope, global roles see all). */
+  async visibleVisitorIds(actor: any, ids: string[]) {
+    if (!ids.length) return [];
+    if (actor.role === 'GLOBAL_ADMIN' && !(actor.permissions || []).includes('visits.view')) return [];
+    const global = ['SUPER_ADMIN', 'GLOBAL_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
+    const rows = await this.prisma.visitor.findMany({ where: { id: { in: ids }, ...(global ? {} : { invite: { organisationId: actor.orgId } }) }, select: { id: true } });
+    return rows.map((r) => r.id);
   }
 
   /**
@@ -356,7 +378,13 @@ export class GateService {
     const plate = vehicleMode(body.entryMode) ? cleanPlate(body.vehiclePlate) : null;
     const vDetails = vehicleMode(body.entryMode) ? cleanVehicleDetails(body.vehicleDetails) : null;
     if (direction === 'EXIT' && visitor.status !== VisitStatus.ARRIVED) throw new BadRequestException('Exit checkpoints start after the visitor has arrived');
-    if (direction === 'EXIT' && decision === 'PASSED') await this.assertParticularsResolved(visitorId, { gateId });
+    if (direction === 'EXIT' && decision === 'PASSED') {
+      await this.assertParticularsResolved(visitorId, { gateId });
+      // v22: a tag / printed pass issued at this gate must be returned or reported lost first.
+      await this.passes.assertNoOpenItems(visitorId, gateId);
+      const below = await this.prisma.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { lt: gate.sequence } } });
+      if (below === 0) await this.passes.assertNoOpenItems(visitorId);
+    }
     const currentEvent = await this.prisma.gateVisit.findFirst({ where: { visitorId, gateId, direction }, orderBy: { occurredAt: 'desc' } });
     if (currentEvent?.decision === 'PASSED') throw new BadRequestException('Visitor has already passed this checkpoint');
     if (direction === 'ENTRY') {
@@ -609,6 +637,7 @@ export class GateService {
     }
     await this.assertParticularsResolved(visitorId);
     await this.assertExitCheckpointsComplete(visitor);
+    await this.passes.assertNoOpenItems(visitorId);
 
     const updated = await this.prisma.visitor.update({
       where: { id: visitorId },
@@ -787,6 +816,7 @@ export class GateService {
             organisation: { select: { name: true, code: true } },
           },
         },
+        passItems: { where: { status: 'ISSUED' }, select: { id: true, kind: true, tagNumber: true, gate: { select: { name: true } } } },
       },
       orderBy: filter === 'scheduled' ? { createdAt: 'asc' } : { createdAt: 'desc' },
       take: 250,
@@ -816,6 +846,9 @@ export class GateService {
       expectedAt: v.invite.expectedAt,
       createdAt: v.createdAt,
       scheduled: filter === 'scheduled',
+      openPassItems: (v as any).passItems?.length || 0,
+      openPassKinds: [...new Set(((v as any).passItems || []).map((i: any) => i.kind))],
+      openPassGates: ((v as any).passItems || []).map((i: any) => ({ id: i.id, kind: i.kind, gateName: i.gate?.name || null, tagNumber: i.tagNumber || null })),
     }));
 
     // Sort scheduled by expected date, current by most recent activity.
@@ -979,6 +1012,8 @@ export class GateService {
       if (opts.direction === 'EXIT' && other.status !== 'ARRIVED') continue;
       const existing = await this.prisma.gateVisit.findFirst({ where: { visitorId: other.id, gateId: gate.id, direction: opts.direction }, orderBy: { occurredAt: 'desc' } });
       if (existing?.decision === 'PASSED') continue;
+      // v22: never walk a linked visit out past a gate where its own tag / pass is still out.
+      if (opts.direction === 'EXIT' && opts.decision === 'PASSED' && (await this.passes.hasOpenItems(other.id, gate.id))) continue;
       await this.prisma.gateVisit.create({
         data: { visitorId: other.id, gateId: gate.id, officerId: opts.actorId, decision: opts.decision, direction: opts.direction, particularsChecked: opts.particularsChecked, evidencePhotos: opts.evidencePhotos, notes: opts.notes },
       });
@@ -990,7 +1025,7 @@ export class GateService {
       } else if (opts.decision === 'PASSED' && opts.direction === 'EXIT') {
         const remaining = await this.prisma.gate.count({ where: { locationId: gate.locationId, isActive: true, sequence: { lt: gate.sequence } } });
         if (remaining === 0) {
-          try { await this.assertParticularsResolved(other.id); } catch { continue; }
+          try { await this.assertParticularsResolved(other.id); await this.passes.assertNoOpenItems(other.id); } catch { continue; }
           await this.prisma.visitor.update({ where: { id: other.id }, data: { status: VisitStatus.EXITED, exitedAt: new Date(), exitById: opts.actorId } });
         }
       }

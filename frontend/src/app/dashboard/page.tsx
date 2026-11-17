@@ -1,4 +1,5 @@
 'use client';
+import { TagsOutPanel } from '@/components/GatePass';
 
 import LineArt from '@/components/ui/LineArt';
 import { useEffect, useMemo, useState } from 'react';
@@ -405,6 +406,8 @@ export default function DashboardPage() {
           <ApprovalTimeline rows={approvals.recent} limit={3} dense />
         </Link>
       )}
+
+      {(user?.role === 'ADMIN' || user?.role === 'GATE') && <TagsOutPanel className="mb-5" onOpen={(p) => p && router.push(`/gate?code=${encodeURIComponent(p)}`)} />}
 
       <div className="stagger mb-6 grid grid-cols-2 gap-3">
         {quick.map(({ href, label, tip, icon: Icon, tone }) => (

@@ -7,6 +7,7 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { GateService } from './gate.service';
+import { GatePassService } from './gate-pass.service';
 import { EntryDto } from './dto/entry.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -20,7 +21,49 @@ import { Role } from '@prisma/client';
 @Roles(Role.ADMIN, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
 @Controller('gate')
 export class GateController {
-  constructor(private gateService: GateService) {}
+  constructor(private gateService: GateService, private passes: GatePassService) {}
+
+  // ----- v22 gate pass protocol -----
+  @Get('pass-protocol')
+  @ApiOperation({ summary: 'Platform-wide gate pass protocol (PLAIN_TAGS | PRINTED_PASS | NONE)' })
+  passProtocol() { return this.passes.summary(); }
+
+  @Patch('pass-protocol')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Super Admin: choose the gate pass protocol' })
+  setPassProtocol(@CurrentUser() user: any, @Body() body: { protocol?: string }) { return this.passes.setProtocol(user, String(body?.protocol || '')); }
+
+  @Post('pass-items')
+  @ApiOperation({ summary: 'Record a tag issued / printed pass issued for a guest at a gate' })
+  issuePassItem(@CurrentUser() user: any, @Body() body: any) { return this.passes.issue(user, body || {}); }
+
+  @Get('pass-items/outstanding')
+  outstandingPassItems(@CurrentUser() user: any, @Query('gateId') gateId?: string) { return this.passes.outstanding(user, gateId || undefined); }
+
+  @Post('pass-items/for-visitors')
+  async passItemsForVisitors(@CurrentUser() user: any, @Body() body: { visitorIds?: string[] }) {
+    const ids = Array.isArray(body?.visitorIds) ? body.visitorIds.map(String).slice(0, 500) : [];
+    const visible = await this.gateService.visibleVisitorIds(user, ids);
+    const map = await this.passes.itemsForVisitors(visible);
+    return Object.fromEntries(map);
+  }
+
+  @Patch('pass-items/:id')
+  @ApiOperation({ summary: 'Mark a tag / pass RETURNED or LOST (reason required for lost)' })
+  closePassItem(@CurrentUser() user: any, @Param('id') id: string, @Body() body: { status?: string; reason?: string }) { return this.passes.close(user, id, body || {}); }
+
+  @Post('passes/preview')
+  previewPasses(@CurrentUser() user: any, @Body() body: { visitorIds?: string[] }) { return this.passes.preview(user, Array.isArray(body?.visitorIds) ? body.visitorIds : []); }
+
+  @Post('passes/pdf')
+  @ApiOperation({ summary: 'CR80 pass PDF, one page per guest (bulk print / download)' })
+  async passesPdf(@CurrentUser() user: any, @Body() body: { visitorIds?: string[]; mode?: string; destination?: string }, @Res() res: Response) {
+    const { buffer, filename } = await this.passes.pdf(user, body || {});
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${body?.mode === 'download' ? 'attachment' : 'inline'}; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  }
 
   @Get('checkpoints')
   checkpoints(@CurrentUser() user: any) { return this.gateService.listCheckpoints(user); }

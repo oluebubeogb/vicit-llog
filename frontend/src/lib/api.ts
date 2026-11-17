@@ -305,6 +305,29 @@ export const api = {
   },
   reorderGate: (gateId: string, sequence: number) => request(`/locations/gates/${gateId}/order`, { method: 'PATCH', body: JSON.stringify({ sequence }) }),
   checkpoints: () => request('/gate/checkpoints'),
+  // v22 gate pass protocol
+  passProtocol: () => request('/gate/pass-protocol'),
+  setPassProtocol: (protocol: string) => request('/gate/pass-protocol', { method: 'PATCH', body: JSON.stringify({ protocol }) }),
+  issuePassItem: (data: { visitorId: string; gateId?: string; tagNumber?: string; destination?: string }) => request('/gate/pass-items', { method: 'POST', body: JSON.stringify(data) }),
+  closePassItem: (id: string, status: 'RETURNED' | 'LOST', reason?: string) => request(`/gate/pass-items/${id}`, { method: 'PATCH', body: JSON.stringify({ status, reason }) }),
+  outstandingPassItems: (gateId?: string) => request(`/gate/pass-items/outstanding${gateId ? `?gateId=${encodeURIComponent(gateId)}` : ''}`),
+  passItemsForVisitors: (visitorIds: string[]) => request('/gate/pass-items/for-visitors', { method: 'POST', body: JSON.stringify({ visitorIds }) }),
+  previewPasses: (visitorIds: string[]) => request('/gate/passes/preview', { method: 'POST', body: JSON.stringify({ visitorIds }) }),
+  passesPdf: async (visitorIds: string[], mode: 'print' | 'download', destination?: string): Promise<{ blob: Blob; filename: string }> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/gate/passes/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ visitorIds, mode, destination }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || 'Could not build the pass PDF');
+    }
+    const cd = res.headers.get('content-disposition') || '';
+    const filename = /filename="([^"]+)"/.exec(cd)?.[1] || 'vicit-passes.pdf';
+    return { blob: await res.blob(), filename };
+  },
   uploadParticularImage: async (file: File) => { const form = new FormData(); form.append('image', file); return request('/gate/particular-image', { method: 'POST', body: form }); },
   checkpointHistory: (visitorId: string) => request(`/gate/history/${visitorId}`),
   returnParticular: (id: string) => request(`/gate/particulars/${id}/return`, { method: 'POST' }),
