@@ -45,6 +45,15 @@ export class InvitesService {
   }
 
   private async sendGuestInviteEmails(inviteId: string) {
+    return (await this.deliverGuestInviteEmails(inviteId)).sent;
+  }
+
+  /**
+   * v23: email every guest that has an address — phone is never considered. Returns who was
+   * emailed and who could not be (SMTP missing / rejected), so the host sees a failure instead
+   * of silence and can resend.
+   */
+  private async deliverGuestInviteEmails(inviteId: string) {
     const invite = await this.prisma.invite.findUnique({
       where: { id: inviteId },
       include: {
@@ -53,13 +62,15 @@ export class InvitesService {
         organisation: { select: { id: true, name: true, customDomain: true } },
       },
     });
-    if (!invite) return [] as string[];
+    if (!invite) return { sent: [] as string[], failed: [] as Array<{ visitorId: string; fullName: string; email: string; error: string }> };
     const ttl = Math.max(1, Math.round((invite.expiresAt.getTime() - Date.now()) / 60000));
     const link = `${publicFrontendBase(invite.organisation?.customDomain)}/visitor/${invite.token}`;
     const sent: string[] = [];
+    const failed: Array<{ visitorId: string; fullName: string; email: string; error: string }> = [];
     for (const v of invite.visitors) {
       if (!v.email) continue;
-      const r = await this.mail.sendInviteEmail({
+      if (['CANCELLED', 'DENIED', 'EXITED'].includes(v.status)) continue;
+      const r: any = await this.mail.sendInviteEmail({
         to: v.email,
         guestName: v.fullName,
         hostName: invite.host.fullName,
@@ -71,9 +82,27 @@ export class InvitesService {
         orgName: invite.organisation?.name,
         organisationId: invite.organisation?.id,
       });
-      if (r.ok) sent.push(v.email);
+      if (r?.ok) sent.push(v.email);
+      else failed.push({ visitorId: v.id, fullName: v.fullName, email: v.email, error: r?.error || 'Mail could not be sent' });
     }
-    return sent;
+    return { sent, failed };
+  }
+
+  /** Host / agency admin / Super Admin: email the registration link again to every guest with an email. */
+  async resendGuestEmails(inviteId: string, actor: any) {
+    const invite = await this.prisma.invite.findUnique({ where: { id: inviteId } });
+    if (!invite) throw new NotFoundException('Invite not found');
+    const allowed = invite.hostId === actor.id || actor.role === 'SUPER_ADMIN' || (actor.role === 'ADMIN' && invite.organisationId === actor.orgId);
+    if (!allowed) throw new ForbiddenException('Only the host or an administrator can resend this invite');
+    if (invite.cancelledAt || invite.status === InviteStatus.REVOKED) throw new BadRequestException('This invite was cancelled');
+    if (invite.status === InviteStatus.AWAITING_APPROVAL || invite.status === InviteStatus.OFFLINE_PENDING) throw new BadRequestException('Guests are emailed once the invite is approved');
+    const ttl = parseInt(process.env.INVITE_LINK_TTL_MINUTES || '60', 10);
+    if (invite.expiresAt.getTime() < Date.now() + 5 * 60 * 1000) {
+      await this.prisma.invite.update({ where: { id: inviteId }, data: { expiresAt: new Date(Date.now() + ttl * 60 * 1000), ...(invite.status === InviteStatus.EXPIRED ? { status: InviteStatus.ACTIVE } : {}) } });
+    }
+    const { sent, failed } = await this.deliverGuestInviteEmails(inviteId);
+    await this.auditGuestNotified(inviteId, actor.id, 'INVITE_LINK_RESENT', sent, { failed: failed.map((f) => ({ email: f.email, error: f.error })) });
+    return { emailsSent: sent, emailsFailed: failed };
   }
 
   async create(dto: CreateInviteDto, hostId: string, orgId: string, creatorRole?: string) {
@@ -182,9 +211,10 @@ export class InvitesService {
 
     // Email each guest that has an address (awaiting approval waits until approved)
     let emailsSent: string[] = [];
+    let emailsFailed: Array<{ visitorId: string; fullName: string; email: string; error: string }> = [];
     if (!needsApproval) {
-      emailsSent = await this.sendGuestInviteEmails(invite.id);
-      await this.auditGuestNotified(invite.id, hostId, 'INVITE_LINK', emailsSent);
+      ({ sent: emailsSent, failed: emailsFailed } = await this.deliverGuestInviteEmails(invite.id));
+      await this.auditGuestNotified(invite.id, hostId, 'INVITE_LINK', emailsSent, emailsFailed.length ? { failed: emailsFailed.map((f) => ({ email: f.email, error: f.error })) } : undefined);
     }
 
     if (needsApproval) {
@@ -209,6 +239,7 @@ export class InvitesService {
       link,
       expiresInMinutes: ttl,
       emailsSent,
+      emailsFailed,
       noContactGuests: createdVisitors.filter((v) => !v.email).map((v) => ({ id: v.id, fullName: v.fullName })),
       awaitingApproval: needsApproval,
     };
@@ -667,8 +698,8 @@ export class InvitesService {
     });
 
     // Approved online invites now get their registration emails
-    const emailsSent = await this.sendGuestInviteEmails(inviteId);
-    await this.auditGuestNotified(inviteId, adminId, 'INVITE_LINK', emailsSent);
+    const { sent: emailsSent, failed: emailsFailed } = await this.deliverGuestInviteEmails(inviteId);
+    await this.auditGuestNotified(inviteId, adminId, 'INVITE_LINK', emailsSent, emailsFailed.length ? { failed: emailsFailed.map((f) => ({ email: f.email, error: f.error })) } : undefined);
     await this.notifications.create({
       userId: invite.hostId,
       title: 'Invite approved',
@@ -676,7 +707,7 @@ export class InvitesService {
       meta: { type: 'INVITE_APPROVED', inviteId },
     });
 
-    return { ...updated, emailsSent };
+    return { ...updated, emailsSent, emailsFailed };
   }
 
 

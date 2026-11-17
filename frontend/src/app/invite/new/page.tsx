@@ -125,6 +125,7 @@ export default function NewInvitePage() {
     if (MODES.length && !MODES.some((m) => m.v === mode)) setMode(MODES[0].v);
   }, [MODES.map((m) => m.v).join(','), mode]);
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
@@ -267,6 +268,19 @@ export default function NewInvitePage() {
     }
   }
 
+  async function resendEmails() {
+    if (!result?.id) return;
+    setResending(true);
+    try {
+      const r = await api.resendInviteEmails(result.id);
+      setResult((cur: any) => ({ ...cur, emailsSent: Array.from(new Set([...(cur?.emailsSent || []), ...(r.emailsSent || [])])), emailsFailed: r.emailsFailed || [] }));
+    } catch (e: any) {
+      setError(e?.message || 'Could not resend');
+    } finally {
+      setResending(false);
+    }
+  }
+
   function copyLink() {
     if (result?.link) {
       navigator.clipboard.writeText(result.link);
@@ -362,6 +376,17 @@ export default function NewInvitePage() {
                 <PhoneOff size={16} className="mt-0.5 shrink-0 text-slate-400" />
                 <span>
                   <strong>{result.noContactGuests.map((g: any) => g.fullName).join(', ')}</strong> {result.noContactGuests.length === 1 ? 'has' : 'have'} no email, so {result.noContactGuests.length === 1 ? 'is' : 'are'} marked no phone. The gate will take {result.noContactGuests.length === 1 ? 'their' : 'each'} photo and send it to you to confirm.
+                </span>
+              </span>
+            </Notice>
+          )}
+          {result.emailsFailed?.length > 0 && (
+            <Notice tone="warn">
+              <span className="flex items-start gap-2" data-testid="invite-email-failed">
+                <Mail size={16} className="mt-0.5 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  Couldn&apos;t email {result.emailsFailed.map((f: any) => `${f.fullName} (${f.email})`).join(', ')}{result.emailsFailed[0]?.error ? ` — ${/smtp not configured/i.test(result.emailsFailed[0].error) ? 'outgoing mail is not set up on the server' : result.emailsFailed[0].error}` : ''}. Share the link above, or try again.
+                  <button type="button" className="btn-ghost mt-2 !px-3 !py-1.5 text-xs" disabled={resending} onClick={resendEmails}>{resending ? 'Sending…' : 'Resend email'}</button>
                 </span>
               </span>
             </Notice>

@@ -81,51 +81,113 @@ export function PassPdfButtons({ visitorIds, destination, onDone, onError, compa
   );
 }
 
-/** On-screen CR80 card (85.6 × 54 mm aspect) mirroring the printed PDF. */
+function tint(hex: string, t: number) {
+  const ok = /^#[0-9a-f]{6}$/i.test(hex || '');
+  const n = parseInt((ok ? hex : '#1e3a8a').slice(1), 16);
+  const mix = (c: number) => Math.round(255 - (255 - c) * t).toString(16).padStart(2, '0');
+  return `#${mix((n >> 16) & 255)}${mix((n >> 8) & 255)}${mix(n & 255)}`;
+}
+
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+/** Width of `text` in px for a CSS font size/weight in Helvetica (falls back to an estimate on the server). */
+function textWidth(text: string, font: string) {
+  if (measureCtx === undefined) measureCtx = typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null;
+  if (!measureCtx) return text.length * parseFloat(font.replace(/^bold /, '')) * (font.startsWith('bold') ? 0.6 : 0.53);
+  measureCtx.font = `${font} Helvetica, Arial, sans-serif`;
+  return measureCtx.measureText(text).width;
+}
+function fitText(text: string, font: string, max: number) {
+  if (textWidth(text, font) <= max) return text;
+  let t = text;
+  while (t.length > 1 && textWidth(t + '…', font) > max) t = t.slice(0, -1);
+  return t.trimEnd() + '…';
+}
+/** Mirrors the PDF: shrink the name from 9.2 to 6.6 until it wraps into two lines. */
+function fitName(name: string, max: number) {
+  const words = String(name || '').split(/\s+/).filter(Boolean);
+  const wrap = (size: number) => {
+    const font = `bold ${size}px`; const lines: string[] = [];
+    for (const w of words) {
+      const last = lines[lines.length - 1];
+      if (last !== undefined && textWidth(`${last} ${w}`, font) <= max) lines[lines.length - 1] = `${last} ${w}`;
+      else lines.push(w);
+    }
+    return { lines, fits: lines.length <= 2 && lines.every((l) => textWidth(l, font) <= max) };
+  };
+  for (let size = 9.2; size > 6.6; size = Math.round((size - 0.4) * 10) / 10) { const r = wrap(size); if (r.fits) return { size, lines: r.lines }; }
+  const r = wrap(6.6);
+  const lines = r.lines.slice(0, 2);
+  if (r.lines.length > 2) lines[1] = r.lines.slice(1).join(' ');
+  return { size: 6.6, lines: lines.map((l) => fitText(l, 'bold 6.6px', max)) };
+}
+
+/**
+ * On-screen CR80 card — the same v23 layout as the printed PDF, drawn in PDF points
+ * (242.65 × 153.07) so preview and print line up: agency logo + name, large “Visitor”, rule,
+ * photo / name / department, divider, Host · Destination chip · Valid until, registration QR.
+ */
 export function PassCardPreview({ card }: { card: any }) {
-  const api = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-  const logo = card.logoUrl ? (card.logoUrl.startsWith('http') ? card.logoUrl : `${api}${card.logoUrl}`) : null;
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+  const logo = card.logoUrl ? (card.logoUrl.startsWith('http') ? card.logoUrl : `${apiBase}${card.logoUrl}`) : null;
+  const W = 242.65, H = 153.07;
+  const accent = /^#[0-9a-f]{6}$/i.test(card.agencyColor || '') ? card.agencyColor : '#1e3a8a';
+  const NAVY = '#0f1f3d', MUTED = '#64748b';
+  const [vDate, vTime] = String(card.validUntilLabel || '').split(', ');
+  const initials = String(card.fullName || '').split(/\s+/).filter(Boolean).slice(0, 2).map((x: string) => x[0]).join('').toUpperCase();
+  const tx = logo ? 34 : 10;
+  const qrSize = 64, qx = W - qrSize - 8, qy = H - 13 - qrSize - 6;
+  const rx = 104;
+  const fo = { fontFamily: 'Helvetica, Arial, sans-serif' } as const;
+  const clip = `pc-${card.visitorId}`;
+  const rw = W - rx - 10;
+  const nameFit = fitName(card.fullName, 82);
+  const subY = 96 + nameFit.size * (0.9 + (nameFit.lines.length - 1) * 1.08) + 8.4;
+  const destText = fitText(card.destination || '—', 'bold 6.4px', rw - 14);
+  const chipW = Math.min(rw, textWidth(destText, 'bold 6.4px') + 17);
   return (
-    <div className="mx-auto w-full max-w-[420px]" data-testid="pass-card-preview">
-      <div className="relative w-full overflow-hidden rounded-[14px] bg-white shadow-lift ring-1 ring-slate-200" style={{ aspectRatio: '85.6 / 54' }}>
-        <div className="absolute inset-x-0 top-0 flex h-[17.6%] items-center gap-2 px-[3%]" style={{ background: card.agencyColor }}>
-          {logo && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={logo} alt="" className="h-[70%] w-auto rounded bg-white object-contain p-0.5" />
-          )}
-          <div className="min-w-0 flex-1 leading-tight text-white">
-            <p className="truncate text-[clamp(9px,2.6vw,12px)] font-bold">{card.agency}</p>
-            <p className="truncate text-[clamp(7px,1.7vw,8px)] text-white/80">Visitor Access &amp; Exit Control</p>
-          </div>
-          <span className="text-[clamp(7px,2vw,9px)] font-bold tracking-[0.15em] text-white">VISITOR PASS</span>
-        </div>
-        <div className="absolute inset-x-0 bottom-[7.2%] top-[17.6%] flex gap-[2.5%] px-[3%] py-[2.5%]">
-          <div className="h-full w-[19%] shrink-0 overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200">
-            {card.photoPath ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={`${api}/visitors/photo/${card.photoPath}`} alt={card.fullName} className="h-full w-full object-cover" />
-            ) : null}
-          </div>
-          <div className="min-w-0 flex-1 space-y-[3%] leading-tight">
-            <p className="line-clamp-2 text-[clamp(10px,3vw,14px)] font-bold text-slate-900">{card.fullName}</p>
-            {[['Host', card.hostName], ['Destination', card.destination], ['Valid until', card.validUntilLabel]].map(([k, val]) => (
-              <div key={k}>
-                <p className="text-[clamp(6px,1.6vw,8px)] font-bold uppercase tracking-wider text-slate-400">{k}</p>
-                <p className="line-clamp-2 text-[clamp(8px,2.2vw,10px)] text-slate-700">{val || '—'}</p>
-              </div>
-            ))}
-          </div>
-          <div className="flex w-[27%] shrink-0 flex-col items-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={card.qrDataUrl} alt="Registration QR" className="aspect-square w-full" />
-            <p className="mt-0.5 font-mono text-[clamp(7px,1.8vw,9px)] font-bold tracking-wider text-slate-600">{card.passphrase}</p>
-          </div>
-        </div>
-        <div className="absolute inset-x-0 bottom-0 flex h-[7.2%] items-center justify-between bg-slate-100 px-[3%] text-[clamp(6px,1.5vw,7px)] text-slate-500">
-          <span>Return this pass at exit · Scan at every gate</span>
-          <span>Powered by CISTECH&apos;s Vicit 1.0.1</span>
-        </div>
-      </div>
+    <div className="mx-auto w-full max-w-[460px]" data-testid="pass-card-preview">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-hidden rounded-[10px] shadow-lift ring-1 ring-slate-200" role="img" aria-label={`Visitor pass for ${card.fullName}`}>
+        <defs><clipPath id={clip}><rect x={10} y={40} width={44} height={52} rx={5} /></clipPath></defs>
+        <rect width={W} height={H} fill="#fff" />
+        <path d={`M ${W - 78} 0 C ${W - 46} 10 ${W - 18} 30 ${W} 58 L ${W} 0 Z`} fill={tint(accent, 0.07)} />
+        <path d={`M ${W - 46} 0 C ${W - 26} 8 ${W - 10} 20 ${W} 34 L ${W} 0 Z`} fill={tint(accent, 0.13)} />
+        <path d={`M 0 ${H - 52} C 18 ${H - 34} 40 ${H - 18} 74 ${H - 11} L 0 ${H - 11} Z`} fill={tint(accent, 0.07)} />
+        {logo && <image href={logo} x={10} y={8} width={20} height={20} preserveAspectRatio="xMidYMid meet" />}
+        <text x={tx} y={17.4} fill={NAVY} style={{ ...fo, fontWeight: 700, fontSize: 7.6, letterSpacing: 0.3 }}>{String(card.agency || '').toUpperCase()}</text>
+        <text x={tx} y={24.5} fill={MUTED} style={{ ...fo, fontSize: 4.8 }}>Visitor Access &amp; Exit Control</text>
+        <text x={W - 10} y={24} textAnchor="end" fill={NAVY} style={{ ...fo, fontWeight: 700, fontSize: 19 }}>Visitor</text>
+        <line x1={10} y1={34} x2={W - 10} y2={34} stroke={tint(accent, 0.45)} strokeWidth={0.6} />
+        <rect x={10} y={40} width={44} height={52} rx={5} fill={tint(accent, 0.1)} />
+        {card.photoPath
+          ? <image href={`${apiBase}/visitors/photo/${card.photoPath}`} x={10} y={40} width={44} height={52} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clip})`} />
+          : <text x={32} y={70} textAnchor="middle" fill={NAVY} style={{ ...fo, fontWeight: 700, fontSize: 15 }}>{initials}</text>}
+        <rect x={10} y={40} width={44} height={52} rx={5} fill="none" stroke="#d6dde8" strokeWidth={0.5} />
+        {nameFit.lines.map((ln, i) => (
+          <text key={i} x={10} y={96 + nameFit.size * (0.9 + i * 1.08)} fill={NAVY} style={{ ...fo, fontWeight: 700, fontSize: nameFit.size }}>{ln}</text>
+        ))}
+        <rect x={10} y={subY - 4.1} width={5.2} height={4.6} rx={0.6} fill={tint(accent, 0.75)} />
+        <rect x={11.9} y={subY - 5} width={1.4} height={1.2} rx={0.3} fill="none" stroke={tint(accent, 0.75)} strokeWidth={0.5} />
+        <text x={17.6} y={subY} fill={MUTED} style={{ ...fo, fontSize: 5.6 }}>{fitText(card.subline || card.agency || '', '5.6px', 82 - 7.6)}</text>
+        <line x1={96} y1={40} x2={96} y2={H - 17} stroke={tint(accent, 0.35)} strokeWidth={0.5} />
+        <text x={rx} y={44} fill={MUTED} style={{ ...fo, fontWeight: 700, fontSize: 4.7, letterSpacing: 0.5 }}>HOST</text>
+        <text x={rx} y={52.6} fill={NAVY} style={{ ...fo, fontWeight: 700, fontSize: 7.4 }}>{fitText(card.hostName || '—', 'bold 7.4px', rw)}</text>
+        <text x={rx} y={63} fill={MUTED} style={{ ...fo, fontWeight: 700, fontSize: 4.7, letterSpacing: 0.5 }}>DESTINATION</text>
+        <g data-testid="pass-destination-chip">
+          <rect x={rx} y={65} width={chipW} height={11} rx={5.5} fill={tint(accent, 0.1)} />
+          <rect x={rx + 4.5} y={67.5} width={4.4} height={6} rx={0.4} fill={accent} />
+          {[0, 1].map((cx) => [0, 1, 2].map((cy) => <rect key={`${cx}${cy}`} x={rx + 5.3 + cx * 1.6} y={68.3 + cy * 1.6} width={0.9} height={0.9} fill={tint(accent, 0.1)} />))}
+          <text x={rx + 11.5} y={72.8} fill={NAVY} style={{ ...fo, fontWeight: 700, fontSize: 6.4 }}>{destText}</text>
+        </g>
+        <text x={rx} y={87} fill={MUTED} style={{ ...fo, fontWeight: 700, fontSize: 4.7, letterSpacing: 0.5 }}>VALID UNTIL</text>
+        <text x={rx} y={95.4} fill={NAVY} style={{ ...fo, fontWeight: 700, fontSize: 7 }}>{vDate || card.validUntilLabel}</text>
+        {vTime && <text x={rx} y={104} fill={MUTED} style={{ ...fo, fontSize: 6 }}>{vTime}</text>}
+        <image href={card.qrDataUrl} x={qx} y={qy} width={qrSize} height={qrSize} />
+        <text x={rx} y={qy + qrSize - 1.5} fill={MUTED} style={{ fontFamily: 'Courier New, monospace', fontWeight: 700, fontSize: 5.2 }}>{card.passphrase}</text>
+        <rect x={0} y={H - 11} width={W} height={11} fill="#f3f5f9" />
+        <rect x={0} y={H - 11} width={W} height={0.6} fill={tint(accent, 0.3)} />
+        <text x={10} y={H - 4} fill="#475569" style={{ ...fo, fontSize: 4.6 }}>Return this pass at exit · Scan at every gate</text>
+        <text x={W - 10} y={H - 4} textAnchor="end" fill="#94a3b8" style={{ ...fo, fontSize: 4.4 }}>Powered by CISTECH&apos;s Vicit 1.0.1</text>
+      </svg>
     </div>
   );
 }

@@ -110,6 +110,7 @@ export const api = {
   myInvites: () => request('/invites/mine'),
   allInvites: () => request('/invites'),
   publicInvite: (token: string) => request(`/invites/public/${token}`),
+  resendInviteEmails: (id: string) => request(`/invites/${id}/resend-emails`, { method: 'POST' }),
   reviveInvite: (id: string) =>
     request(`/invites/${id}/revive`, { method: 'POST' }),
   approveOffline: (id: string) =>

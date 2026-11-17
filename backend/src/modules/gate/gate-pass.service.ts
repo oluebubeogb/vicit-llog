@@ -32,6 +32,7 @@ type PassCard = {
   photoPath: string | null;
   photoFile: string | null;
   hostName: string;
+  subline: string;
   destination: string;
   validUntil: string;
   validUntilLabel: string;
@@ -109,6 +110,11 @@ export class GatePassService {
     return this.prisma.gate.findFirst({ where, orderBy: [{ sequence: 'asc' }, { createdAt: 'asc' }], include: { location: true, assignments: { select: { userId: true } } } });
   }
 
+  /** Printed pass: a place (the chip on the card), not the host — the host has its own line. */
+  passDestination(visitor: any, locationName?: string | null) {
+    return locationName || visitor.invite?.organisation?.name || '';
+  }
+
   defaultDestination(visitor: any, locationName?: string | null) {
     const host = visitor.invite?.host;
     return [host?.fullName, host?.portfolio, locationName].filter(Boolean).join(' · ') || visitor.invite?.purpose || '';
@@ -179,7 +185,7 @@ export class GatePassService {
         gateVisitId: lastEntry?.id || null,
         kind,
         tagNumber,
-        destination: destination ?? (kind === 'PASS' ? this.defaultDestination(visitor, gate.location?.name) : null),
+        destination: destination ?? (kind === 'PASS' ? this.passDestination(visitor, gate.location?.name) : null),
         issuedById: actor.id,
       },
     });
@@ -291,7 +297,8 @@ export class GatePassService {
       photoPath: visitor.photoPath || null,
       photoFile: this.photoFile(visitor.photoPath),
       hostName: visitor.invite.host?.fullName || '',
-      destination: item?.destination || this.defaultDestination(visitor, gateName),
+      subline: visitor.invite.host?.portfolio || org?.name || '',
+      destination: item?.destination || this.passDestination(visitor, gateName),
       validUntil: valid.iso,
       validUntilLabel: valid.label,
       passphrase: visitor.invite.passphrase,
@@ -342,70 +349,114 @@ export class GatePassService {
     return { buffer, filename: `vicit-pass${cards.length > 1 ? 'es' : ''}-${new Date().toISOString().slice(0, 10)}.pdf` };
   }
 
+  /** Mix a hex colour with white (t = share of the colour, 0..1). */
+  private tint(hex: string, t: number) {
+    const n = parseInt(hex.slice(1), 16);
+    const mix = (c: number) => Math.round(255 - (255 - c) * t).toString(16).padStart(2, '0');
+    return `#${mix((n >> 16) & 255)}${mix((n >> 8) & 255)}${mix(n & 255)}`;
+  }
+
+  /**
+   * v23 CR80 layout (85.6 × 54 mm, landscape): agency logo + name left and a large “Visitor” right,
+   * thin rule; photo, name and department on the left; a thin divider; Host / Destination chip /
+   * Valid until on the right with the registration QR bottom-right; v22 footer kept.
+   * The agency colour is used sparingly: corner swooshes, the rule, divider and chip tint.
+   */
   private async renderPdf(cards: PassCard[]): Promise<Buffer> {
     const W = CR80_PT.width;
     const H = CR80_PT.height;
+    const NAVY = '#0f1f3d';
+    const MUTED = '#64748b';
     const doc = new PDFDocument({ size: [W, H], margin: 0, autoFirstPage: false, info: { Title: 'Vicit visitor pass', Author: 'Vicit', Creator: "CISTECH's Vicit 1.0.1" } });
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
     const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
     for (const c of cards) {
+      const accent = c.agencyColor;
       doc.addPage({ size: [W, H], margin: 0 });
-      const band = 27;
       doc.rect(0, 0, W, H).fill('#ffffff');
-      doc.rect(0, 0, W, band).fill(c.agencyColor);
-      let textX = 8;
-      if (this.embeddable(c.logoPath)) {
-        try {
-          doc.save().roundedRect(6, 4, 19, 19, 4).fill('#ffffff').restore();
-          doc.image(c.logoPath as string, 7.5, 5.5, { fit: [16, 16], align: 'center', valign: 'center' });
-          textX = 30;
-        } catch { /* unsupported logo image */ }
-      }
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.5).text(c.agency, textX, 6.5, { width: W - textX - 62, height: 10, lineBreak: false, ellipsis: true });
-      doc.font('Helvetica').fontSize(5).fillColor('#e2e8f0').text('Visitor Access & Exit Control', textX, 16, { width: W - textX - 62, lineBreak: false });
-      doc.font('Helvetica-Bold').fontSize(6).fillColor('#ffffff').text('VISITOR PASS', W - 60, 10.5, { width: 54, align: 'right', characterSpacing: 0.6 });
 
-      // Photo
-      const px = 7, py = band + 6, pw = 54, ph = 72;
-      doc.save().roundedRect(px, py, pw, ph, 4).clip();
+      // Corner swooshes (agency colour, low intensity)
+      doc.save();
+      doc.path(`M ${W - 78} 0 C ${W - 46} 10 ${W - 18} 30 ${W} 58 L ${W} 0 Z`).fill(this.tint(accent, 0.07));
+      doc.path(`M ${W - 46} 0 C ${W - 26} 8 ${W - 10} 20 ${W} 34 L ${W} 0 Z`).fill(this.tint(accent, 0.13));
+      doc.path(`M 0 ${H - 52} C 18 ${H - 34} 40 ${H - 18} 74 ${H - 11} L 0 ${H - 11} Z`).fill(this.tint(accent, 0.07));
+      doc.restore();
+
+      // Header: logo + agency name (left), “Visitor” (right)
+      let tx = 10;
+      if (this.embeddable(c.logoPath)) {
+        try { doc.image(c.logoPath as string, 10, 8, { fit: [20, 20], align: 'center', valign: 'center' }); tx = 34; } catch { /* unsupported logo */ }
+      }
+      doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(7.6).text(c.agency.toUpperCase(), tx, 10.5, { width: W - tx - 82, height: 9, lineBreak: false, ellipsis: true, characterSpacing: 0.3 });
+      doc.fillColor(MUTED).font('Helvetica').fontSize(4.8).text('Visitor Access & Exit Control', tx, 20, { width: W - tx - 82, lineBreak: false });
+      doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(19).text('Visitor', W - 86, 8.5, { width: 76, align: 'right', lineBreak: false });
+      doc.save().lineWidth(0.6).strokeColor(this.tint(accent, 0.45)).moveTo(10, 34).lineTo(W - 10, 34).stroke().restore();
+
+      // Left column: photo, name, department
+      const px = 10, py = 40, pw = 44, ph = 52;
+      doc.save().roundedRect(px, py, pw, ph, 5).clip();
       let photoDone = false;
       if (this.embeddable(c.photoFile)) {
         try { doc.image(c.photoFile as string, px, py, { cover: [pw, ph], align: 'center', valign: 'center' }); photoDone = true; } catch { /* fall back */ }
       }
       if (!photoDone) {
-        doc.rect(px, py, pw, ph).fill('#e2e8f0');
-        const initials = c.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase();
-        doc.fillColor('#475569').font('Helvetica-Bold').fontSize(16).text(initials, px, py + ph / 2 - 9, { width: pw, align: 'center' });
+        doc.rect(px, py, pw, ph).fill(this.tint(accent, 0.1));
+        const initials = c.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase();
+        doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(15).text(initials, px, py + ph / 2 - 8, { width: pw, align: 'center' });
       }
       doc.restore();
-      doc.save().lineWidth(0.6).strokeColor('#cbd5e1').roundedRect(px, py, pw, ph, 4).stroke().restore();
+      doc.save().lineWidth(0.5).strokeColor('#d6dde8').roundedRect(px, py, pw, ph, 5).stroke().restore();
+      const colW = 80;
+      // Auto-fit long names (two lines max) before falling back to an ellipsis.
+      let nameSize = 9.2;
+      doc.font('Helvetica-Bold');
+      while (nameSize > 6.6 && doc.fontSize(nameSize).heightOfString(c.fullName, { width: colW, lineGap: -0.5 }) > nameSize * 2.3) nameSize -= 0.4;
+      doc.fillColor(NAVY).fontSize(nameSize).text(c.fullName, px, py + ph + 5, { width: colW, height: nameSize * 2.4, ellipsis: true, lineGap: -0.5 });
+      const subY = Math.min(doc.y + 1.5, H - 24);
+      // small building/briefcase glyph
+      doc.save().fillColor(this.tint(accent, 0.75));
+      doc.roundedRect(px, subY + 0.6, 5.2, 4.6, 0.6).fill();
+      doc.rect(px + 1.7, subY - 0.4, 1.8, 1.2).fill();
+      doc.restore();
+      doc.fillColor(MUTED).font('Helvetica').fontSize(5.6).text(c.subline || c.agency, px + 7.5, subY, { width: colW - 7.5, height: 7, lineBreak: false, ellipsis: true });
 
-      // Details
-      const qrSize = 80;
-      const qx = W - qrSize - 6, qy = band + 4;
-      const tx = px + pw + 6, tw = qx - tx - 4;
-      let y = band + 5;
-      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8.5).text(c.fullName, tx, y, { width: tw, height: 21, ellipsis: true });
-      y = doc.y + 2;
-      const field = (label: string, value: string, h = 9) => {
-        doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(4.6).text(label.toUpperCase(), tx, y, { width: tw, characterSpacing: 0.4 });
-        doc.fillColor('#1e293b').font('Helvetica').fontSize(6).text(value || '—', tx, doc.y + 0.6, { width: tw, height: h, ellipsis: true });
-        y = doc.y + 2.2;
-      };
-      field('Host', c.hostName);
-      field('Destination', c.destination, 15);
-      field('Valid until', c.validUntilLabel);
+      // Divider
+      const dx = 96;
+      doc.save().lineWidth(0.5).strokeColor(this.tint(accent, 0.35)).moveTo(dx, 40).lineTo(dx, H - 17).stroke().restore();
 
-      // Registration QR (same code as on registration)
-      const qr = await QRCode.toBuffer(c.qrPayload, { ...QR_RENDER_OPTIONS, type: 'png', margin: 2 });
+      // Right column: Host, Destination chip, Valid until; QR bottom-right
+      const rx = dx + 8, rw = W - rx - 10;
+      const label = (t: string, y: number) => doc.fillColor(MUTED).font('Helvetica-Bold').fontSize(4.7).text(t.toUpperCase(), rx, y, { width: rw, characterSpacing: 0.5, lineBreak: false });
+      label('Host', 40);
+      doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(7.4).text(c.hostName || '—', rx, 46, { width: rw, height: 9, lineBreak: false, ellipsis: true });
+      label('Destination', 59);
+      const dest = c.destination || '—';
+      doc.font('Helvetica-Bold').fontSize(6.4);
+      const chipW = Math.min(rw, doc.widthOfString(dest) + 17);
+      doc.save().roundedRect(rx, 65, chipW, 11, 5.5).fill(this.tint(accent, 0.1)).restore();
+      // building icon in the chip
+      doc.save().fillColor(accent);
+      doc.rect(rx + 4.5, 67.6, 4.4, 6).fill();
+      doc.fillColor(this.tint(accent, 0.1));
+      for (const [ox, oy] of [[5.4, 68.6], [7.2, 68.6], [5.4, 70.4], [7.2, 70.4]]) doc.rect(rx + ox, oy, 0.9, 0.9).fill();
+      doc.restore();
+      doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(6.4).text(dest, rx + 11.5, 68.2, { width: chipW - 14, lineBreak: false, ellipsis: true });
+      const qrSize = 64;
+      const qx = W - qrSize - 8, qy = H - 13 - qrSize - 6;
+      label('Valid until', 83);
+      const [vDate, vTime] = c.validUntilLabel.split(', ');
+      doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(7).text(vDate || c.validUntilLabel, rx, 89, { width: qx - rx - 4, lineBreak: false });
+      if (vTime) doc.fillColor(MUTED).font('Helvetica').fontSize(6).text(vTime, rx, 98, { width: qx - rx - 4, lineBreak: false });
+      const qr = await QRCode.toBuffer(c.qrPayload, { ...QR_RENDER_OPTIONS, type: 'png', margin: 2, color: { dark: '#0b1530', light: '#ffffff' } });
       doc.image(qr, qx, qy, { width: qrSize, height: qrSize });
-      doc.fillColor('#334155').font('Courier-Bold').fontSize(5.6).text(c.passphrase, qx - 4, qy + qrSize + 1.5, { width: qrSize + 8, align: 'center', lineBreak: false });
+      doc.fillColor(MUTED).font('Courier-Bold').fontSize(5.2).text(c.passphrase, rx, qy + qrSize - 6, { width: qx - rx - 4, lineBreak: false });
 
-      // Footer
-      doc.rect(0, H - 11, W, 11).fill('#f1f5f9');
-      doc.fillColor('#475569').font('Helvetica').fontSize(4.6).text('Return this pass at exit · Scan at every gate', 7, H - 7.6, { width: W / 2, lineBreak: false });
-      doc.fillColor('#94a3b8').font('Helvetica').fontSize(4.4).text("Powered by CISTECH's Vicit 1.0.1", W / 2, H - 7.6, { width: W / 2 - 7, align: 'right', lineBreak: false });
+      // Footer (kept from v22)
+      doc.rect(0, H - 11, W, 11).fill('#f3f5f9');
+      doc.rect(0, H - 11, W, 0.6).fill(this.tint(accent, 0.3));
+      doc.fillColor('#475569').font('Helvetica').fontSize(4.6).text('Return this pass at exit · Scan at every gate', 10, H - 7.4, { width: W / 2, lineBreak: false });
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(4.4).text("Powered by CISTECH's Vicit 1.0.1", W / 2, H - 7.4, { width: W / 2 - 10, align: 'right', lineBreak: false });
     }
     doc.end();
     return done;

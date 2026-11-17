@@ -120,6 +120,15 @@ export class InvitesController {
     return this.invitesService.confirmAvailability(id, user);
   }
 
+  @Post(':id/resend-emails')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.STAFF, Role.GATE, Role.SUPER_ADMIN, Role.GLOBAL_ADMIN, Role.GLOBAL_GATE)
+  @ApiOperation({ summary: 'Email the registration link again to every guest that has an email' })
+  resendEmails(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.invitesService.resendGuestEmails(id, user);
+  }
+
   @Post(':id/revive')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
