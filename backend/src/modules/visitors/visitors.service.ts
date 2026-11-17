@@ -37,7 +37,10 @@ export class VisitorsService {
     return dir;
   }
 
-  async uploadPhoto(token: string, visitorId: string, file: Express.Multer.File) {
+  /** v24 lock: the photo can only be (re)taken before the guest arrives or passes any checkpoint. */
+  static readonly PHOTO_LOCKED = 'Your photo can no longer be changed - please see the gate officer.';
+
+  private async loadForPhoto(token: string, visitorId: string) {
     const invite = await this.prisma.invite.findUnique({
       where: { token },
       include: {
@@ -46,33 +49,145 @@ export class VisitorsService {
         organisation: { select: { id: true, name: true, customDomain: true } },
       },
     });
-
     if (!invite) throw new NotFoundException('Invite not found');
-    if (
-      invite.status !== InviteStatus.ACTIVE &&
-      invite.status !== InviteStatus.USED
-    ) {
-      throw new BadRequestException('Invite is not active');
-    }
-    if (new Date() > invite.expiresAt && invite.status === InviteStatus.ACTIVE) {
-      throw new BadRequestException('Invite has expired');
-    }
-
     const visitor = invite.visitors.find((v) => v.id === visitorId);
     if (!visitor) throw new NotFoundException('Visitor not found on this invite');
+    const lock = await this.photoLockReason(invite, visitor);
+    if (lock) throw new BadRequestException(lock);
+    return { invite, visitor };
+  }
 
-    if (visitor.photoPath) {
-      throw new BadRequestException(
-        'Photo already captured for this visitor. Show your QR or passphrase at the gate.',
-      );
+  /**
+   * null when the guest may take / retake their photo, else the friendly lock message.
+   * Locked once arrived / checked in / passed any checkpoint, or the visit is cancelled,
+   * denied, exited or expired. First capture keeps the original link-expiry rule.
+   */
+  async photoLockReason(invite: any, visitor: any): Promise<string | null> {
+    const LOCKED = VisitorsService.PHOTO_LOCKED;
+    if (invite.cancelledAt || invite.status === InviteStatus.REVOKED) return LOCKED;
+    if (visitor.status !== VisitStatus.INVITED || visitor.enteredAt || visitor.exitedAt || visitor.deniedAt) return LOCKED;
+    const passed = await this.prisma.gateVisit.count({ where: { visitorId: visitor.id, decision: 'PASSED' } });
+    if (passed > 0) return LOCKED;
+    if (!visitor.photoPath) {
+      if (invite.status !== InviteStatus.ACTIVE && invite.status !== InviteStatus.USED) return 'Invite is not active';
+      if (new Date() > invite.expiresAt && invite.status === InviteStatus.ACTIVE) return 'Invite has expired';
+      return null;
     }
+    // Retake: allowed until the end of the visit day (the link TTL only governs first registration).
+    if (invite.status === InviteStatus.EXPIRED) return LOCKED;
+    const visitEnd = new Date((invite.expectedAt || invite.createdAt).getTime() + 24 * 3600 * 1000);
+    if (new Date() > new Date(Math.max(visitEnd.getTime(), invite.expiresAt.getTime()))) return LOCKED;
+    return null;
+  }
 
-    const ext = path.extname(file.originalname) || '.jpg';
-    const filename = `${visitorId}-${uuidv4()}${ext}`;
-    const filepath = path.join(this.getPhotoDir(), filename);
+  private static extFor(file: Express.Multer.File) {
+    const ext = (path.extname(file.originalname || '') || '').toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) return ext;
+    if (file.mimetype === 'image/png') return '.png';
+    if (file.mimetype === 'image/webp') return '.webp';
+    return '.jpg';
+  }
 
-    fs.writeFileSync(filepath, file.buffer);
+  /**
+   * Step 1 — stage a photo for review. Nothing changes on the visit and no QR is generated
+   * until the guest taps "Proceed to QR code" (confirmPhoto).
+   */
+  async stagePhoto(token: string, visitorId: string, file: Express.Multer.File) {
+    const { visitor } = await this.loadForPhoto(token, visitorId);
+    const dir = this.getPhotoDir();
+    for (const f of fs.readdirSync(dir)) {
+      if (f.startsWith(`pending-${visitorId}-`)) fs.rmSync(path.join(dir, f), { force: true });
+    }
+    const pendingId = `pending-${visitorId}-${uuidv4()}${VisitorsService.extFor(file)}`;
+    fs.writeFileSync(path.join(dir, pendingId), file.buffer);
+    return {
+      pendingId,
+      retake: Boolean(visitor.photoPath),
+      message: 'Review your photo, then tap "Proceed to QR code".',
+    };
+  }
 
+  /** Step 2 — the guest approved the preview: make it their photo and issue / re-send the QR. */
+  async confirmPhoto(token: string, visitorId: string, pendingId: string) {
+    const safe = path.basename(String(pendingId || ''));
+    const esc = visitorId.replace(/[^a-zA-Z0-9-]/g, '');
+    if (!new RegExp(`^pending-${esc}-[0-9a-f-]{36}\\.(jpg|jpeg|png|webp)$`, 'i').test(safe)) {
+      throw new BadRequestException('Photo preview not found. Please take your photo again.');
+    }
+    const dir = this.getPhotoDir();
+    const pendingPath = path.join(dir, safe);
+    if (!fs.existsSync(pendingPath)) throw new BadRequestException('Photo preview not found. Please take your photo again.');
+    const { invite, visitor } = await this.loadForPhoto(token, visitorId);
+    const filename = `${visitorId}-${uuidv4()}${path.extname(safe)}`;
+    fs.renameSync(pendingPath, path.join(dir, filename));
+    if (visitor.photoPath) return this.commitRetake(invite, visitor, filename);
+    return this.commitFirstPhoto(invite, visitor, filename);
+  }
+
+  /** Legacy single-step upload (older cached pages): same as capture + Proceed. */
+  async uploadPhoto(token: string, visitorId: string, file: Express.Multer.File) {
+    const staged = await this.stagePhoto(token, visitorId, file);
+    return this.confirmPhoto(token, visitorId, staged.pendingId);
+  }
+
+  /** Retake after a QR was issued: only the photo changes; the SAME QR is e-mailed again. */
+  private async commitRetake(invite: any, visitor: any, filename: string) {
+    const visitorId = visitor.id;
+    const updated = await this.prisma.visitor.update({
+      where: { id: visitorId },
+      data: { photoPath: filename, photoTakenAt: new Date(), photoRetakes: { increment: 1 } },
+    });
+    await this.audit.log({
+      action: 'PHOTO_RETAKEN',
+      entity: 'Visitor',
+      entityId: visitorId,
+      details: { inviteId: invite.id, fullName: visitor.fullName, previousPhoto: visitor.photoPath, retakes: updated.photoRetakes },
+    });
+    await this.notifications.create({
+      userId: invite.hostId,
+      title: 'Guest photo retaken',
+      body: `${visitor.fullName} retook their registration photo for "${invite.purpose}". Their QR code is unchanged.`,
+      meta: { visitorId, inviteId: invite.id, type: 'PHOTO_RETAKEN' },
+      channels: ['in_app'],
+    });
+    let qrPng: Buffer | null = null;
+    const stored = String(visitor.qrCodeData || '');
+    if (stored.startsWith('data:image/png;base64,')) qrPng = Buffer.from(stored.split(',')[1], 'base64');
+    if (!qrPng) {
+      const { png } = await this.getQrPng(invite.token, visitorId);
+      qrPng = png;
+    }
+    let emailed = false;
+    if (visitor.email) {
+      const frontend = publicFrontendBase(invite.organisation?.customDomain);
+      const apiPublic = (process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+      const r: any = await this.mail.sendVisitorQrEmail({
+        to: visitor.email,
+        guestName: visitor.fullName,
+        hostName: invite.host.fullName,
+        purpose: invite.purpose,
+        passphrase: invite.passphrase,
+        qrPng,
+        qrFileName: qrFileName(visitor.fullName, invite.expectedAt || new Date()),
+        qrImageUrl: apiPublic && !isLocalUrl(apiPublic) ? `${apiPublic}/visitors/qr/${invite.token}/${visitorId}.png` : undefined,
+        registrationLink: frontend ? `${frontend}/visitor/${invite.token}` : undefined,
+        orgName: invite.organisation?.name,
+        organisationId: invite.organisation?.id,
+      });
+      emailed = r?.ok !== false;
+    }
+    return {
+      visitor: updated,
+      passphrase: invite.passphrase,
+      qrCodeData: visitor.qrCodeData,
+      retake: true,
+      emailedTo: emailed ? visitor.email : null,
+      message: 'New photo saved. Your QR code is unchanged.',
+    };
+  }
+
+  private async commitFirstPhoto(invite: any, visitor: any, filename: string) {
+    const visitorId = visitor.id;
     const linked = await linkSameDayVisits(this.prisma, visitorId);
     const canonicalId = linked.visitorIds[0] || visitorId;
     const qrPayload = buildGateQrPayload(canonicalId, invite.passphrase, invite.token, linked.passToken);
@@ -96,6 +211,7 @@ export class VisitorsService {
         qrCodeData: qrDataUrl,
         status: VisitStatus.INVITED,
         passToken: linked.passToken,
+        photoTakenAt: new Date(),
       },
     });
     if (linked.visitorIds.length > 1) {
@@ -179,6 +295,8 @@ export class VisitorsService {
       passphrase: invite.passphrase,
       qrCodeData: qrDataUrl,
       message: 'Photo captured successfully. Show QR or passphrase at the gate.',
+      retake: false,
+      emailedTo: visitor.email || null,
     };
   }
 

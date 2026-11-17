@@ -90,6 +90,13 @@ const MAP: Record<string, Desc> = {
     group: 'gate',
     text: (a) => `${relName(a)} completed registration with a photo`,
   },
+  PHOTO_RETAKEN: {
+    label: 'Photo retaken',
+    icon: <Camera size={16} />,
+    tone: 'violet',
+    group: 'gate',
+    text: (a) => `${relName(a)} retook their registration photo (QR unchanged)`,
+  },
   INVITE_CREATED: {
     label: 'Invite created',
     icon: <FilePlus2 size={16} />,

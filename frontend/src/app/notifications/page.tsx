@@ -47,6 +47,7 @@ const TYPE: Record<string, { label: string; icon: ReactNode; tone: Tone }> = {
   EXIT: { label: 'Visitor exit', icon: <LogOut size={18} />, tone: 'brand' },
   ENTRY_DENIED: { label: 'Entry declined', icon: <Ban size={18} />, tone: 'rose' },
   PHOTO_CAPTURED: { label: 'Visitor registered', icon: <Camera size={18} />, tone: 'violet' },
+  PHOTO_RETAKEN: { label: 'Photo retaken', icon: <Camera size={18} />, tone: 'violet' },
   profile_edit: { label: 'Profile update', icon: <UserCog size={18} />, tone: 'amber' },
   INVITE_APPROVAL: { label: 'Approval needed', icon: <ClipboardCheck size={18} />, tone: 'amber' },
   INVITE_APPROVED: { label: 'Invite approved', icon: <CheckCircle2 size={18} />, tone: 'emerald' },

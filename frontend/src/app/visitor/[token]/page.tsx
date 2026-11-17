@@ -18,6 +18,9 @@ import {
   ShieldCheck,
   Download,
   Mail,
+  RotateCcw,
+  ArrowRight,
+  Lock,
 } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
 import StatusPill from '@/components/ui/StatusPill';
@@ -45,6 +48,10 @@ type Visitor = {
   exitedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  photoTakenAt?: string | null;
+  photoRetakes?: number;
+  /** v24: the guest can no longer change their photo from this link */
+  photoLocked?: boolean;
 };
 
 type Invite = {
@@ -181,6 +188,11 @@ export default function VisitorPage() {
   const [localQr, setLocalQr] = useState<Record<string, string>>({});
   const [localPass, setLocalPass] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState('');
+  /** v24: photo awaiting review — QR is only issued after "Proceed to QR code". */
+  const [preview, setPreview] = useState<{ url: string; pendingId: string; visitorId: string } | null>(null);
+  const [retakeFor, setRetakeFor] = useState<string | null>(null);
+  const [proceeding, setProceeding] = useState(false);
+  const [doneNote, setDoneNote] = useState<{ visitorId: string; text: string } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -196,7 +208,8 @@ export default function VisitorPage() {
       // Auto-select first visitor without photo, else first visitor
       const needPhoto = data.visitors?.find((v: Visitor) => !v.photoPath);
       const first = needPhoto || data.visitors?.[0];
-      if (first) setSelectedId(first.id);
+      // Keep the guest the user is working on (group invites) — only auto-pick on first load.
+      if (first) setSelectedId((prev) => (prev && data.visitors?.some((v: Visitor) => v.id === prev) ? prev : first.id));
       // Cache existing QR codes
       const qrs: Record<string, string> = {};
       for (const v of data.visitors || []) {
@@ -282,20 +295,50 @@ export default function VisitorPage() {
       if (!blob) throw new Error('Could not capture image');
 
       const file = new File([blob], 'passport.jpg', { type: 'image/jpeg' });
-      const result = await api.uploadPhoto(token, selectedId, file);
-
-      setLocalQr((prev) => ({
-        ...prev,
-        [selectedId]: result.qrCodeData,
-      }));
-      if (result.passphrase) setLocalPass(result.passphrase);
-
+      const staged = await api.stagePhoto(token, selectedId, file);
+      if (preview) URL.revokeObjectURL(preview.url);
+      setPreview({ url: URL.createObjectURL(blob), pendingId: staged.pendingId, visitorId: selectedId });
       stopCamera();
-      await load();
+      setTimeout(() => photoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
     } catch (err: any) {
       setCaptureError(err.message || 'Upload failed');
     } finally {
       setUploading(false);
+    }
+  }
+
+  function discardPreview() {
+    if (preview) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  }
+
+  async function retake() {
+    discardPreview();
+    await startCamera();
+  }
+
+  async function proceedToQr() {
+    if (!preview || !token) return;
+    setCaptureError('');
+    setProceeding(true);
+    try {
+      const result = await api.confirmPhoto(token, preview.visitorId, preview.pendingId);
+      if (result.qrCodeData) setLocalQr((prev) => ({ ...prev, [preview.visitorId]: result.qrCodeData }));
+      if (result.passphrase) setLocalPass(result.passphrase);
+      setDoneNote({
+        visitorId: preview.visitorId,
+        text: result.retake
+          ? `New photo saved. Your QR code is unchanged${result.emailedTo ? ` and was emailed again to ${result.emailedTo}` : ''}.`
+          : `Photo saved. Your QR code is ready${result.emailedTo ? ` and was emailed to ${result.emailedTo}` : ''}.`,
+      });
+      discardPreview();
+      setRetakeFor(null);
+      await load();
+    } catch (err: any) {
+      setCaptureError(err.message || 'Could not save your photo');
+      if (/no longer be changed/i.test(err.message || '')) { discardPreview(); setRetakeFor(null); await load(); }
+    } finally {
+      setProceeding(false);
     }
   }
 
@@ -329,8 +372,11 @@ export default function VisitorPage() {
   const passphrase = localPass || invite.passphrase;
   const isArrived = selected?.status === 'ARRIVED';
   const isExited = selected?.status === 'EXITED';
-  const photoTime = hasPhoto ? fmt(selected?.updatedAt || selected?.createdAt) : null;
+  const photoTime = hasPhoto ? fmt(selected?.photoTakenAt || selected?.updatedAt || selected?.createdAt) : null;
   const stateLabel = isExited ? 'EXITED' : isArrived ? 'ARRIVED' : hasPhoto ? 'USED' : 'PENDING';
+  const locked = Boolean(selected?.photoLocked);
+  const showCapture = Boolean(selected) && !isArrived && !isExited && !locked && (!hasPhoto || retakeFor === selected?.id);
+  const reviewing = preview && preview.visitorId === selected?.id ? preview : null;
   const stepsDone = [hasPhoto, hasPhoto && !!qr, hasPhoto, isArrived || isExited, isExited].filter(Boolean).length;
 
   return (
@@ -374,6 +420,8 @@ export default function VisitorPage() {
                   onClick={() => {
                     setSelectedId(v.id);
                     stopCamera();
+                    discardPreview();
+                    setRetakeFor(null);
                     setCaptureError('');
                   }}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition duration-200 hover:-translate-y-0.5 ${
@@ -416,22 +464,46 @@ export default function VisitorPage() {
           </div>
         )}
 
-        {/* Photo capture — only if not yet taken and not arrived/exited */}
-        {selected && !hasPhoto && !isArrived && !isExited && (
-          <div ref={photoCardRef} className="card animate-in p-4">
+        {/* Photo capture → review (Retake / Proceed). v24: also used to retake after the QR was issued. */}
+        {showCapture && selected && (
+          <div ref={photoCardRef} className="card animate-in p-4" data-testid="photo-capture-card">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-50 to-brand-100 text-brand-600">
                 <Camera size={16} />
               </span>
-              Passport-style photo
+              {reviewing ? 'Check your photo' : hasPhoto ? 'Retake your photo' : 'Passport-style photo'}
               <InfoTip text="Face the camera in good light. Empty frames are rejected automatically." />
             </h3>
+            {hasPhoto && !reviewing && (
+              <p className="-mt-1 mb-3 text-xs text-slate-500">Your QR code stays the same. After you proceed we&apos;ll email it to you again with your new photo on file.</p>
+            )}
 
-            {!capturing ? (
-              <button type="button" onClick={startCamera} className="btn-primary w-full !py-3.5">
-                <Camera size={20} />
-                Open camera
-              </button>
+            {reviewing ? (
+              <div className="space-y-3" data-testid="photo-review">
+                <div className="relative mx-auto aspect-square w-full max-w-[320px] overflow-hidden rounded-2xl bg-slate-100 shadow-lift ring-1 ring-slate-200">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={reviewing.url} alt="Your photo" className="h-full w-full object-cover" />
+                </div>
+                <p className="text-center text-xs text-slate-500">Is your face clear, centred and well lit?</p>
+                <div className="flex gap-2">
+                  <button type="button" onClick={retake} disabled={proceeding} className="btn-ghost flex-1 !py-3" data-testid="photo-retake-btn">
+                    <RotateCcw size={17} /> Retake
+                  </button>
+                  <button type="button" onClick={proceedToQr} disabled={proceeding} className="btn-success flex-[2] !py-3" data-testid="photo-proceed-btn">
+                    {proceeding ? <><Loader2 size={18} className="animate-spin" /> Saving…</> : <>Proceed to QR code <ArrowRight size={17} /></>}
+                  </button>
+                </div>
+              </div>
+            ) : !capturing ? (
+              <div className="flex gap-2">
+                {hasPhoto && (
+                  <button type="button" onClick={() => { setRetakeFor(null); setCaptureError(''); }} className="btn-ghost flex-1">Cancel</button>
+                )}
+                <button type="button" onClick={startCamera} className="btn-primary flex-[2] w-full !py-3.5">
+                  <Camera size={20} />
+                  Open camera
+                </button>
+              </div>
             ) : (
               <div className="space-y-3">
                 <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-950 shadow-lift">
@@ -441,12 +513,11 @@ export default function VisitorPage() {
                   </div>
                   <p className="absolute inset-x-0 bottom-3 text-center text-xs font-medium text-white/85">Centre your face in the oval</p>
                 </div>
-                <canvas ref={canvasRef} className="hidden" />
                 <div className="flex gap-2">
-                  <button type="button" onClick={stopCamera} className="btn-ghost flex-1">
+                  <button type="button" onClick={() => { stopCamera(); if (hasPhoto) setRetakeFor(null); }} className="btn-ghost flex-1">
                     Cancel
                   </button>
-                  <button type="button" onClick={takePhoto} disabled={uploading} className="btn-success flex-[2] !py-3">
+                  <button type="button" onClick={takePhoto} disabled={uploading} className="btn-success flex-[2] !py-3" data-testid="photo-capture-btn">
                     {uploading ? (
                       <>
                         <Loader2 size={18} className="animate-spin" /> Checking…
@@ -460,6 +531,7 @@ export default function VisitorPage() {
                 </div>
               </div>
             )}
+            <canvas ref={canvasRef} className="hidden" />
             {captureError && <div className="mt-3"><Notice tone="error">{captureError}</Notice></div>}
           </div>
         )}
@@ -484,6 +556,26 @@ export default function VisitorPage() {
               </div>
             </div>
             <div className="p-5">
+              {doneNote && doneNote.visitorId === selected?.id && (
+                <div className="mb-4" data-testid="photo-done-note"><Notice tone="success">{doneNote.text}</Notice></div>
+              )}
+              {locked ? (
+                <p className="mb-4 flex items-start gap-2 rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-medium text-slate-600" data-testid="photo-locked">
+                  <Lock size={14} className="mt-px shrink-0" /> Your photo can no longer be changed - please see the gate officer.
+                </p>
+              ) : !isArrived && !isExited && retakeFor !== selected?.id && (
+                <div className="mb-4 flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-100" data-testid="photo-retake-offer">
+                  <p className="min-w-0 flex-1 text-xs text-slate-600">Photo not right? Retake it — your QR code stays the same.</p>
+                  <button
+                    type="button"
+                    className="btn-ghost shrink-0 !px-3 !py-2 !text-xs"
+                    data-testid="photo-retake-start"
+                    onClick={() => { setDoneNote(null); setCaptureError(''); setRetakeFor(selected!.id); setTimeout(() => photoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60); }}
+                  >
+                    <RotateCcw size={14} /> Retake photo
+                  </button>
+                </div>
+              )}
               {qr && (
                 <div className="mb-4 flex flex-col items-center">
                   {/* Always black-on-white, never inverted by dark mode, crisp pixels, big

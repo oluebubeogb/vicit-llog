@@ -248,6 +248,9 @@ model Visitor {
   idNumber    String?
   /// Shared same-day pass so one QR covers every invite for this person
   passToken   String?
+  /// v24: when the current (latest) self-service photo was confirmed, and how many times it was retaken
+  photoTakenAt DateTime?
+  photoRetakes Int @default(0)
   /// Vehicle actually used at the gate
   vehiclePlate   String?
   vehicleDetails String?

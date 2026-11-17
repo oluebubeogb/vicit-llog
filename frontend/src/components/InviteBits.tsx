@@ -26,6 +26,7 @@ import {
   XCircle,
   CalendarPlus,
   Loader2,
+  Camera,
 } from 'lucide-react';
 import SleekOverlay from '@/components/ui/SleekOverlay';
 import { Notice } from '@/components/ui/Bits';
@@ -183,6 +184,7 @@ export function VisitorCard({ v }: { v: any }) {
   const [transfer, setTransfer] = useState(false);
   const steps = [
     { at: v.createdAt, label: 'Registered', icon: <UserRound size={12} />, tone: 'bg-brand-500' },
+    v.photoRetakes > 0 && v.photoTakenAt && { at: v.photoTakenAt, label: v.photoRetakes > 1 ? `Photo retaken (${v.photoRetakes}×)` : 'Photo retaken', icon: <Camera size={12} />, tone: 'bg-violet-500' },
     v.enteredAt && { at: v.enteredAt, label: 'Checked in', icon: <LogIn size={12} />, tone: 'bg-emerald-500' },
     v.exitedAt && { at: v.exitedAt, label: 'Checked out', icon: <LogOut size={12} />, tone: 'bg-slate-500' },
     v.deniedAt && { at: v.deniedAt, label: v.deniedReason ? `Declined — ${v.deniedReason}` : 'Declined', icon: <Ban size={12} />, tone: 'bg-rose-500' },

@@ -633,6 +633,22 @@ export class InvitesService {
       }
     }
 
+    // v24: can each guest still (re)take their photo from this link?
+    const passed = await this.prisma.gateVisit.findMany({
+      where: { visitorId: { in: (invite.visitors || []).map((v) => v.id) }, decision: 'PASSED' },
+      select: { visitorId: true },
+    });
+    const passedIds = new Set(passed.map((p) => p.visitorId));
+    const dayEnd = (invite.expectedAt || invite.createdAt).getTime() + 24 * 3600 * 1000;
+    for (const v of invite.visitors || []) {
+      const locked =
+        !!invite.cancelledAt ||
+        v.status !== 'INVITED' || !!v.enteredAt || !!v.exitedAt || !!v.deniedAt ||
+        passedIds.has(v.id) ||
+        (!!v.photoPath && (invite.status === InviteStatus.EXPIRED || Date.now() > Math.max(dayEnd, invite.expiresAt.getTime())));
+      (v as any).photoLocked = locked;
+    }
+
     return invite;
   }
 

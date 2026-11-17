@@ -6,6 +6,7 @@ import {
   UseInterceptors,
   UploadedFile,
   Res,
+  Body,
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -49,6 +50,40 @@ export class VisitorsController {
   ) {
     if (!file) throw new BadRequestException('Photo file is required');
     return this.visitorsService.uploadPhoto(token, visitorId, file);
+  }
+
+  @Post(':token/:visitorId/photo/preview')
+  @ApiOperation({ summary: 'v24: stage a photo for review — no QR until /photo/confirm' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { photo: { type: 'string', format: 'binary' } } } })
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(new BadRequestException('Only image files allowed'), false);
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  stagePhoto(
+    @Param('token') token: string,
+    @Param('visitorId') visitorId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Photo file is required');
+    return this.visitorsService.stagePhoto(token, visitorId, file);
+  }
+
+  @Post(':token/:visitorId/photo/confirm')
+  @ApiOperation({ summary: 'v24: "Proceed to QR code" — keep the reviewed photo, issue or re-send the QR' })
+  confirmPhoto(
+    @Param('token') token: string,
+    @Param('visitorId') visitorId: string,
+    @Body() body: { pendingId?: string },
+  ) {
+    return this.visitorsService.confirmPhoto(token, visitorId, String(body?.pendingId || ''));
   }
 
   @Get('qr/:token/:visitorId')

@@ -123,6 +123,14 @@ export const api = {
       body: form,
     });
   },
+  /** v24: stage a photo for review (no QR yet), then confirm with "Proceed to QR code". */
+  stagePhoto: async (token: string, visitorId: string, file: File) => {
+    const form = new FormData();
+    form.append('photo', file);
+    return request(`/visitors/${token}/${visitorId}/photo/preview`, { method: 'POST', body: form });
+  },
+  confirmPhoto: (token: string, visitorId: string, pendingId: string) =>
+    request(`/visitors/${token}/${visitorId}/photo/confirm`, { method: 'POST', body: JSON.stringify({ pendingId }) }),
   gateLookup: (code: string) =>
     request(`/gate/lookup?code=${encodeURIComponent(code)}`),
   gateVisits: (filter?: string, q?: string) => {
