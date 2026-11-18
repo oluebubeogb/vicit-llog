@@ -25,7 +25,7 @@ const BRANDING_SELECT = {
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const SIZE = /^\d+(\.\d+)?(px|%|vh|vw|em|rem)$/i;
-export const APP_VERSION = '1.0.1-v29';
+export const APP_VERSION = '1.0.1-v30';
 
 function normHex(v: unknown, field: string): string {
   const s = String(v || '').trim();

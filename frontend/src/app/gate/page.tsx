@@ -668,8 +668,8 @@ export default function GatePage() {
     <div className="page">
       <PageHeader
         icon={<ScanLine size={20} />}
-        title="Gate control"
-        subtitle="Camera opens automatically — or type a passphrase"
+        title={(() => { const g = activeGate || (checkpoints.length === 1 ? checkpoints[0] : null); return g?.name || (checkpoints.length > 1 ? `${checkpoints.length} gates assigned` : 'Gate control'); })()}
+        subtitle={(() => { const g = activeGate || (checkpoints.length === 1 ? checkpoints[0] : null); return g ? `Checkpoint ${(g.sequence ?? 0) + 1}` : 'Camera opens automatically — or type a passphrase'; })()}
         info="The rear camera opens as soon as this page loads. Hold a code in view to scan hands-free. If the camera is blocked, use Scan, Scan from photo, or type the passphrase."
       />
 
