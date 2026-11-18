@@ -50,7 +50,7 @@ export class LocationsService {
   async listLocations(orgId: string) {
     return this.prisma.location.findMany({
       where: { OR: [{ organisationId: orgId }, { isShared: true }] },
-      include: { organisation: { select: { id: true, name: true, code: true } }, gates: { include: { assignments: { include: { user: { select: { id: true, fullName: true, email: true, role: true } } } } }, orderBy: { sequence: 'asc' } } },
+      include: { organisation: { select: { id: true, name: true, code: true } }, gates: { include: { assignments: { include: { user: { select: { id: true, fullName: true, email: true, role: true, organisationId: true } } } } }, orderBy: { sequence: 'asc' } } },
       orderBy: { name: 'asc' },
     });
   }
@@ -59,7 +59,7 @@ export class LocationsService {
     try {
       return await this.prisma.location.create({
         data: { ...data, organisationId: orgId },
-        include: { gates: { include: { assignments: { include: { user: { select: { id: true, fullName: true, email: true, role: true } } } } }, orderBy: { sequence: 'asc' } } },
+        include: { gates: { include: { assignments: { include: { user: { select: { id: true, fullName: true, email: true, role: true, organisationId: true } } } } }, orderBy: { sequence: 'asc' } } },
       });
     } catch {
       throw new ConflictException('Location code already exists');
@@ -108,12 +108,16 @@ export class LocationsService {
       include: { location: { select: { organisationId: true } } },
     });
     if (!gate) throw new NotFoundException('Gate not found');
-    if (gate.location.organisationId !== orgId) throw new ForbiddenException('Shared location gates are managed by the owning agency');
     const assignment = await this.prisma.gateOfficerAssignment.findUnique({ where: { gateId_userId: { gateId, userId } } });
     if (!assignment) throw new NotFoundException('Officer is not assigned to this gate');
+    const officer = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true, role: true, organisationId: true } });
+    // The owning agency manages everyone on its gates. On another agency's shared site,
+    // an agency may only take its OWN gate officers off (matches the user edit screen).
+    const ownsSite = gate.location.organisationId === orgId;
+    const ownOfficer = officer?.role === 'GATE' && officer.organisationId === orgId;
+    if (!ownsSite && !ownOfficer) throw new ForbiddenException('On a shared site you can only remove your own agency’s gate officers');
     await this.prisma.gateOfficerAssignment.delete({ where: { id: assignment.id } });
-    const officer = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
-    await this.audit.log({ action: 'GATE_OFFICER_UNASSIGNED', entity: 'Gate', entityId: gateId, userId: actor?.id, details: { organisationId: orgId, officerId: userId, officerName: officer?.fullName, gateName: gate.name } });
+    await this.audit.log({ action: 'GATE_OFFICER_UNASSIGNED', entity: 'Gate', entityId: gateId, userId: actor?.id, details: { organisationId: orgId, officerId: userId, officerName: officer?.fullName, gateName: gate.name, sharedSite: !ownsSite } });
     return { ok: true };
   }
 
@@ -169,7 +173,7 @@ export class LocationsService {
   async listGates(orgId: string) {
     return this.prisma.gate.findMany({
       where: { location: { OR: [{ organisationId: orgId }, { isShared: true }] } },
-      include: { location: { select: { name: true, code: true, organisationId: true } }, assignments: { include: { user: { select: { id: true, fullName: true, email: true, role: true } } } } },
+      include: { location: { select: { name: true, code: true, organisationId: true } }, assignments: { include: { user: { select: { id: true, fullName: true, email: true, role: true, organisationId: true } } } } },
       orderBy: [{ locationId: 'asc' }, { sequence: 'asc' }],
     });
   }

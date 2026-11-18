@@ -10,13 +10,18 @@
  */
 
 export type ProfileTemplates = {
+  /** 2 = v29 token names ([portfolio] is the system field; [department] is free for a custom field). */
+  tokens?: number;
   dashboard: { title: string; subtitle: string; chips: string[] };
   hostCard: { title: string; subtitle: string };
   myProfile: { title: string; subtitle: string; badges: string[]; meta: string };
 };
 
 /** Defaults reproduce the pre-v25 layout exactly. */
+export const PROFILE_TOKENS_VERSION = 2;
+
 export const DEFAULT_PROFILE_TEMPLATES: ProfileTemplates = {
+  tokens: PROFILE_TOKENS_VERSION,
   dashboard: { title: '[fullname]', subtitle: '[agency] · [role]', chips: [] },
   hostCard: { title: '[fullname]', subtitle: '[agency]' },
   myProfile: { title: '[fullname]', subtitle: '[email]', badges: ['[role]'], meta: '[agency]' },
@@ -31,7 +36,7 @@ export const SYSTEM_PLACEHOLDERS: Array<{ token: string; label: string }> = [
   { token: 'role', label: 'Role' },
   { token: 'agency', label: 'Agency' },
   { token: 'agencycode', label: 'Agency code' },
-  { token: 'department', label: 'Department / portfolio' },
+  { token: 'portfolio', label: 'Portfolio' },
 ];
 
 /** "Rank" → "rank", "Service No." → "serviceno" (same rule as the backend). */
@@ -42,13 +47,23 @@ export function placeholderSlug(v: unknown): string {
 export function mergeTemplates(raw: any): ProfileTemplates {
   const D = DEFAULT_PROFILE_TEMPLATES;
   const r = raw && typeof raw === 'object' ? raw : {};
-  const str = (v: any, d: string) => (typeof v === 'string' ? v : d);
-  const arr = (v: any, d: string[]) => (Array.isArray(v) ? v.map(String) : d);
+  // Templates saved before v29 used [department] for the system portfolio field. Rename it once,
+  // so [department] can belong to a custom field from then on.
+  const legacy = Object.keys(r).length > 0 && r.tokens !== PROFILE_TOKENS_VERSION;
+  const up = (t: string) => (legacy ? migrateLegacyTokens(t) : t);
+  const str = (v: any, d: string) => (typeof v === 'string' ? up(v) : d);
+  const arr = (v: any, d: string[]) => (Array.isArray(v) ? v.map((x) => up(String(x))) : d);
   return {
+    tokens: PROFILE_TOKENS_VERSION,
     dashboard: { title: str(r.dashboard?.title, D.dashboard.title), subtitle: str(r.dashboard?.subtitle, D.dashboard.subtitle), chips: arr(r.dashboard?.chips, D.dashboard.chips) },
     hostCard: { title: str(r.hostCard?.title, D.hostCard.title), subtitle: str(r.hostCard?.subtitle, D.hostCard.subtitle) },
     myProfile: { title: str(r.myProfile?.title, D.myProfile.title), subtitle: str(r.myProfile?.subtitle, D.myProfile.subtitle), badges: arr(r.myProfile?.badges, D.myProfile.badges), meta: str(r.myProfile?.meta, D.myProfile.meta) },
   };
+}
+
+/** Pre-v29 templates: the system [department] placeholder (any spacing / case) becomes [portfolio]. */
+export function migrateLegacyTokens(t: string): string {
+  return String(t).replace(/\[([^\[\]]*)\]/g, (m, name) => (placeholderSlug(name) === 'department' ? '[portfolio]' : m));
 }
 
 function fieldText(v: any): string {
@@ -77,7 +92,7 @@ export function profileVars(u: any, opts: { roleText?: (role?: string | null) =>
     role: u.role ? (opts.roleText ? opts.roleText(u.role) : String(u.role)) : '',
     agency: String(u.organisation?.name || u.organisationName || u.orgName || '').trim(),
     agencycode: String(u.organisation?.code || u.organisationCode || u.orgCode || '').trim(),
-    department: String(u.portfolio || u.department || '').trim(),
+    portfolio: String(u.portfolio || '').trim(),
   };
   const list = Array.isArray(u.customFieldsList) ? u.customFieldsList : Array.isArray(u.customFields) ? u.customFields : null;
   if (list) {

@@ -32,18 +32,29 @@ export function CustomFieldInputs({
   fields,
   value,
   onChange,
+  enforceRequired = true,
 }: {
   fields: CustomFieldDef[];
   value: Record<string, any>;
   onChange: (v: Record<string, any>) => void;
+  /** Create forms block on empty required fields. Edit forms don't, so older accounts can still be saved. */
+  enforceRequired?: boolean;
 }) {
   const active = (fields || []).filter((f) => f.isActive !== false);
   if (!active.length) return null;
   const set = (k: string, v: any) => onChange({ ...(value || {}), [k]: v });
+  const isEmpty = (v: any) => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
+  const missing = enforceRequired ? [] : active.filter((f) => f.required && isEmpty(value?.[f.key]) && !(f.type === 'checkbox' && !f.options.length && value?.[f.key] === false));
   return (
     <div className="space-y-3 rounded-2xl border border-brand-100 bg-brand-50/30 p-3" data-testid="custom-field-inputs">
+      {missing.length > 0 && (
+        <p className="rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] font-medium text-amber-800" data-testid="custom-field-missing">
+          Not filled yet: {missing.map((f) => f.label).join(', ')}
+        </p>
+      )}
       {active.map((f) => {
         const v = value?.[f.key];
+        const req = f.required && enforceRequired;
         const label = (
           <span className="label !mb-1">
             {f.label}
@@ -54,14 +65,14 @@ export function CustomFieldInputs({
           return (
             <label key={f.key} className="block">
               {label}
-              <textarea rows={2} className="input text-sm" value={v || ''} required={f.required} onChange={(e) => set(f.key, e.target.value)} />
+              <textarea rows={2} className="input text-sm" value={v || ''} required={req} onChange={(e) => set(f.key, e.target.value)} />
             </label>
           );
         if (f.type === 'dropdown')
           return (
             <label key={f.key} className="block">
               {label}
-              <select className="input text-sm" value={v || ''} required={f.required} onChange={(e) => set(f.key, e.target.value)}>
+              <select className="input text-sm" value={v || ''} required={req} onChange={(e) => set(f.key, e.target.value)}>
                 <option value="">Select {f.label.toLowerCase()}…</option>
                 {f.options.map((o) => (
                   <option key={o} value={o}>{o}</option>
@@ -109,7 +120,7 @@ export function CustomFieldInputs({
         return (
           <label key={f.key} className="block">
             {label}
-            <input type={f.type === 'date' ? 'date' : 'text'} className="input text-sm" value={v || ''} required={f.required} onChange={(e) => set(f.key, e.target.value)} />
+            <input type={f.type === 'date' ? 'date' : 'text'} className="input text-sm" value={v || ''} required={req} onChange={(e) => set(f.key, e.target.value)} />
           </label>
         );
       })}
@@ -118,13 +129,36 @@ export function CustomFieldInputs({
 }
 
 /** Loads an agency's active fields (super admin: by agency id; agency admin: own agency). */
+export const CUSTOM_FIELDS_CHANGED = 'vicit:custom-fields-changed';
+/** Tell every open form on this tab that an agency's fields changed. */
+export function announceCustomFieldsChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(CUSTOM_FIELDS_CHANGED));
+}
+
+/**
+ * Loads an agency's active fields (super admin: by agency id; agency admin / self: own agency).
+ * Re-loads when fields change on this tab and whenever the window regains focus, so newly
+ * added fields appear in open create / edit forms without a code change or a reload.
+ */
 export function useCustomFields(agencyId?: string | null, own?: boolean) {
   const [fields, setFields] = useState<CustomFieldDef[]>([]);
   useEffect(() => {
     let off = false;
-    const p = own ? api.myCustomFields() : agencyId ? api.agencyCustomFields(agencyId) : Promise.resolve([]);
-    p.then((rows: any[]) => !off && setFields((rows || []).filter((r: any) => r.isActive !== false))).catch(() => !off && setFields([]));
-    return () => { off = true; };
+    const load = () => {
+      const p = own ? api.myCustomFields() : agencyId ? api.agencyCustomFields(agencyId) : Promise.resolve([]);
+      p.then((rows: any[]) => !off && setFields((rows || []).filter((r: any) => r.isActive !== false))).catch(() => !off && setFields([]));
+    };
+    load();
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    window.addEventListener(CUSTOM_FIELDS_CHANGED, load);
+    window.addEventListener('focus', load);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      off = true;
+      window.removeEventListener(CUSTOM_FIELDS_CHANGED, load);
+      window.removeEventListener('focus', load);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [agencyId, own]);
   return fields;
 }
@@ -139,6 +173,7 @@ export function CustomFieldsManager({ agencyId, agencyName }: { agencyId: string
 
   async function load() {
     try { setRows(await api.agencyCustomFields(agencyId)); } catch (e: any) { setErr(e.message); setRows([]); }
+    announceCustomFieldsChanged();
   }
   useEffect(() => { setRows(null); load(); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agencyId]);

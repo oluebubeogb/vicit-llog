@@ -124,7 +124,7 @@ function fitName(name: string, max: number) {
 /**
  * On-screen CR80 card — the same v23 layout as the printed PDF, drawn in PDF points
  * (242.65 × 153.07) so preview and print line up: agency logo + name, large “Visitor”, rule,
- * photo / name / department, divider, Host · Destination chip · Valid until, registration QR.
+ * photo / name / portfolio, divider, Host · Destination chip · Valid until, registration QR.
  */
 export function PassCardPreview({ card }: { card: any }) {
   const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -332,7 +332,8 @@ export function GatePassPanel({ guest, protocol, gate, gateNumber, isFirstGate, 
   const passOut = open.find((i) => i.kind === 'PASS');
   // Option 2 prints at Gate 1 only. A super gate officer whose screen has moved on to Gate 2 after the
   // Main Gate check-in can still print it, as long as no pass is out yet (never a second card).
-  const passedMain = !!passGateId && (guest.gateVisits || []).some((e: any) => e.gateId === passGateId && e.decision === 'PASSED' && e.direction !== 'EXIT');
+  const mainId = guest.passGateId ?? passGateId;
+  const passedMain = !!mainId && (guest.gateVisits || []).some((e: any) => e.gateId === mainId && e.decision === 'PASSED' && e.direction !== 'EXIT');
   const canPrintHere = isFirstGate || (!passOut && passedMain && guest.status !== 'ARRIVED');
   if (protocol === 'NONE' && !open.length) return null;
   if (!gate) return null;

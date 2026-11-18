@@ -17,6 +17,7 @@ import { Notice } from '@/components/ui/Bits';
 import InstallBanner from '@/components/InstallBanner';
 import StaffQrPanel from '@/components/StaffQrPanel';
 import { roleLabel } from '@/lib/roleLabels';
+import { CustomFieldInputs, useCustomFields } from '@/components/CustomFields';
 import { platformHome } from '@/lib/navLinks';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -32,6 +33,10 @@ export default function ProfilePage() {
   const myBadges = user ? renderList(myTpl.badges, myVars) : [];
   const myMeta = user ? renderTemplate(myTpl.meta, myVars) : '';
   const [form, setForm] = useState({ fullName: '', phone: '', portfolio: '', email: '' });
+  // Agency fields (system ones above + every active custom field, new ones included).
+  const myFields = useCustomFields(null, true);
+  const [custom, setCustom] = useState<Record<string, any>>({});
+  const [customDirty, setCustomDirty] = useState(false);
   const [msg, setMsg] = useState('');
   const [pending, setPending] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -67,6 +72,7 @@ export default function ProfilePage() {
           portfolio: me.portfolio || '',
           email: me.email || '',
         });
+        setCustom(me.customFields && typeof me.customFields === 'object' ? me.customFields : {});
       })
       .catch(() => {});
   }, [router]);
@@ -207,7 +213,9 @@ export default function ProfilePage() {
         phone: form.phone.trim() || null,
         portfolio: form.portfolio.trim() || null,
         email: form.email.trim().toLowerCase(),
+        ...(customDirty ? { customFields: custom } : {}),
       });
+      setCustomDirty(false);
       if (res?.applied) {
         // Admins / Super Admins are the approvers: their edits apply straight away.
         setPending(false);
@@ -215,6 +223,7 @@ export default function ProfilePage() {
         setUser(next);
         setLocal((cur: any) => ({ ...cur, ...res.after }));
         setMsg('Your details were updated.');
+        api.me().then((me) => { setLocal((cur: any) => ({ ...cur, ...me })); setUser({ ...getUser(), ...me }); }).catch(() => {});
       } else {
         setPending(true);
         setMsg('Changes submitted — pending admin approval.');
@@ -291,10 +300,14 @@ export default function ProfilePage() {
           </label>
           <label className="block">
             <span className="label">Portfolio</span>
-            <input value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} placeholder="Department" className="input" />
+            <input value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} placeholder="Portfolio" className="input" />
           </label>
         </div>
-        {Array.isArray(user?.customFieldsList) && user.customFieldsList.length > 0 && (
+        {myFields.length > 0 ? (
+          <div data-testid="profile-custom-fields">
+            <CustomFieldInputs fields={myFields} value={custom} onChange={(v) => { setCustom(v); setCustomDirty(true); }} enforceRequired={false} />
+          </div>
+        ) : Array.isArray(user?.customFieldsList) && user.customFieldsList.length > 0 && (
           <div className="tile-muted space-y-1.5" data-testid="profile-custom-fields">
             {user.customFieldsList.map((f: any) => (
               <p key={f.key} className="flex items-baseline justify-between gap-3 text-sm">

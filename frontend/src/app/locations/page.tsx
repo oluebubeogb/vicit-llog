@@ -187,9 +187,9 @@ function LocationsInner() {
                       >
                         <Pencil size={14} />
                       </button>
-                      <select aria-label={`Assign officer to ${g.name}`} disabled={locked} className="input !w-full !py-1.5 text-xs sm:!w-auto" value="" onChange={async (e) => { const userId = e.target.value; if (!userId) return; try { await api.assignGateOfficer(g.id, userId); await load(true); } catch (err: any) { window.alert(err.message || 'Could not assign that officer'); } }}>
+                      <select aria-label={`Assign officer to ${g.name}`} title={locked ? 'Shared site: you can assign your own gate officers' : undefined} className="input !w-full !py-1.5 text-xs sm:!w-auto" value="" onChange={async (e) => { const userId = e.target.value; if (!userId) return; try { await api.assignGateOfficer(g.id, userId); await load(true); } catch (err: any) { window.alert(err.message || 'Could not assign that officer'); } }}>
                         <option value="">Assign gate officer…</option>
-                        {officers.filter((o: any) => !(g.assignments || []).some((a: any) => a.user?.id === o.id)).map((o: any) => <option key={o.id} value={o.id}>{o.fullName}{o.role === 'GLOBAL_GATE' ? ' (Super gate)' : ''}</option>)}
+                        {officers.filter((o: any) => !(g.assignments || []).some((a: any) => a.user?.id === o.id) && (!locked || o.role === 'GATE')).map((o: any) => <option key={o.id} value={o.id}>{o.fullName}{o.role === 'GLOBAL_GATE' ? ' (Super gate)' : ''}</option>)}
                       </select>
                       <div className="w-full space-y-1.5 pl-6">
                         <p className="text-[11px] font-semibold tracking-wide text-slate-600">Gate Officers currently assigned</p>
@@ -202,10 +202,10 @@ function LocationsInner() {
                                 <span className="min-w-0 flex-1 font-medium">{a.user?.fullName || 'Unknown officer'}{a.user?.role === 'GLOBAL_GATE' ? <span className="ml-1.5 text-[11px] font-normal text-slate-400">Super gate</span> : null}</span>
                                 <button
                                   type="button"
-                                  title={`Remove ${a.user?.fullName || 'officer'} from ${g.name}`}
+                                  title={locked && !(a.user?.role === 'GATE' && a.user?.organisationId === orgId) ? 'Another agency’s officer — managed by the owning agency' : `Remove ${a.user?.fullName || 'officer'} from ${g.name}`}
                                   aria-label={`Remove ${a.user?.fullName || 'officer'} from ${g.name}`}
                                   data-testid="remove-officer"
-                                  disabled={!a.user?.id || locked}
+                                  disabled={!a.user?.id || (locked && !(a.user?.role === 'GATE' && a.user?.organisationId === orgId))}
                                   onClick={() => { if (a.user?.id) setRemoveOfficer({ gateId: g.id, gateName: g.name, userId: a.user.id, fullName: a.user.fullName }); }}
                                   className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
                                 >

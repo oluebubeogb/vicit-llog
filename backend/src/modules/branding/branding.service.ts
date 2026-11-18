@@ -25,7 +25,7 @@ const BRANDING_SELECT = {
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const SIZE = /^\d+(\.\d+)?(px|%|vh|vw|em|rem)$/i;
-export const APP_VERSION = '1.0.1-v27';
+export const APP_VERSION = '1.0.1-v29';
 
 function normHex(v: unknown, field: string): string {
   const s = String(v || '').trim();
@@ -52,6 +52,13 @@ export function placeholderSlug(v: any) {
 }
 
 /** v25 profile header templates — defaults reproduce the pre-v25 layout exactly. */
+export const PROFILE_TOKENS_VERSION = 2;
+
+/** Pre-v29 templates used [department] for the system portfolio field; it is now [portfolio]. */
+export function migrateLegacyTokens(t: string) {
+  return String(t).replace(/\[([^\[\]]*)\]/g, (m, name) => (placeholderSlug(name) === 'department' ? '[portfolio]' : m));
+}
+
 export const DEFAULT_PROFILE_TEMPLATES = {
   dashboard: { title: '[fullname]', subtitle: '[agency] · [role]', chips: [] as string[] },
   hostCard: { title: '[fullname]', subtitle: '[agency]' },
@@ -60,20 +67,25 @@ export const DEFAULT_PROFILE_TEMPLATES = {
 
 export function normaliseProfileTemplates(raw: any, strict = false) {
   const D = DEFAULT_PROFILE_TEMPLATES;
+  const r = raw && typeof raw === 'object' ? raw : {};
+  // Stored before v29 (no token version): rename the system [department] to [portfolio] on read.
+  // Saves (strict) come from the v29 builder, where [department] means a custom field.
+  const legacy = !strict && Object.keys(r).length > 0 && r.tokens !== PROFILE_TOKENS_VERSION;
+  const up = (t: string) => (legacy ? migrateLegacyTokens(t) : t);
   const line = (v: any, fallback: string, label: string) => {
     if (v === undefined || v === null) return fallback;
-    const t = String(v).replace(/\s+/g, ' ').trim();
+    const t = up(String(v).replace(/\s+/g, ' ').trim());
     if (strict && t.length > 160) throw new BadRequestException(`${label} must be 160 characters or fewer`);
     return t.slice(0, 160);
   };
   const list = (v: any, fallback: string[], label: string) => {
     if (!Array.isArray(v)) return fallback;
-    const items = v.map((x) => String(x || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const items = v.map((x) => up(String(x || '').replace(/\s+/g, ' ').trim())).filter(Boolean);
     if (strict && items.length > 6) throw new BadRequestException(`${label}: up to 6 items`);
     return items.slice(0, 6).map((x) => x.slice(0, 80));
   };
-  const r = raw && typeof raw === 'object' ? raw : {};
   return {
+    tokens: PROFILE_TOKENS_VERSION,
     dashboard: {
       title: line(r.dashboard?.title, D.dashboard.title, 'Dashboard title'),
       subtitle: line(r.dashboard?.subtitle, D.dashboard.subtitle, 'Dashboard subtitle'),

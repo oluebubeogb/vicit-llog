@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, RotateCcw, X, Sparkles, Phone, Briefcase } from 'lucide-react';
 import { api } from '@/lib/api';
+import { CUSTOM_FIELDS_CHANGED } from '@/components/CustomFields';
 import { roleLabel } from '@/lib/roleLabels';
 import { titleCase } from '@/lib/format';
 import Avatar from '@/components/ui/Avatar';
@@ -36,18 +37,36 @@ export default function ProfileHeaderBuilder({ value, onChange }: { value: Profi
   const [focus, setFocus] = useState<{ key: FieldKey; pos: number } | null>(null);
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 
+  // Placeholder chips come from every active custom field across agencies. Re-load on focus and
+  // when fields change on this tab, so a newly added field shows up as a chip without a reload.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
+    window.addEventListener(CUSTOM_FIELDS_CHANGED, bump);
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener(CUSTOM_FIELDS_CHANGED, bump);
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
   useEffect(() => {
     api.profileBuilder().then((d: any) => {
       setCustom(d.custom || []);
       setSamples(d.samples || []);
-      const first = (d.samples || []).find((s: any) => s.role !== 'SUPER_ADMIN') || d.samples?.[0];
-      if (first) setSampleId(first.id);
+      setSampleId((cur) => {
+        if (cur && (d.samples || []).some((s: any) => s.id === cur)) return cur;
+        const first = (d.samples || []).find((s: any) => s.role !== 'SUPER_ADMIN') || d.samples?.[0];
+        return first ? first.id : '';
+      });
     }).catch(() => {});
-  }, []);
+  }, [tick]);
   useEffect(() => {
     if (!sampleId) return;
     api.profileBuilderSample(sampleId).then(setSample).catch(() => setSample(null));
-  }, [sampleId]);
+  }, [sampleId, tick]);
 
   const s = tpl[surface] as any;
   const listKey = surface === 'dashboard' ? 'chips' : surface === 'myProfile' ? 'badges' : null;

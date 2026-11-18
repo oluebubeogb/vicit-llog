@@ -442,7 +442,7 @@ export class AttendanceRegisterService {
     const data = await this.register(orgId, { ...q, page: 1, pageSize: EXPORT_CAP });
     if ((q.view || '') === 'sheet' && data.sheet) {
       const days = data.sheet.days as Array<{ key: string; label: string }>;
-      const header = ['S/N', 'Name', 'Department', 'Type', 'Agency', ...days.flatMap((d) => [`${d.label} In`, `${d.label} Out`])];
+      const header = ['S/N', 'Name', 'Portfolio', 'Type', 'Agency', ...days.flatMap((d) => [`${d.label} In`, `${d.label} Out`])];
       const lines = [header.map(csvEscape).join(',')];
       for (const r of data.sheet.rows) {
         lines.push(
@@ -462,7 +462,7 @@ export class AttendanceRegisterService {
       res.send('\ufeff' + lines.join('\r\n'));
       return;
     }
-    const header = ['S/N', 'Date', 'Name', 'Department', 'Type', 'Email', 'Agency', 'Role', 'Status', 'Time In', 'Time Out', 'Duration (min)', 'Late', 'Gate'];
+    const header = ['S/N', 'Date', 'Name', 'Portfolio', 'Type', 'Email', 'Agency', 'Role', 'Status', 'Time In', 'Time Out', 'Duration (min)', 'Late', 'Gate'];
     const lines = [header.map(csvEscape).join(',')];
     let sn = 0;
     for (const r of data.rows.slice(0, EXPORT_CAP)) {

@@ -394,7 +394,7 @@ export default function AttendanceRegisterPage() {
           <option value="absent">Absent</option>
           <option value="no_exit">No exit</option>
         </select>
-        <input className="input !w-36 !py-2 text-sm" placeholder="Department" value={department} onChange={(e) => { setDepartment(e.target.value); setPage(1); }} aria-label="Department" />
+        <input className="input !w-36 !py-2 text-sm" placeholder="Portfolio" value={department} onChange={(e) => { setDepartment(e.target.value); setPage(1); }} aria-label="Portfolio" />
         <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
           <span className="shrink-0">In from</span>
           <input type="time" className="input !w-auto !py-1.5" value={timeFrom} onChange={(e) => { setTimeFrom(e.target.value); setPage(1); }} />
@@ -429,7 +429,7 @@ export default function AttendanceRegisterPage() {
                 <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
                   <SortTh label="S/N" k="sn" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-2 py-2 md:sticky md:left-0 md:z-10 md:bg-slate-50 sm:px-3" />
                   <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-2 py-2 md:sticky md:left-10 md:z-10 md:bg-slate-50 sm:px-3" />
-                  <SortTh label="Department" k="department" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
+                  <SortTh label="Portfolio" k="department" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
                   {(data?.sheet?.days || []).map((d: any) => (
                     <th key={d.key} colSpan={2} className="border-l border-slate-200 px-3 py-2 text-center font-semibold text-slate-700">{d.label}</th>
                   ))}
@@ -470,7 +470,7 @@ export default function AttendanceRegisterPage() {
                 <tr className="border-b border-slate-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <SortTh label="S/N" k="sn" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
                   <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
-                  <SortTh label="Department" k="department" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
+                  <SortTh label="Portfolio" k="department" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
                   <SortTh label="Time in" k="in" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
                   <SortTh label="Time out" k="out" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-3 py-2" />
                 </tr>

@@ -102,12 +102,58 @@ export class GatePassService {
     }
   }
 
-  /** Gate 1 of a guest's route (lowest sequence on their location, or on their agency). */
-  async firstGateFor(visitor: { invite: { organisationId: string; locationId?: string | null } }) {
-    const where: any = { isActive: true };
-    if (visitor.invite.locationId) where.locationId = visitor.invite.locationId;
-    else where.location = { organisationId: visitor.invite.organisationId };
-    return this.prisma.gate.findFirst({ where, orderBy: [{ sequence: 'asc' }, { createdAt: 'asc' }], include: { location: true, assignments: { select: { userId: true } } } });
+  /**
+   * Gate 1 of a guest's route.
+   * 1. The invite names a site → the first gate of that site.
+   * 2. No site on the invite (agencies with several sites): follow the guest's own route —
+   *    the site of their first recorded checkpoint, else the site of a pass already issued,
+   *    else the site the officer works at (hint gate, or the officer's own assigned gate 1).
+   * 3. Nothing known yet → the agency's oldest site, then its lowest sequence.
+   */
+  async firstGateFor(
+    visitor: { id?: string; invite: { organisationId: string; locationId?: string | null } },
+    hint?: { gateId?: string | null; actor?: any },
+  ) {
+    const include = { location: true, assignments: { select: { userId: true } } };
+    const order: any = [{ sequence: 'asc' }, { createdAt: 'asc' }];
+    const firstOf = (locationId: string) => this.prisma.gate.findFirst({ where: { isActive: true, locationId }, orderBy: order, include });
+    const orgId = visitor.invite.organisationId;
+    if (visitor.invite.locationId) return firstOf(visitor.invite.locationId);
+
+    const siteCount = await this.prisma.location.count({ where: { organisationId: orgId, gates: { some: { isActive: true } } } });
+    if (siteCount > 1) {
+      if (visitor.id) {
+        const gv = await this.prisma.gateVisit.findFirst({
+          where: { visitorId: visitor.id, gate: { location: { organisationId: orgId } } },
+          orderBy: { occurredAt: 'asc' },
+          select: { gate: { select: { locationId: true } } },
+        });
+        if (gv) return firstOf(gv.gate.locationId);
+        const item = await this.prisma.gatePassItem.findFirst({
+          where: { visitorId: visitor.id, gate: { location: { organisationId: orgId } } },
+          orderBy: { issuedAt: 'asc' },
+          select: { gate: { select: { locationId: true } } },
+        });
+        if (item) return firstOf(item.gate.locationId);
+      }
+      if (hint?.gateId) {
+        const g = await this.prisma.gate.findFirst({ where: { id: hint.gateId, location: { organisationId: orgId } }, select: { locationId: true } });
+        if (g) return firstOf(g.locationId);
+      }
+      if (hint?.actor?.role === 'GATE' && hint.actor.id) {
+        const mine = await this.prisma.gate.findMany({
+          where: { isActive: true, location: { organisationId: orgId }, assignments: { some: { userId: hint.actor.id } } },
+          select: { locationId: true },
+        });
+        const sites = Array.from(new Set(mine.map((g) => g.locationId)));
+        if (sites.length === 1) return firstOf(sites[0]);
+      }
+    }
+    return this.prisma.gate.findFirst({
+      where: { isActive: true, location: { organisationId: orgId } },
+      orderBy: [{ location: { createdAt: 'asc' } }, ...order],
+      include,
+    });
   }
 
   /** Printed pass: a place (the chip on the card), not the host — the host has its own line. */
@@ -162,7 +208,7 @@ export class GatePassService {
     const kind = protocol === 'PLAIN_TAGS' ? 'TAG' : 'PASS';
     const visitor = await this.loadVisitor(String(body.visitorId || ''));
     let gate: any = body.gateId ? await this.loadGate(String(body.gateId)) : null;
-    if (kind === 'PASS' && !gate) gate = await this.firstGateFor(visitor);
+    if (kind === 'PASS' && !gate) gate = await this.firstGateFor(visitor, { actor });
     if (!gate) throw new BadRequestException('Choose the checkpoint first');
     this.assertOperator(actor, visitor, gate);
     this.assertOpenVisit(visitor);
@@ -313,7 +359,7 @@ export class GatePassService {
     const out: any[] = [];
     for (const id of ids) {
       const visitor = await this.loadVisitor(id);
-      const gate = await this.firstGateFor(visitor);
+      const gate = await this.firstGateFor(visitor, { actor });
       this.assertOperator(actor, visitor, null);
       const item = gate ? await this.prisma.gatePassItem.findFirst({ where: { visitorId: id, gateId: gate.id, kind: 'PASS' }, orderBy: { issuedAt: 'desc' } }) : null;
       const card = await this.cardFor(visitor, item, gate?.location?.name);
@@ -333,7 +379,7 @@ export class GatePassService {
     const cards: PassCard[] = [];
     for (const id of ids) {
       const visitor = await this.loadVisitor(id);
-      const gate = await this.firstGateFor(visitor);
+      const gate = await this.firstGateFor(visitor, { actor });
       if (!gate) throw new BadRequestException(`${visitor.fullName} has no Gate 1 on their route`);
       this.assertOperator(actor, visitor, gate);
       this.assertOpenVisit(visitor);
@@ -358,7 +404,7 @@ export class GatePassService {
 
   /**
    * v23 CR80 layout (85.6 × 54 mm, landscape): agency logo + name left and a large “Visitor” right,
-   * thin rule; photo, name and department on the left; a thin divider; Host / Destination chip /
+   * thin rule; photo, name and portfolio on the left; a thin divider; Host / Destination chip /
    * Valid until on the right with the registration QR bottom-right; v22 footer kept.
    * The agency colour is used sparingly: corner swooshes, the rule, divider and chip tint.
    */
@@ -393,7 +439,7 @@ export class GatePassService {
       doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(19).text('Visitor', W - 86, 8.5, { width: 76, align: 'right', lineBreak: false });
       doc.save().lineWidth(0.6).strokeColor(this.tint(accent, 0.45)).moveTo(10, 34).lineTo(W - 10, 34).stroke().restore();
 
-      // Left column: photo, name, department
+      // Left column: photo, name, portfolio
       const px = 10, py = 40, pw = 44, ph = 52;
       doc.save().roundedRect(px, py, pw, ph, 5).clip();
       let photoDone = false;

@@ -587,7 +587,7 @@ export default function AdminPage() {
                   <GateAssignmentPicker gates={gateOptions} loading={gatesLoading} value={form.gateIds} onChange={(gateIds) => setForm({ ...form, gateIds })} />
                 </div>
               )}
-              <input placeholder="Portfolio / department" value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} className="input" />
+              <input placeholder="Portfolio" value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} className="input" />
               <CustomFieldInputs fields={customFields} value={formCustom} onChange={setFormCustom} />
               <button type="submit" className="btn-primary w-full">
                 Create user
@@ -807,10 +807,10 @@ export default function AdminPage() {
               </label>
               <label className="block">
                 <span className="label">Portfolio</span>
-                <input value={selected.portfolio || ''} onChange={(e) => setSelected({ ...selected, portfolio: e.target.value })} className="input" placeholder="Department" />
+                <input value={selected.portfolio || ''} onChange={(e) => setSelected({ ...selected, portfolio: e.target.value })} className="input" placeholder="Portfolio" />
               </label>
             </div>
-            <CustomFieldInputs fields={customFields} value={selected.customFields || {}} onChange={(v) => setSelected({ ...selected, customFields: v })} />
+            <CustomFieldInputs fields={customFields} value={selected.customFields || {}} onChange={(v) => setSelected({ ...selected, customFields: v })} enforceRequired={false} />
             <div>
               <span className="label">
                 Role

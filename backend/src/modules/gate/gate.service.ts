@@ -144,6 +144,7 @@ export class GateService {
       inviteId: v.inviteId,
     });
 
+    const presentedVisitors = await this.withPassItems(this.lookupVisitors(invite, linked, !seedVisitorId && !scannedVisitorId).map(presentVisitor), invite, actor);
     return {
       kind: 'visitor',
       inviteId: invite.id,
@@ -167,19 +168,21 @@ export class GateService {
       gates: await this.routeGates(invite, actor),
       passToken: linked.passToken,
       appointments,
-      visitors: await this.withPassItems(this.lookupVisitors(invite, linked, !seedVisitorId && !scannedVisitorId).map(presentVisitor)),
+      visitors: presentedVisitors,
       gatePassProtocol: await this.passes.protocol(),
-      passGateId: (await this.passes.firstGateFor({ invite }))?.id || null,
+      // Gate 1 per guest (multi-site agencies follow each guest's own route); the top-level id is kept for older screens.
+      passGateId: presentedVisitors.find((v: any) => v.id === scannedVisitorId)?.passGateId ?? presentedVisitors[0]?.passGateId ?? (await this.passes.firstGateFor({ invite }, { actor }))?.id ?? null,
     };
   }
 
   /** v22: every tag / printed pass issued to these guests (open and closed), for the guest card + history. */
-  private async withPassItems(list: any[]) {
+  private async withPassItems(list: any[], invite?: { organisationId: string; locationId?: string | null }, actor?: any) {
     const map = await this.passes.itemsForVisitors(list.map((v) => v.id));
-    return list.map((v) => {
+    return Promise.all(list.map(async (v) => {
       const passItems = map.get(v.id) || [];
-      return { ...v, passItems, openPassItems: passItems.filter((i: any) => i.status === 'ISSUED').length };
-    });
+      const passGateId = invite ? (await this.passes.firstGateFor({ id: v.id, invite }, { actor }))?.id || null : undefined;
+      return { ...v, passItems, openPassItems: passItems.filter((i: any) => i.status === 'ISSUED').length, ...(invite ? { passGateId } : {}) };
+    }));
   }
 
   /** Which of these visitor ids the actor may see (org scope, global roles see all). */
