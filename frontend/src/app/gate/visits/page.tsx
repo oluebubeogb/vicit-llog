@@ -185,7 +185,7 @@ export default function GateVisitsPage() {
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">{protocol === 'PRINTED_PASS' ? <IdCard size={17} /> : <Tag size={17} />}</span>
             <span className="min-w-0 flex-1">
               <b className="block text-sm text-slate-900">Tags / passes out</b>
-              <span className="block truncate text-[11px] text-slate-500">{protocol === 'PLAIN_TAGS' ? 'Option 1 · plain tags' : protocol === 'PRINTED_PASS' ? 'Option 2 · printed passes' : 'Issued before the protocol changed'} · exit is blocked until returned or lost</span>
+              <span className="block truncate text-[11px] text-slate-500">{protocol === 'PLAIN_TAGS' ? 'Plain tags' : protocol === 'PRINTED_PASS' ? 'Printed passes' : 'Issued earlier'} · return before exit</span>
             </span>
             <span className="text-xl font-bold text-amber-700">{outCount}</span>
           </button>

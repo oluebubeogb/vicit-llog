@@ -24,8 +24,10 @@ import {
   Minus,
   UserPlus,
   IdCard,
+  Tag,
 } from 'lucide-react';
 import LoginAgencyGrid from '@/components/LoginAgencyGrid';
+import GatePassProtocolSetting from '@/components/GatePassProtocolSetting';
 import ProfileHeaderBuilder from '@/components/ProfileHeaderBuilder';
 import { mergeTemplates, type ProfileTemplates } from '@/lib/profileTemplate';
 import { ALL_MODES, resetEntryModesCache } from '@/lib/entry-modes';
@@ -830,6 +832,10 @@ function SignInSettings() {
             <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${form.superAdminCanInvite ? 'left-6' : 'left-1'}`} />
           </span>
         </button>
+      </Section>
+
+      <Section icon={<Tag size={16} />} title="Gate pass" info="Applies to all agencies." applies={['All gates', 'Visits page']}>
+        <GatePassProtocolSetting editable bare />
       </Section>
 
       <Section icon={<IdCard size={16} />} title="Profile header builder" info="One set of templates for every agency. Build each line from placeholders; custom fields fill in for agencies that have them and are left out cleanly elsewhere." applies={['Dashboard greeting', 'Host profile card', 'My profile header']}>
