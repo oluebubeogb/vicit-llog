@@ -55,7 +55,8 @@ function useSessionNav() {
     };
   }, [pathname]);
 
-  return { pathname, role, permissions, unread, mounted, links: buildSidebarLinks(role, permissions) };
+  const { brand: navBrand } = useBrand();
+  return { pathname, role, permissions, unread, mounted, links: buildSidebarLinks(role, permissions, { superAdminCanInvite: (navBrand as any)?.superAdminCanInvite }) };
 }
 
 function DesktopSidebar({

@@ -1,83 +1,138 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api, getUser } from '@/lib/api';
-import { Building2, DoorOpen, MapPin, Plus, Minus, ChevronUp, ChevronDown } from 'lucide-react';
+import { Building2, DoorOpen, MapPin, Plus, Minus, ChevronUp, ChevronDown, Pencil, Settings2 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
-import Collapse from '@/components/ui/Collapse';
-import { Empty, SkeletonList } from '@/components/ui/Bits';
+import { Empty, Notice, SkeletonList } from '@/components/ui/Bits';
 import SleekOverlay from '@/components/ui/SleekOverlay';
 
+type LocForm = { name: string; code: string; address: string };
+type GateForm = { name: string; code: string; officerId: string; admissionsEnabled: boolean; particularsCheckEnabled: boolean; dailyAdmissionLimit: string | number };
+const EMPTY_LOC: LocForm = { name: '', code: '', address: '' };
+const EMPTY_GATE: GateForm = { name: '', code: '', officerId: '', admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' };
+
 export default function LocationsPage() {
+  return (
+    <Suspense fallback={<div className="page"><SkeletonList rows={3} h={120} /></div>}>
+      <LocationsInner />
+    </Suspense>
+  );
+}
+
+function LocationsInner() {
+  const me = getUser();
+  const superAdmin = me?.role === 'SUPER_ADMIN';
+  const params = useSearchParams();
+  const [agencies, setAgencies] = useState<any[]>([]);
+  const [orgId, setOrgId] = useState<string | null>(superAdmin ? params?.get('orgId') || null : me?.organisation?.id || me?.orgId || me?.organisationId || 'own');
   const [locations, setLocations] = useState<any[]>([]);
-  const ownOrgId = getUser()?.orgId;
   const [officers, setOfficers] = useState<any[]>([]);
-  const [showLoc, setShowLoc] = useState(false);
-  const [showGate, setShowGate] = useState<string | null>(null);
-  const [locForm, setLocForm] = useState({ name: '', code: '', address: '' });
-  const [gateForm, setGateForm] = useState<any>({ name: '', code: '', officerId: '', admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
   const [loading, setLoading] = useState(true);
   const [maxGates, setMaxGates] = useState(10);
-  const [gateSettingsOpen, setGateSettingsOpen] = useState<string | null>(null);
-  const [gateSettings, setGateSettings] = useState<any>({ admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
+  const [error, setError] = useState('');
+  // Same overlay for add and edit
+  const [locEditor, setLocEditor] = useState<{ mode: 'add' | 'edit'; id?: string; form: LocForm } | null>(null);
+  const [gateEditor, setGateEditor] = useState<{ mode: 'add' | 'edit'; locationId?: string; gateId?: string; locationName?: string; form: GateForm } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
   const [removeOfficer, setRemoveOfficer] = useState<{ gateId: string; gateName: string; userId: string; fullName: string } | null>(null);
   const [removing, setRemoving] = useState(false);
 
+  // Super Admin: pick the agency to work on
+  useEffect(() => {
+    if (!superAdmin) return;
+    api.platformAgencies().then((list: any[]) => {
+      setAgencies(list || []);
+      if (!orgId && list?.length) setOrgId(list[0].id);
+    }).catch((e: any) => setError(e.message || 'Could not load agencies'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [superAdmin]);
+
   function load(silent = false) {
+    if (!orgId) return;
+    api.setLocationsOrg(superAdmin ? orgId : null);
     if (!silent) setLoading(true);
-    Promise.all([api.locations(), api.users(), api.locationSettings()])
-      .then(([locs, people, settings]) => { setLocations(locs); setOfficers((people || []).filter((p: any) => p.role === 'GATE' || p.role === 'GLOBAL_GATE')); setMaxGates(settings?.maxGates ?? 10); })
+    setError('');
+    Promise.all([api.locations(), api.locationOfficers(), api.locationSettings()])
+      .then(([locs, people, settings]) => { setLocations(locs || []); setOfficers(people || []); setMaxGates(settings?.maxGates ?? 10); })
+      .catch((e: any) => setError(e.message || 'Could not load locations'))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
-  async function createLoc(e: React.FormEvent) {
+  const managedElsewhere = (loc: any) => !!loc.organisation?.id && loc.organisation.id !== orgId;
+  const gateCount = locations.reduce((n, l) => n + (l.organisation?.id === orgId ? l.gates?.length || 0 : 0), 0);
+
+  async function saveLocation(e: React.FormEvent) {
     e.preventDefault();
-    await api.createLocation(locForm);
-    setShowLoc(false);
-    setLocForm({ name: '', code: '', address: '' });
-    load();
+    if (!locEditor) return;
+    setSaving(true); setFormError('');
+    try {
+      if (locEditor.mode === 'add') await api.createLocation(locEditor.form);
+      else await api.updateLocation(locEditor.id!, locEditor.form);
+      setLocEditor(null);
+      load(true);
+    } catch (err: any) { setFormError(err.message || 'Could not save location'); } finally { setSaving(false); }
   }
 
-  async function createGate(e: React.FormEvent, locId: string) {
+  async function saveGate(e: React.FormEvent) {
     e.preventDefault();
-    await api.addGate(locId, { ...gateForm, officerId: (gateForm as any).officerId || undefined, admissionsEnabled: (gateForm as any).admissionsEnabled ?? true, particularsCheckEnabled: (gateForm as any).particularsCheckEnabled ?? true, dailyAdmissionLimit: (gateForm as any).dailyAdmissionLimit || null });
-    setShowGate(null);
-    setGateForm({ name: '', code: '', officerId: '', admissionsEnabled: true, particularsCheckEnabled: true, dailyAdmissionLimit: '' });
-    load();
+    if (!gateEditor) return;
+    setSaving(true); setFormError('');
+    const f = gateEditor.form;
+    const body = { name: f.name, code: f.code, admissionsEnabled: f.admissionsEnabled, particularsCheckEnabled: f.particularsCheckEnabled, dailyAdmissionLimit: f.dailyAdmissionLimit === '' ? null : Number(f.dailyAdmissionLimit) };
+    try {
+      if (gateEditor.mode === 'add') await api.addGate(gateEditor.locationId!, { ...body, officerId: f.officerId || undefined });
+      else await api.updateGate(gateEditor.gateId!, body);
+      setGateEditor(null);
+      load(true);
+    } catch (err: any) { setFormError(err.message || 'Could not save gate'); } finally { setSaving(false); }
   }
+
+  const agencyName = superAdmin ? agencies.find((a) => a.id === orgId)?.name : me?.organisation?.name || me?.orgName;
 
   return (
     <div className="page">
       <PageHeader
-        back="/admin"
+        back={superAdmin ? '/platform' : '/admin'}
         icon={<MapPin size={20} />}
         title="Locations & gates"
-        subtitle={loading ? 'Loading…' : `${locations.length} sites · ${locations.reduce((a, l) => a + (l.gates?.length || 0), 0)} gates`}
+        subtitle={loading ? 'Loading…' : `${agencyName ? `${agencyName} · ` : ''}${locations.length} sites · ${locations.reduce((a, l) => a + (l.gates?.length || 0), 0)} gates`}
         info="Sites your visitors are invited to, and the gates officers check them in at."
         actions={
-          <button onClick={() => setShowLoc(!showLoc)} className="btn-primary !px-3">
+          <button onClick={() => { setFormError(''); setLocEditor({ mode: 'add', form: { ...EMPTY_LOC } }); }} disabled={!orgId} className="btn-primary !px-3" data-testid="add-location">
             <Plus size={16} /> Location
           </button>
         }
       />
 
-      <div className="surface mb-4 flex flex-wrap items-center gap-3 p-4"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">Gate capacity settings</p><p className="text-xs text-slate-500">{locations.reduce((n,l)=>n+(l.gates?.length||0),0)} gates currently created · limit {maxGates}</p></div><form className="flex items-center gap-2" onSubmit={async e=>{e.preventDefault();try{await api.updateLocationSettings({maxGates});load()}catch(err:any){window.alert(err.message)}}}><input aria-label="Maximum gates" type="number" min={Math.max(1,locations.reduce((n,l)=>n+(l.gates?.length||0),0))} max={500} className="input !w-24" value={maxGates} onChange={e=>setMaxGates(Number(e.target.value))}/><button className="btn-primary !py-2 text-xs">Save limit</button></form></div>
+      {superAdmin && (
+        <label className="surface mb-4 flex flex-wrap items-center gap-3 p-4" data-testid="locations-agency-picker">
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Agency</span>
+            <span className="block text-xs text-slate-500">As Super Admin you can manage any agency&apos;s locations and gates.</span>
+          </span>
+          <select className="input !w-full sm:!w-72" value={orgId || ''} onChange={(e) => setOrgId(e.target.value)}>
+            {agencies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </label>
+      )}
 
-      <Collapse open={showLoc}>
-        <form onSubmit={createLoc} className="surface mb-4 space-y-2.5">
-          <p className="section-title">New location</p>
-          <input placeholder="Name" value={locForm.name} onChange={(e) => setLocForm({ ...locForm, name: e.target.value })} className="input" required />
-          <input placeholder="Code (e.g. HQ)" value={locForm.code} onChange={(e) => setLocForm({ ...locForm, code: e.target.value })} className="input uppercase" required />
-          <input placeholder="Address (optional)" value={locForm.address} onChange={(e) => setLocForm({ ...locForm, address: e.target.value })} className="input" />
-          <button type="submit" className="btn-primary w-full">
-            Create location
-          </button>
+      {error && <div className="mb-4"><Notice tone="error">{error}</Notice></div>}
+
+      <div className="surface mb-4 flex flex-wrap items-center gap-3 p-4">
+        <div className="min-w-0 flex-1"><p className="text-sm font-semibold">Gate capacity settings</p><p className="text-xs text-slate-500">{gateCount} gates currently created · limit {maxGates}</p></div>
+        <form className="flex items-center gap-2" onSubmit={async (e) => { e.preventDefault(); try { await api.updateLocationSettings({ maxGates }); load(true); } catch (err: any) { window.alert(err.message); } }}>
+          <input aria-label="Maximum gates" type="number" min={Math.max(1, gateCount)} max={500} className="input !w-24" value={maxGates} onChange={(e) => setMaxGates(Number(e.target.value))} />
+          <button className="btn-primary !py-2 text-xs">Save limit</button>
         </form>
-      </Collapse>
+      </div>
 
       {loading ? (
         <SkeletonList rows={3} h={120} />
@@ -85,97 +140,159 @@ export default function LocationsPage() {
         <Empty icon={<MapPin size={24} />} title="No locations yet" hint="Add your first site, then the gates where officers scan visitors." />
       ) : (
         <ul className="space-y-3">
-          {locations.map((loc) => (
-            <li key={loc.id} className="card card-art p-4">
-              <div className="flex items-start gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-600">
-                  <Building2 size={20} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-800">{loc.name}</p>
-                  <p className="truncate text-xs text-slate-500">
-                    <span className="chip mr-1 !py-0 font-mono">{loc.code}</span>
-                    {loc.address} {loc.isShared ? '· Shared site' : ''} {loc.organisation?.id && loc.organisation.id !== ownOrgId ? `· Managed by ${loc.organisation.name}` : ''}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-3 space-y-1.5 border-l-2 border-emerald-100 pl-3">
-                {(loc.gates || []).length === 0 && <p className="text-xs text-slate-400">No gates yet</p>}
-                {(loc.gates || []).map((g: any) => (
-                  <div key={g.id} className="tile flex flex-wrap items-center gap-2 !py-2 text-sm">
-                    <DoorOpen size={14} className="text-brand-500" />
-                    <span className="min-w-0 flex-1 font-medium text-slate-700">{g.sequence + 1}. {g.name}</span>
-                    <span className="font-mono text-[11px] text-slate-400">{g.code}</span>
-                    <button type="button" title="Move earlier" disabled={g.sequence === 0 || (!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId)} onClick={async () => { await api.reorderGate(g.id, Math.max(0, g.sequence - 1)); load(true); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronUp size={14}/></button>
-                    <button type="button" title="Move later" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} onClick={async () => { await api.reorderGate(g.id, g.sequence + 1); load(true); }} className="rounded-lg p-1 text-slate-500 hover:bg-white"><ChevronDown size={14}/></button>
-                    <select aria-label={`Assign officer to ${g.name}`} className="input !w-full !py-1.5 text-xs sm:!w-auto" value="" onChange={async e => { const userId = e.target.value; if (!userId) return; try { await api.assignGateOfficer(g.id, userId); await load(true); } catch (err: any) { window.alert(err.message || 'Could not assign that officer'); } }}>
-                      <option value="">Assign gate officer…</option>
-                      {officers.map((o: any) => <option key={o.id} value={o.id}>{o.fullName}</option>)}
-                    </select>
-                    <div className="w-full space-y-1.5 pl-6">
-                      <p className="text-[11px] font-semibold tracking-wide text-slate-600">Gate Officers currently assigned</p>
-                      {(g.assignments || []).length === 0 ? (
-                        <p className="text-[11px] text-slate-400">No officers assigned</p>
-                      ) : (
-                        <ul className="space-y-1">
-                          {(g.assignments || []).map((a: any) => (
-                            <li key={a.user?.id || a.id} className="flex items-center gap-2 text-sm text-slate-700">
-                              <span className="min-w-0 flex-1 font-medium">{a.user?.fullName || 'Unknown officer'}</span>
-                              <button
-                                type="button"
-                                title={`Remove ${a.user?.fullName || 'officer'} from this gate`}
-                                aria-label={`Remove ${a.user?.fullName || 'officer'} from this gate`}
-                                disabled={!a.user?.id || (!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId)}
-                                onClick={() => {
-                                  if (!a.user?.id) return;
-                                  setRemoveOfficer({ gateId: g.id, gateName: g.name, userId: a.user.id, fullName: a.user.fullName });
-                                }}
-                                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <Minus size={12} strokeWidth={3} />
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                    <button type="button" disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} title="Shared checkpoint settings are managed by the owning agency" className="ml-6 text-[11px] font-semibold text-brand-700 underline disabled:opacity-40" onClick={()=>{setGateSettingsOpen(gateSettingsOpen===g.id?null:g.id);setGateSettings({admissionsEnabled:g.admissionsEnabled??true,particularsCheckEnabled:g.particularsCheckEnabled??true,dailyAdmissionLimit:g.dailyAdmissionLimit??''})}}>Gate settings</button>
-                    {gateSettingsOpen===g.id&&<form className="grid w-full gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2" onSubmit={async e=>{e.preventDefault();try{await api.updateGateSettings(g.id,{...gateSettings,dailyAdmissionLimit:gateSettings.dailyAdmissionLimit||null});setGateSettingsOpen(null);load(true)}catch(err:any){window.alert(err.message)}}}>
-                      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.admissionsEnabled} onChange={e=>setGateSettings({...gateSettings,admissionsEnabled:e.target.checked})}/> Admissions enabled</label>
-                      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={gateSettings.particularsCheckEnabled} onChange={e=>setGateSettings({...gateSettings,particularsCheckEnabled:e.target.checked})}/> Require particulars check</label>
-                      <input type="number" min="1" className="input !py-2 text-xs sm:col-span-2" placeholder="Daily admission limit (blank = unlimited)" value={gateSettings.dailyAdmissionLimit} onChange={e=>setGateSettings({...gateSettings,dailyAdmissionLimit:e.target.value})}/>
-                      <button className="btn-primary !py-2 text-xs sm:col-span-2">Save gate settings</button>
-                    </form>}
+          {locations.map((loc) => {
+            const locked = managedElsewhere(loc);
+            return (
+              <li key={loc.id} className="card card-art p-4" data-testid="location-card">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-600">
+                    <Building2 size={20} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-slate-800">{loc.name}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      <span className="chip mr-1 !py-0 font-mono">{loc.code}</span>
+                      {loc.address} {loc.isShared ? '· Shared site' : ''} {locked ? `· Managed by ${loc.organisation.name}` : ''}
+                    </p>
                   </div>
-                ))}
-              </div>
-              <button disabled={!!loc.isShared && !!loc.organisation?.id && loc.organisation.id !== ownOrgId} title={loc.isShared && loc.organisation?.id !== ownOrgId ? "Shared location gates are managed by the owning agency" : "Add gate"} onClick={() => setShowGate(showGate === loc.id ? null : loc.id)} className="mt-3 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40">
-                <Plus size={13} className={`transition-transform ${showGate === loc.id ? 'rotate-45' : ''}`} /> Add gate
-              </button>
-              <Collapse open={showGate === loc.id}>
-                <form onSubmit={(e) => createGate(e, loc.id)} className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-brand-100 bg-brand-50/40 p-3">
-                  <input placeholder="Gate name" value={gateForm.name} onChange={(e) => setGateForm({ ...gateForm, name: e.target.value })} className="input !py-2 text-sm" required />
-                  <input placeholder="Gate code" value={gateForm.code} onChange={(e) => setGateForm({ ...gateForm, code: e.target.value })} className="input !py-2 text-sm" required />
-                  <select className="input col-span-2 !py-2 text-sm" value={(gateForm as any).officerId||''} onChange={e=>setGateForm({...gateForm,officerId:e.target.value} as any)}><option value="">Assign officer now (optional)</option>{officers.map(o=><option key={o.id} value={o.id}>{o.fullName}</option>)}</select>
-                  <label className="col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={(gateForm as any).admissionsEnabled??true} onChange={e=>setGateForm({...gateForm,admissionsEnabled:e.target.checked} as any)}/> Admissions enabled</label>
-                  <label className="col-span-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={(gateForm as any).particularsCheckEnabled??true} onChange={e=>setGateForm({...gateForm,particularsCheckEnabled:e.target.checked} as any)}/> Require particulars check confirmation</label>
-                  <input type="number" min="1" placeholder="Daily admission limit (optional)" className="input col-span-2 !py-2 text-sm" value={(gateForm as any).dailyAdmissionLimit||''} onChange={e=>setGateForm({...gateForm,dailyAdmissionLimit:e.target.value} as any)}/>
-                  <button type="submit" className="btn-primary col-span-2 !py-2">
-                    Save gate
+                  <button
+                    type="button"
+                    disabled={locked}
+                    title={locked ? 'Shared locations are managed by the owning agency' : `Edit ${loc.name}`}
+                    aria-label={`Edit ${loc.name}`}
+                    data-testid="edit-location"
+                    onClick={() => { setFormError(''); setLocEditor({ mode: 'edit', id: loc.id, form: { name: loc.name || '', code: loc.code || '', address: loc.address || '' } }); }}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Pencil size={14} />
                   </button>
-                </form>
-              </Collapse>
-            </li>
-          ))}
+                </div>
+                <div className="mt-3 space-y-1.5 border-l-2 border-emerald-100 pl-3">
+                  {(loc.gates || []).length === 0 && <p className="text-xs text-slate-400">No gates yet</p>}
+                  {(loc.gates || []).map((g: any) => (
+                    <div key={g.id} className="tile flex flex-wrap items-center gap-2 !py-2 text-sm" data-testid="gate-row">
+                      <DoorOpen size={14} className="text-brand-500" />
+                      <span className="min-w-0 flex-1 font-medium text-slate-700">{g.sequence + 1}. {g.name}</span>
+                      <span className="font-mono text-[11px] text-slate-400">{g.code}</span>
+                      <button type="button" title="Move earlier" disabled={g.sequence === 0 || locked} onClick={async () => { await api.reorderGate(g.id, Math.max(0, g.sequence - 1)); load(true); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronUp size={14} /></button>
+                      <button type="button" title="Move later" disabled={locked} onClick={async () => { await api.reorderGate(g.id, g.sequence + 1); load(true); }} className="rounded-lg p-1 text-slate-500 hover:bg-white disabled:opacity-30"><ChevronDown size={14} /></button>
+                      <button
+                        type="button"
+                        disabled={locked}
+                        title={locked ? 'Shared checkpoints are managed by the owning agency' : `Edit ${g.name}`}
+                        aria-label={`Edit ${g.name}`}
+                        data-testid="edit-gate"
+                        onClick={() => { setFormError(''); setGateEditor({ mode: 'edit', gateId: g.id, locationName: loc.name, form: { name: g.name || '', code: g.code || '', officerId: '', admissionsEnabled: g.admissionsEnabled ?? true, particularsCheckEnabled: g.particularsCheckEnabled ?? true, dailyAdmissionLimit: g.dailyAdmissionLimit ?? '' } }); }}
+                        className="rounded-lg p-1 text-slate-500 hover:bg-white hover:text-brand-700 disabled:opacity-30"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <select aria-label={`Assign officer to ${g.name}`} disabled={locked} className="input !w-full !py-1.5 text-xs sm:!w-auto" value="" onChange={async (e) => { const userId = e.target.value; if (!userId) return; try { await api.assignGateOfficer(g.id, userId); await load(true); } catch (err: any) { window.alert(err.message || 'Could not assign that officer'); } }}>
+                        <option value="">Assign gate officer…</option>
+                        {officers.filter((o: any) => !(g.assignments || []).some((a: any) => a.user?.id === o.id)).map((o: any) => <option key={o.id} value={o.id}>{o.fullName}{o.role === 'GLOBAL_GATE' ? ' (Super gate)' : ''}</option>)}
+                      </select>
+                      <div className="w-full space-y-1.5 pl-6">
+                        <p className="text-[11px] font-semibold tracking-wide text-slate-600">Gate Officers currently assigned</p>
+                        {(g.assignments || []).length === 0 ? (
+                          <p className="text-[11px] text-slate-400">No officers assigned</p>
+                        ) : (
+                          <ul className="space-y-1">
+                            {(g.assignments || []).map((a: any) => (
+                              <li key={a.user?.id || a.id} className="flex items-center gap-2 text-sm text-slate-700" data-testid="assigned-officer">
+                                <span className="min-w-0 flex-1 font-medium">{a.user?.fullName || 'Unknown officer'}{a.user?.role === 'GLOBAL_GATE' ? <span className="ml-1.5 text-[11px] font-normal text-slate-400">Super gate</span> : null}</span>
+                                <button
+                                  type="button"
+                                  title={`Remove ${a.user?.fullName || 'officer'} from ${g.name}`}
+                                  aria-label={`Remove ${a.user?.fullName || 'officer'} from ${g.name}`}
+                                  data-testid="remove-officer"
+                                  disabled={!a.user?.id || locked}
+                                  onClick={() => { if (a.user?.id) setRemoveOfficer({ gateId: g.id, gateName: g.name, userId: a.user.id, fullName: a.user.fullName }); }}
+                                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  <Minus size={13} strokeWidth={3} />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  disabled={locked}
+                  title={locked ? 'Shared location gates are managed by the owning agency' : 'Add gate'}
+                  onClick={() => { setFormError(''); setGateEditor({ mode: 'add', locationId: loc.id, locationName: loc.name, form: { ...EMPTY_GATE } }); }}
+                  className="mt-3 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Plus size={13} /> Add gate
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
+
+      {/* Location: add / edit (same overlay) */}
+      <SleekOverlay
+        open={!!locEditor}
+        onClose={() => !saving && setLocEditor(null)}
+        title={locEditor?.mode === 'edit' ? 'Edit location' : 'New location'}
+        subtitle={agencyName || undefined}
+        icon={<Building2 size={20} />}
+      >
+        {locEditor && (
+          <form onSubmit={saveLocation} className="space-y-2.5" data-testid="location-form">
+            <label className="block"><span className="label">Name</span><input value={locEditor.form.name} onChange={(e) => setLocEditor({ ...locEditor, form: { ...locEditor.form, name: e.target.value } })} className="input" required /></label>
+            <label className="block"><span className="label">Code</span><input placeholder="e.g. HQ" value={locEditor.form.code} onChange={(e) => setLocEditor({ ...locEditor, form: { ...locEditor.form, code: e.target.value } })} className="input uppercase" required /></label>
+            <label className="block"><span className="label">Address (optional)</span><input value={locEditor.form.address} onChange={(e) => setLocEditor({ ...locEditor, form: { ...locEditor.form, address: e.target.value } })} className="input" /></label>
+            {formError && <Notice tone="error">{formError}</Notice>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" className="btn-quiet flex-1" disabled={saving} onClick={() => setLocEditor(null)}>Cancel</button>
+              <button type="submit" className="btn-primary flex-1" disabled={saving}>{saving ? 'Saving…' : locEditor.mode === 'edit' ? 'Save changes' : 'Create location'}</button>
+            </div>
+          </form>
+        )}
+      </SleekOverlay>
+
+      {/* Gate / checkpoint: add / edit (same overlay) */}
+      <SleekOverlay
+        open={!!gateEditor}
+        onClose={() => !saving && setGateEditor(null)}
+        title={gateEditor?.mode === 'edit' ? 'Edit gate / checkpoint' : 'New gate / checkpoint'}
+        subtitle={gateEditor?.locationName}
+        icon={<Settings2 size={20} />}
+      >
+        {gateEditor && (
+          <form onSubmit={saveGate} className="space-y-2.5" data-testid="gate-form">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block"><span className="label">Gate name</span><input value={gateEditor.form.name} onChange={(e) => setGateEditor({ ...gateEditor, form: { ...gateEditor.form, name: e.target.value } })} className="input" required /></label>
+              <label className="block"><span className="label">Gate code</span><input value={gateEditor.form.code} onChange={(e) => setGateEditor({ ...gateEditor, form: { ...gateEditor.form, code: e.target.value } })} className="input" required /></label>
+            </div>
+            {gateEditor.mode === 'add' && (
+              <select className="input" value={gateEditor.form.officerId} onChange={(e) => setGateEditor({ ...gateEditor, form: { ...gateEditor.form, officerId: e.target.value } })}>
+                <option value="">Assign officer now (optional)</option>
+                {officers.map((o: any) => <option key={o.id} value={o.id}>{o.fullName}</option>)}
+              </select>
+            )}
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={gateEditor.form.admissionsEnabled} onChange={(e) => setGateEditor({ ...gateEditor, form: { ...gateEditor.form, admissionsEnabled: e.target.checked } })} /> Admissions enabled</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={gateEditor.form.particularsCheckEnabled} onChange={(e) => setGateEditor({ ...gateEditor, form: { ...gateEditor.form, particularsCheckEnabled: e.target.checked } })} /> Require particulars check</label>
+            <label className="block"><span className="label">Daily admission limit</span><input type="number" min="1" placeholder="Blank = unlimited" className="input" value={gateEditor.form.dailyAdmissionLimit} onChange={(e) => setGateEditor({ ...gateEditor, form: { ...gateEditor.form, dailyAdmissionLimit: e.target.value } })} /></label>
+            {formError && <Notice tone="error">{formError}</Notice>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" className="btn-quiet flex-1" disabled={saving} onClick={() => setGateEditor(null)}>Cancel</button>
+              <button type="submit" className="btn-primary flex-1" disabled={saving}>{saving ? 'Saving…' : gateEditor.mode === 'edit' ? 'Save changes' : 'Save gate'}</button>
+            </div>
+          </form>
+        )}
+      </SleekOverlay>
 
       <SleekOverlay
         open={!!removeOfficer}
         onClose={() => !removing && setRemoveOfficer(null)}
         tone="rose"
         title="Remove gate officer"
-        subtitle={removeOfficer ? `Unassign ${removeOfficer.fullName} from ${removeOfficer.gateName}?` : ''}
+        subtitle={removeOfficer ? `Remove ${removeOfficer.fullName} from ${removeOfficer.gateName}?` : ''}
         icon={<Minus size={20} />}
         footer={
           <>
@@ -184,6 +301,7 @@ export default function LocationsPage() {
               type="button"
               className="btn-primary flex-1 !bg-rose-600 hover:!bg-rose-700"
               disabled={removing}
+              data-testid="confirm-remove-officer"
               onClick={async () => {
                 if (!removeOfficer) return;
                 setRemoving(true);
@@ -203,7 +321,7 @@ export default function LocationsPage() {
           </>
         }
       >
-        <p className="text-sm text-slate-600">They will no longer be able to record decisions at this checkpoint until reassigned.</p>
+        <p className="text-sm text-slate-600">They will no longer be able to record decisions at this checkpoint until reassigned. Their past checkpoint records stay in the history.</p>
       </SleekOverlay>
     </div>
   );

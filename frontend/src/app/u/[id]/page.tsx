@@ -11,6 +11,9 @@ import Tooltip from '@/components/ui/Tooltip';
 import { Empty, Field, Fields, SkeletonList } from '@/components/ui/Bits';
 import { VisitorCard } from '@/components/InviteBits';
 import { MODE_LABEL, relTime } from '@/lib/format';
+import { useBrand } from '@/components/BrandProvider';
+import { roleLabel } from '@/lib/roleLabels';
+import { mergeTemplates, profileVars, renderTemplate } from '@/lib/profileTemplate';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -37,6 +40,7 @@ export default function PublicUserPage() {
   const [guest, setGuest] = useState<any | null>(null);
   const [photoPreview, setPhotoPreview] = useState(false);
   const [tab, setTab] = useState<Tab>('invites');
+  const { brand } = useBrand();
 
   useEffect(() => {
     if (!id) return;
@@ -93,6 +97,11 @@ export default function PublicUserPage() {
     return path ? `${API}/visitors/photo/${path}` : null;
   }
 
+  // v25: Super Admin profile header template (defaults = name + agency, as before)
+  const hostTpl = mergeTemplates((brand as any)?.profileTemplates).hostCard;
+  const hostVars = profileVars(profile, { roleText: roleLabel });
+  const hostSubtitle = renderTemplate(hostTpl.subtitle, hostVars);
+
   const guests = profile.guests || [];
   const onSite = guests.filter((g: any) => g.status === 'ARRIVED').length;
   const lastVisit = guests.map((g: any) => g.enteredAt || g.createdAt).filter(Boolean).sort().pop();
@@ -114,8 +123,8 @@ export default function PublicUserPage() {
             <Avatar name={profile.fullName} src={avatar} size={96} ring={false} className="!text-2xl" />
           </button>
         </Tooltip>
-        <h1 className="text-2xl font-bold">{profile.fullName}</h1>
-        {profile.organisationName && <p className="mt-0.5 text-sm text-on-brand/75">{profile.organisationName}</p>}
+        <h1 className="text-2xl font-bold" data-testid="host-card-title">{renderTemplate(hostTpl.title, hostVars) || profile.fullName}</h1>
+        {hostSubtitle && <p className="mt-0.5 text-sm text-on-brand/75" data-testid="host-card-subtitle">{hostSubtitle}</p>}
         <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs">
           {profile.portfolio && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 ring-1 ring-on-brand/20 backdrop-blur">

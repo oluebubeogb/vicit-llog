@@ -1,6 +1,6 @@
 /** Brand colour engine: turns one hex colour into a 50–950 scale of CSS variables. */
 
-export const APP_VERSION = '1.0.1-v24';
+export const APP_VERSION = '1.0.1-v25';
 
 export type LoginBranding = {
   logoUrl?: string | null;
@@ -31,6 +31,10 @@ export type PublicBranding = {
   footerCreditMobileMode?: 'FLOATING' | 'STATIC' | null;
   assetVersion?: string | null;
   login?: LoginBranding | null;
+  /** v25: Super Admins / Super Admin II may create invites (default true) */
+  superAdminCanInvite?: boolean;
+  /** v25: platform-wide profile header templates (null = defaults) */
+  profileTemplates?: any;
   agencies?: Array<{
     id: string;
     name: string;

@@ -106,6 +106,13 @@ export class InvitesService {
   }
 
   async create(dto: CreateInviteDto, hostId: string, orgId: string, creatorRole?: string) {
+    // v25: Super Admin branding setting "Allow super admins to invite visitors"
+    if (creatorRole === Role.SUPER_ADMIN || creatorRole === Role.GLOBAL_ADMIN) {
+      const ps = await this.prisma.platformSettings.findUnique({ where: { id: 'platform' } });
+      if ((ps as any)?.superAdminCanInvite === false) {
+        throw new ForbiddenException('Inviting visitors is turned off for Super Admins. Ask the Super Admin to switch it on in Branding settings.');
+      }
+    }
     const ttl = parseInt(process.env.INVITE_LINK_TTL_MINUTES || '60', 10);
     const orgSettings = await this.prisma.organisation.findUnique({
       where: { id: orgId },

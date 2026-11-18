@@ -502,6 +502,10 @@ model PlatformSettings {
   assetVersion              String   @default("1.0.1")
   /// Gate pass protocol for every agency and gate (no per-agency override).
   gatePassProtocol          GatePassProtocol @default(NONE)
+  /// v25: when false, Super Admins / Super Admin II cannot create new invites (old ones stay visible)
+  superAdminCanInvite       Boolean  @default(true)
+  /// v25: profile header templates (dashboard greeting, host profile card, my profile header). Null = defaults.
+  profileTemplates          Json?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 }

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getUser, setUser, clearToken } from '@/lib/api';
+import { useBrand } from '@/components/BrandProvider';
+import { mergeTemplates, profileVars, renderList, renderTemplate } from '@/lib/profileTemplate';
 import { isValidEmail } from '@/lib/email';
 import { detectHumanInVideo } from '@/lib/detectHuman';
 import { LogOut, User, Camera, Loader2, Send } from 'lucide-react';
@@ -22,6 +24,13 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 export default function ProfilePage() {
   const router = useRouter();
   const [user, setLocal] = useState<any>(null);
+  // v25: Super Admin profile header template (defaults = name, email, role badge, agency)
+  const { brand: tplBrand } = useBrand();
+  const myTpl = mergeTemplates((tplBrand as any)?.profileTemplates).myProfile;
+  const myVars = profileVars(user, { roleText: roleLabel });
+  const myProfileSubtitle = user ? renderTemplate(myTpl.subtitle, myVars) : '';
+  const myBadges = user ? renderList(myTpl.badges, myVars) : [];
+  const myMeta = user ? renderTemplate(myTpl.meta, myVars) : '';
   const [form, setForm] = useState({ fullName: '', phone: '', portfolio: '', email: '' });
   const [msg, setMsg] = useState('');
   const [pending, setPending] = useState(false);
@@ -249,12 +258,14 @@ export default function ProfilePage() {
             </button>
           </Tooltip>
           <div className="min-w-0">
-            <p className="truncate text-xl font-bold">{user?.fullName}</p>
-            <p className="truncate text-sm text-on-brand/75">{user?.email}</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {user?.role && <span className="rounded-full bg-on-brand/20 px-2 py-0.5 text-[11px] font-semibold ring-1 ring-on-brand/25">{roleLabel(user.role)}</span>}
-              {user?.organisation?.name && <span className="truncate text-[11px] text-on-brand/70">{user.organisation.name}</span>}
-            </div>
+            <p className="line-clamp-2 break-words text-xl font-bold leading-tight" data-testid="my-profile-title">{(user && renderTemplate(myTpl.title, myVars)) || user?.fullName}</p>
+            {myProfileSubtitle && <p className="truncate text-sm text-on-brand/75" data-testid="my-profile-subtitle">{myProfileSubtitle}</p>}
+            {(myBadges.length > 0 || myMeta) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {myBadges.map((b, i) => <span key={i} className="rounded-full bg-on-brand/20 px-2 py-0.5 text-[11px] font-semibold ring-1 ring-on-brand/25" data-testid="my-profile-badge">{b}</span>)}
+                {myMeta && <span className="truncate text-[11px] text-on-brand/70" data-testid="my-profile-meta">{myMeta}</span>}
+              </div>
+            )}
           </div>
         </div>
       </div>

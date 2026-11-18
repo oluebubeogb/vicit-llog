@@ -92,6 +92,9 @@ async function request(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
+let locationsOrg: string | null = null;
+const lq = (path: string) => (locationsOrg ? `${path}${path.includes('?') ? '&' : '?'}orgId=${encodeURIComponent(locationsOrg)}` : path);
+
 export const api = {
   login: (email: string, password: string) =>
     request('/auth/login', {
@@ -249,6 +252,8 @@ export const api = {
   uploadAgencyLogo: async (agencyId: string, file: File) => { const form = new FormData(); form.append('logo', file); return request(`/platform/agencies/${agencyId}/logo`, { method: 'POST', body: form }); },
   createAgencyUser: (agencyId: string, data: any) => request(`/platform/agencies/${agencyId}/users`, { method: 'POST', body: JSON.stringify(data) }),
   platformAdministrators: () => request('/platform/administrators'),
+  profileBuilder: () => request('/branding/platform/profile-builder'),
+  profileBuilderSample: (userId: string) => request(`/branding/platform/profile-builder/sample/${userId}`),
   platformLocations: () => request('/platform/locations'),
   setPlatformLocationShared: (id: string, isShared: boolean) => request(`/platform/locations/${id}/shared`, { method: 'PATCH', body: JSON.stringify({ isShared }) }),
   platformGates: () => request('/platform/gates'),
@@ -257,20 +262,25 @@ export const api = {
   platformGlobalGateOfficers: () => request('/platform/global-gate-officers'),
   createGlobalGateOfficer: (data: any) => request('/platform/global-gate-officers', { method: 'POST', body: JSON.stringify(data) }),
   setPlatformUserStatus: (id: string, isActive: boolean) => request(`/platform/administrators/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) }),
-  locations: () => request('/locations'),
-  locationSettings: () => request('/locations/settings'),
-  updateLocationSettings: (data: any) => request('/locations/settings', { method: 'PATCH', body: JSON.stringify(data) }),
-  updateGateSettings: (id: string, data: any) => request(`/locations/gates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  /** v25: Super Admin works on one agency's locations at a time (?orgId=). Agency admins ignore it. */
+  setLocationsOrg: (orgId: string | null) => { locationsOrg = orgId; },
+  locations: () => request(lq('/locations')),
+  locationSettings: () => request(lq('/locations/settings')),
+  locationOfficers: () => request(lq('/locations/officers')),
+  updateLocationSettings: (data: any) => request(lq('/locations/settings'), { method: 'PATCH', body: JSON.stringify(data) }),
+  updateGateSettings: (id: string, data: any) => request(lq(`/locations/gates/${id}`), { method: 'PATCH', body: JSON.stringify(data) }),
+  updateGate: (id: string, data: any) => request(lq(`/locations/gates/${id}`), { method: 'PATCH', body: JSON.stringify(data) }),
+  updateLocation: (id: string, data: any) => request(lq(`/locations/${id}`), { method: 'PATCH', body: JSON.stringify(data) }),
   createLocation: (data: any) =>
-    request('/locations', { method: 'POST', body: JSON.stringify(data) }),
+    request(lq('/locations'), { method: 'POST', body: JSON.stringify(data) }),
   addGate: (locationId: string, data: any) =>
-    request(`/locations/${locationId}/gates`, {
+    request(lq(`/locations/${locationId}/gates`), {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   gates: () => request('/locations/gates/all'),
-  assignGateOfficer: (gateId: string, userId: string) => request(`/locations/gates/${gateId}/officers/${userId}`, { method: 'POST' }),
-  unassignGateOfficer: (gateId: string, userId: string) => request(`/locations/gates/${gateId}/officers/${userId}`, { method: 'DELETE' }),
+  assignGateOfficer: (gateId: string, userId: string) => request(lq(`/locations/gates/${gateId}/officers/${userId}`), { method: 'POST' }),
+  unassignGateOfficer: (gateId: string, userId: string) => request(lq(`/locations/gates/${gateId}/officers/${userId}`), { method: 'DELETE' }),
 
   staffQrStatus: () => request('/users/me/staff-qr/status'),
   setStaffPin: (pin: string, confirmPin: string) => request('/users/me/staff-qr/pin', { method: 'POST', body: JSON.stringify({ pin, confirmPin }) }),
@@ -312,7 +322,7 @@ export const api = {
     const name = /filename="?([^";]+)"?/i.exec(cd)?.[1] || 'vicit-attendance-register.csv';
     return { blob: await res.blob(), name };
   },
-  reorderGate: (gateId: string, sequence: number) => request(`/locations/gates/${gateId}/order`, { method: 'PATCH', body: JSON.stringify({ sequence }) }),
+  reorderGate: (gateId: string, sequence: number) => request(lq(`/locations/gates/${gateId}/order`), { method: 'PATCH', body: JSON.stringify({ sequence }) }),
   checkpoints: () => request('/gate/checkpoints'),
   // v22 gate pass protocol
   passProtocol: () => request('/gate/pass-protocol'),

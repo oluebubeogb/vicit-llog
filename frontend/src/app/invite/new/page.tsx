@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { api } from '@/lib/api';
+import { api, getUser } from '@/lib/api';
+import { canCreateInvites, platformHome } from '@/lib/navLinks';
+import { useBrand } from '@/components/BrandProvider';
 import {
   CalendarDays,
   Check,
@@ -132,6 +134,11 @@ export default function NewInvitePage() {
   const [bulkText, setBulkText] = useState('');
   const [bulkOpen, setBulkOpen] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  // v25: Super Admin branding switch "Allow super admins to invite visitors"
+  const { brand } = useBrand();
+  const [viewerRole, setViewerRole] = useState<string | null>(null);
+  useEffect(() => { setViewerRole(getUser()?.role ?? null); }, []);
+  const inviteBlocked = !!viewerRole && !canCreateInvites(viewerRole, (brand as any)?.superAdminCanInvite);
 
   const placeholders = [
     'Official: Meeting with Finance team to review Q3 budget',
@@ -328,6 +335,15 @@ export default function NewInvitePage() {
     a.download = 'vicit-invite-sample.txt';
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  if (inviteBlocked) {
+    return (
+      <div className="page">
+        <PageHeader back={platformHome(viewerRole)} icon={<UserPlus size={20} />} title="New invite" />
+        <div data-testid="invite-disabled"><Notice tone="warn">Inviting visitors is turned off for Super Admins. It can be switched on under Branding → Visitor invites. Your earlier invites are still in Visits and history.</Notice></div>
+      </div>
+    );
   }
 
   if (result) {

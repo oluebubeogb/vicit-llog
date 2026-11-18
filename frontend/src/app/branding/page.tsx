@@ -22,8 +22,12 @@ import {
   EyeOff,
   GripVertical,
   Minus,
+  UserPlus,
+  IdCard,
 } from 'lucide-react';
 import LoginAgencyGrid from '@/components/LoginAgencyGrid';
+import ProfileHeaderBuilder from '@/components/ProfileHeaderBuilder';
+import { mergeTemplates, type ProfileTemplates } from '@/lib/profileTemplate';
 import { ALL_MODES, resetEntryModesCache } from '@/lib/entry-modes';
 import SleekOverlay from '@/components/ui/SleekOverlay';
 import PageHeader from '@/components/ui/PageHeader';
@@ -549,6 +553,8 @@ function SignInSettings() {
     footerCreditMobileMode: 'FLOATING' as 'FLOATING' | 'STATIC',
     loginTitle: 'Defence Headquarters',
     loginLogoVisible: true,
+    superAdminCanInvite: true,
+    profileTemplates: mergeTemplates(null) as ProfileTemplates,
   });
   const [agencies, setAgencies] = useState<any[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -577,6 +583,8 @@ function SignInSettings() {
         footerCreditMobileMode: b.footerCreditMobileMode === 'STATIC' ? 'STATIC' : 'FLOATING',
         loginTitle: b.loginTitle || 'Defence Headquarters',
         loginLogoVisible: b.loginLogoVisible !== false,
+        superAdminCanInvite: b.superAdminCanInvite !== false,
+        profileTemplates: mergeTemplates(b.profileTemplates),
       });
       if (Array.isArray(b.agencies)) setAgencies(b.agencies);
     }).catch(() => {});
@@ -597,7 +605,7 @@ function SignInSettings() {
         })),
       });
       window.dispatchEvent(new Event('vicit-brand-updated'));
-      setMsg({ tone: 'success', text: 'Sign-in page and footer credit are live on every device.' });
+      setMsg({ tone: 'success', text: 'Platform settings saved — live on every device.' });
     } catch (err: any) {
       setMsg({ tone: 'error', text: err.message });
     } finally {
@@ -805,9 +813,32 @@ function SignInSettings() {
         </div>
       </Section>
 
+      <Section icon={<UserPlus size={16} />} title="Visitor invites" info="Whether Super Admins and Super Admin II accounts can create new visitor invites. Their existing invites always stay visible." applies={['Super Admin', 'Super Admin II']}>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={form.superAdminCanInvite}
+          data-testid="toggle-super-admin-invite"
+          onClick={() => setForm({ ...form, superAdminCanInvite: !form.superAdminCanInvite })}
+          className="tile flex w-full items-center justify-between gap-3 text-left"
+        >
+          <span>
+            <span className="block text-sm font-semibold text-slate-800">Allow super admins to invite visitors</span>
+            <span className="mt-0.5 block text-[11px] text-slate-500">{form.superAdminCanInvite ? 'On — Invite shows on the Super Admin dashboard and menu.' : 'Off — Invite is hidden for Super Admins and new invites are refused. Old invites stay in Visits, history and the audit.'}</span>
+          </span>
+          <span className={`relative h-7 w-12 shrink-0 rounded-full transition ${form.superAdminCanInvite ? 'bg-gradient-to-r from-brand-500 to-brand-700' : 'bg-slate-200'}`}>
+            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${form.superAdminCanInvite ? 'left-6' : 'left-1'}`} />
+          </span>
+        </button>
+      </Section>
+
+      <Section icon={<IdCard size={16} />} title="Profile header builder" info="One set of templates for every agency. Build each line from placeholders; custom fields fill in for agencies that have them and are left out cleanly elsewhere." applies={['Dashboard greeting', 'Host profile card', 'My profile header']}>
+        <ProfileHeaderBuilder value={form.profileTemplates} onChange={(v) => setForm({ ...form, profileTemplates: v })} />
+      </Section>
+
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
-      <button type="submit" disabled={saving} className="btn-primary w-full">
-        <Save size={16} /> {saving ? 'Saving…' : 'Save sign-in page'}
+      <button type="submit" disabled={saving} className="btn-primary w-full" data-testid="save-platform-settings">
+        <Save size={16} /> {saving ? 'Saving…' : 'Save platform settings'}
       </button>
 
       <SleekOverlay

@@ -78,8 +78,21 @@ const L = {
   home: { href: '/dashboard', icon: Home, label: 'Home' } as AppNavLink,
 };
 
+/** v25: Super Admin branding switch "Allow super admins to invite visitors" (default on). */
+export function canCreateInvites(role?: string | null, superAdminCanInvite?: boolean | null) {
+  if (role === 'SUPER_ADMIN' || role === 'GLOBAL_ADMIN') return superAdminCanInvite !== false;
+  return true;
+}
+type NavOpts = { superAdminCanInvite?: boolean | null };
+const dropInvite = (links: AppNavLink[], role?: string | null, opts?: NavOpts) =>
+  canCreateInvites(role, opts?.superAdminCanInvite) ? links : links.filter((l) => l.href !== '/invite/new');
+
 /** Desktop sidebar. Super Admin order is fixed. */
-export function buildSidebarLinks(role?: string | null, permissions: string[] = []): AppNavLink[] {
+export function buildSidebarLinks(role?: string | null, permissions: string[] = [], opts?: NavOpts): AppNavLink[] {
+  return dropInvite(sidebarLinks(role, permissions), role, opts);
+}
+
+function sidebarLinks(role?: string | null, permissions: string[] = []): AppNavLink[] {
   if (role === 'SUPER_ADMIN') {
     return [L.platform, L.invite, L.visits, L.alerts, L.gate, L.dispatch, L.contractors, L.attendance, L.profile];
   }
@@ -97,7 +110,12 @@ export function buildSidebarLinks(role?: string | null, permissions: string[] = 
 }
 
 /** Mobile footer (max ~5) plus overflow items for the More sheet. */
-export function buildMobileNav(role?: string | null, permissions: string[] = []): { primary: AppNavLink[]; more: AppNavLink[] } {
+export function buildMobileNav(role?: string | null, permissions: string[] = [], opts?: NavOpts): { primary: AppNavLink[]; more: AppNavLink[] } {
+  const n = mobileNav(role, permissions);
+  return { primary: dropInvite(n.primary, role, opts), more: dropInvite(n.more, role, opts) };
+}
+
+function mobileNav(role?: string | null, permissions: string[] = []): { primary: AppNavLink[]; more: AppNavLink[] } {
   // Primary order is Platform, Gate, (More is inserted here), Alerts, Profile.
   if (role === 'SUPER_ADMIN') {
     return {

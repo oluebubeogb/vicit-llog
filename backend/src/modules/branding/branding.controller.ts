@@ -64,6 +64,23 @@ export class BrandingController {
     return this.branding.updatePlatform(body);
   }
 
+  @Get('platform/profile-builder')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'v25: placeholders and sample people for the profile header builder' })
+  profileBuilder() {
+    return this.branding.profileBuilderData();
+  }
+
+  @Get('platform/profile-builder/sample/:userId')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN)
+  profileBuilderSample(@Param('userId') userId: string) {
+    return this.branding.profileBuilderSample(userId);
+  }
+
   @Get('platform/agencies')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

@@ -9,8 +9,10 @@ import { motion } from 'framer-motion';
 import { Ellipsis } from 'lucide-react';
 import { buildMobileNav, isBarePath, type AppNavLink } from '@/lib/navLinks';
 import Sheet from '@/components/ui/Sheet';
+import { useBrand } from '@/components/BrandProvider';
 
 export default function BottomNav() {
+  const { brand } = useBrand();
   const pathname = usePathname();
   const [role, setRole] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -61,7 +63,7 @@ export default function BottomNav() {
   }
 
   const isGate = role === 'GATE' || role === 'GLOBAL_GATE';
-  const { primary, more } = buildMobileNav(role, getUser()?.permissions || []);
+  const { primary, more } = buildMobileNav(role, getUser()?.permissions || [], { superAdminCanInvite: (brand as any)?.superAdminCanInvite });
   const moreActive = more.some((l) => pathname === l.href || pathname?.startsWith(l.href + '/'));
   const slots: Array<AppNavLink | { href: '__more__'; icon: typeof Ellipsis; label: string; exact?: boolean; badge?: boolean }> =
     more.length

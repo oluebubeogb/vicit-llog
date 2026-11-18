@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, getUser } from '@/lib/api';
+import { useBrand } from '@/components/BrandProvider';
+import { mergeTemplates, profileVars, renderList, renderTemplate } from '@/lib/profileTemplate';
 import {
   ArrowDownRight,
   ArrowLeft,
@@ -272,6 +274,8 @@ export default function DashboardPage() {
       return;
     }
     setUserState(u);
+    // v25: full profile (custom fields) for the header template placeholders
+    api.me().then((me: any) => setUserState((prev: any) => ({ ...(prev || u), ...me }))).catch(() => {});
     if (u.role === 'ADMIN') api.approvalsSummary().then(setApprovals).catch(() => {});
     api
       .myInvites()
@@ -311,6 +315,14 @@ export default function DashboardPage() {
       : []),
   ];
 
+  // v25: Super Admin profile header template (defaults = the original greeting card)
+  const { brand } = useBrand();
+  const tpl = mergeTemplates((brand as any)?.profileTemplates).dashboard;
+  const hv = profileVars(user, { roleText: (r) => titleCase(r === 'GATE' ? 'Gate officer' : String(r)) });
+  const headTitle = user ? renderTemplate(tpl.title, hv) : '';
+  const headSubtitle = user ? renderTemplate(tpl.subtitle, hv) : '';
+  const headChips = user ? renderList(tpl.chips, hv) : [];
+
   const sheetOpen = view !== null;
   const drillKind = view?.kind === 'invite' ? view.from : view?.kind;
   const invite = view?.kind === 'invite' ? view.invite : null;
@@ -323,10 +335,10 @@ export default function DashboardPage() {
             <p className="flex items-center gap-1.5 text-xs font-medium text-on-brand/75">
               <Sparkles size={13} /> {greeting(now)}
             </p>
-            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{user?.fullName || '…'}</h1>
-            <p className="mt-0.5 truncate text-sm text-on-brand/75">
-              {[user?.organisation?.name, user?.role && titleCase(user.role === 'GATE' ? 'Gate officer' : user.role)].filter(Boolean).join(' · ')}
-            </p>
+            <h1 className="mt-1 line-clamp-2 break-words text-2xl font-bold leading-tight tracking-tight" data-testid="dashboard-greeting-title">{user ? headTitle || user.fullName : '…'}</h1>
+            {headSubtitle && (
+              <p className="mt-0.5 truncate text-sm text-on-brand/75" data-testid="dashboard-greeting-subtitle">{headSubtitle}</p>
+            )}
           </div>
           <span className="rounded-2xl bg-on-brand/15 px-3 py-2 text-center ring-1 ring-on-brand/25 backdrop-blur">
             <span className="block text-[10px] uppercase tracking-wider text-on-brand/70">
@@ -346,6 +358,9 @@ export default function DashboardPage() {
               <CalendarDays size={12} /> {s.expectedToday} expected today
             </span>
           </Tooltip>
+          {headChips.map((c, i) => (
+            <span key={i} className="inline-flex items-center gap-1.5 rounded-full bg-on-brand/15 px-2.5 py-1 font-medium ring-1 ring-on-brand/20 backdrop-blur" data-testid="dashboard-greeting-chip">{c}</span>
+          ))}
         </div>
       </header>
 

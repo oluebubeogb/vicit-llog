@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, getUser } from '@/lib/api';
-import { platformHome } from '@/lib/navLinks';
+import { canCreateInvites, platformHome } from '@/lib/navLinks';
+import { useBrand } from '@/components/BrandProvider';
 import Link from 'next/link';
 import { CalendarClock, Loader2, RotateCcw, Search, Sparkles, UserPlus, Users, X } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
@@ -24,6 +25,7 @@ export default function VisitorsPage() {
   const [invites, setInvites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<string | null>(null);
+  const { brand } = useBrand();
   const [detail, setDetail] = useState<any | null>(null);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['k']>('all');
   const [period, setPeriod] = useState<'current' | 'scheduled'>('current');
@@ -115,9 +117,11 @@ export default function VisitorsPage() {
         subtitle={loading ? 'Loading…' : `${invites.length} invites`}
         info="Tap any invite to see its guests, gate timeline, passphrase and link."
         actions={
-          <Link href="/invite/new" className="btn-primary !px-3" aria-label="New invite">
-            <UserPlus size={17} /> <span className="hidden min-[380px]:inline">Invite</span>
-          </Link>
+          canCreateInvites(role, (brand as any)?.superAdminCanInvite) ? (
+            <Link href="/invite/new" className="btn-primary !px-3" aria-label="New invite">
+              <UserPlus size={17} /> <span className="hidden min-[380px]:inline">Invite</span>
+            </Link>
+          ) : undefined
         }
       />
 

@@ -557,13 +557,14 @@ export class UsersService {
       select: {
         id: true,
         fullName: true,
+        email: true,
         phone: true,
         portfolio: true,
         avatarPath: true,
         role: true,
         organisationId: true,
         customFields: true,
-        organisation: { select: { name: true } },
+        organisation: { select: { name: true, code: true } },
       },
     });
     if (!user) throw new NotFoundException('Profile not found');
@@ -599,6 +600,10 @@ export class UsersService {
       portfolio: user.portfolio,
       avatarPath: user.avatarPath,
       organisationName: user.organisation?.name,
+      // v25: values for the profile header template placeholders
+      email: user.email,
+      role: user.role,
+      organisationCode: user.organisation?.code,
       customFields: await this.labelledCustomFields(user.organisationId, user.customFields),
       // isGate subject (for UI tabs) — not the viewer's role
       subjectIsGate: user.role === Role.GATE,

@@ -1,12 +1,13 @@
 {
   "name": "vicit-llog-frontend",
-  "version": "1.0.1-v24",
+  "version": "1.0.1-v25",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:profile-template": "node scripts/profile-template.test.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

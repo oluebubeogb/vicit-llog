@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { ALL_ENTRY_MODES, normaliseModes } from '../../common/utils/entry-modes';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -24,7 +25,7 @@ const BRANDING_SELECT = {
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const SIZE = /^\d+(\.\d+)?(px|%|vh|vw|em|rem)$/i;
-export const APP_VERSION = '1.0.1-v24';
+export const APP_VERSION = '1.0.1-v25';
 
 function normHex(v: unknown, field: string): string {
   const s = String(v || '').trim();
@@ -43,6 +44,52 @@ function normSize(v: unknown, field: string, fallback?: string): string {
   }
   if (!SIZE.test(s)) throw new BadRequestException(`${field} must be a size like 180px, 40%, 70vw or 50vh`);
   return s;
+}
+
+/** v25: placeholder token for a custom field key/label, e.g. "Rank" → "rank", "Service No." → "serviceno". */
+export function placeholderSlug(v: any) {
+  return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** v25 profile header templates — defaults reproduce the pre-v25 layout exactly. */
+export const DEFAULT_PROFILE_TEMPLATES = {
+  dashboard: { title: '[fullname]', subtitle: '[agency] · [role]', chips: [] as string[] },
+  hostCard: { title: '[fullname]', subtitle: '[agency]' },
+  myProfile: { title: '[fullname]', subtitle: '[email]', badges: ['[role]'], meta: '[agency]' },
+};
+
+export function normaliseProfileTemplates(raw: any, strict = false) {
+  const D = DEFAULT_PROFILE_TEMPLATES;
+  const line = (v: any, fallback: string, label: string) => {
+    if (v === undefined || v === null) return fallback;
+    const t = String(v).replace(/\s+/g, ' ').trim();
+    if (strict && t.length > 160) throw new BadRequestException(`${label} must be 160 characters or fewer`);
+    return t.slice(0, 160);
+  };
+  const list = (v: any, fallback: string[], label: string) => {
+    if (!Array.isArray(v)) return fallback;
+    const items = v.map((x) => String(x || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (strict && items.length > 6) throw new BadRequestException(`${label}: up to 6 items`);
+    return items.slice(0, 6).map((x) => x.slice(0, 80));
+  };
+  const r = raw && typeof raw === 'object' ? raw : {};
+  return {
+    dashboard: {
+      title: line(r.dashboard?.title, D.dashboard.title, 'Dashboard title'),
+      subtitle: line(r.dashboard?.subtitle, D.dashboard.subtitle, 'Dashboard subtitle'),
+      chips: list(r.dashboard?.chips, D.dashboard.chips, 'Dashboard chips'),
+    },
+    hostCard: {
+      title: line(r.hostCard?.title, D.hostCard.title, 'Host card title'),
+      subtitle: line(r.hostCard?.subtitle, D.hostCard.subtitle, 'Host card subtitle'),
+    },
+    myProfile: {
+      title: line(r.myProfile?.title, D.myProfile.title, 'Profile title'),
+      subtitle: line(r.myProfile?.subtitle, D.myProfile.subtitle, 'Profile subtitle'),
+      badges: list(r.myProfile?.badges, D.myProfile.badges, 'Profile badges'),
+      meta: line(r.myProfile?.meta, D.myProfile.meta, 'Profile meta line'),
+    },
+  };
 }
 
 @Injectable()
@@ -129,7 +176,53 @@ export class BrandingService {
       assetVersion: settings.assetVersion || APP_VERSION,
       contractorMinDurationDays: settings.contractorMinDurationDays,
       allowedEntryModes: normaliseModes((settings as any).allowedEntryModes),
+      // v25
+      superAdminCanInvite: (settings as any).superAdminCanInvite !== false,
+      profileTemplates: normaliseProfileTemplates((settings as any).profileTemplates),
     };
+  }
+
+  /** v25: placeholders + sample people for the Super Admin profile header builder. */
+  async profileBuilderData() {
+    const fields = await this.prisma.agencyCustomField.findMany({
+      where: { isActive: true },
+      select: { key: true, label: true, organisation: { select: { name: true } } },
+      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+    });
+    const custom = new Map<string, { token: string; label: string; agencies: string[] }>();
+    for (const f of fields) {
+      const token = placeholderSlug(f.key) || placeholderSlug(f.label);
+      if (!token) continue;
+      const row = custom.get(token) || { token, label: f.label, agencies: [] as string[] };
+      if (f.organisation?.name && !row.agencies.includes(f.organisation.name)) row.agencies.push(f.organisation.name);
+      custom.set(token, row);
+    }
+    const samples = await this.prisma.user.findMany({
+      where: { isActive: true },
+      select: { id: true, fullName: true, role: true, organisation: { select: { name: true } } },
+      orderBy: [{ organisation: { name: 'asc' } }, { fullName: 'asc' }],
+      take: 300,
+    });
+    return {
+      custom: [...custom.values()],
+      samples: samples.map((u) => ({ id: u.id, fullName: u.fullName, role: u.role, agency: u.organisation?.name || null })),
+    };
+  }
+
+  /** v25: one person's values for the builder preview (any agency — Super Admin only). */
+  async profileBuilderSample(userId: string) {
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, fullName: true, email: true, phone: true, role: true, portfolio: true, customFields: true, organisationId: true, organisation: { select: { name: true, code: true } } },
+    });
+    if (!u) throw new NotFoundException('User not found');
+    const values: any = u.customFields && typeof u.customFields === 'object' ? u.customFields : {};
+    const defs = u.organisationId ? await this.prisma.agencyCustomField.findMany({ where: { organisationId: u.organisationId }, orderBy: { sortOrder: 'asc' } }) : [];
+    const customFieldsList = defs
+      .filter((d) => values[d.key] !== undefined && values[d.key] !== '' && values[d.key] !== null)
+      .map((d) => ({ key: d.key, label: d.label, type: d.type, value: values[d.key] }));
+    const { customFields, ...rest } = u as any;
+    return { ...rest, customFieldsList };
   }
 
   /**
@@ -334,6 +427,10 @@ export class BrandingService {
       const modes = ALL_ENTRY_MODES.filter((m) => raw.includes(m));
       if (!modes.length) throw new BadRequestException('Keep at least one mode of entry switched on');
       data.allowedEntryModes = [...modes];
+    }
+    if (body.superAdminCanInvite !== undefined) data.superAdminCanInvite = body.superAdminCanInvite !== false;
+    if (body.profileTemplates !== undefined) {
+      data.profileTemplates = body.profileTemplates === null ? Prisma.DbNull : normaliseProfileTemplates(body.profileTemplates, true);
     }
     data.assetVersion = `${APP_VERSION}-${Date.now().toString(36)}`;
     const settings = await this.prisma.platformSettings.update({ where: { id: 'platform' }, data });
