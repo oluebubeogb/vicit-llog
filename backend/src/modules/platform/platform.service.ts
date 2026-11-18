@@ -4,6 +4,7 @@ import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
 import { generateNigerianPassword } from '../../common/utils/password-words';
 import { Role } from '@prisma/client';
+import { syncOfficerGates, validateGateIds, withGateAssignments } from '../../common/utils/officer-gates';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -116,7 +117,8 @@ export class PlatformService {
         this.prisma.gate.count({ where: { location: { OR: [{ organisationId: org.id }, { isShared: true }] } } }),
         this.prisma.visitor.count({ where: { invite: { organisationId: org.id }, status: 'ARRIVED' } }),
       ]);
-      return { ...org, _count: { ...org._count, users: agencyAccounts, visitors, gates, activeVisitors } };
+      const users = await withGateAssignments(this.prisma, org.users as any[]);
+      return { ...org, users, _count: { ...org._count, users: agencyAccounts, visitors, gates, activeVisitors } };
     }));
   }
 
@@ -193,10 +195,19 @@ export class PlatformService {
       data.role = requestedRole;
     }
     if (target.role === Role.GLOBAL_ADMIN && Array.isArray(input.permissions)) data.permissions = input.permissions.filter((p: string) => GLOBAL_PERMISSIONS.includes(p));
+    const finalRole = (data.role ?? target.role) as Role;
+    const gateIds = input.gateIds !== undefined && target.organisationId ? await validateGateIds(this.prisma, target.organisationId, input.gateIds) : undefined;
+    if (gateIds?.length && finalRole !== Role.GATE) throw new BadRequestException('Only gate officers can be assigned to gates or checkpoints');
     const updated = await this.prisma.user.update({ where: { id: userId }, data, select: userSelect });
-    if (updated.role !== Role.GATE) await this.prisma.gateOfficerAssignment.deleteMany({ where: { userId } });
+    if (updated.role !== Role.GATE) {
+      if (target.role === Role.GATE && target.organisationId) await syncOfficerGates(this.prisma, this.audit, { orgId: target.organisationId, userId, gateIds: [], actorId: actor.id, via: 'role-change' });
+      else await this.prisma.gateOfficerAssignment.deleteMany({ where: { userId } });
+    } else if (gateIds !== undefined && target.organisationId) {
+      await syncOfficerGates(this.prisma, this.audit, { orgId: target.organisationId, userId, gateIds, actorId: actor.id, via: 'platform-edit' });
+    }
     await this.audit.log({ action: 'PLATFORM_PERSON_UPDATED', entity: 'User', entityId: userId, userId: actor.id, details: { role: updated.role, email: updated.email } });
-    return updated;
+    const [withGates] = await withGateAssignments(this.prisma, [updated]);
+    return withGates;
   }
 
   async createGlobalAdmin(actor: any, input: any) {

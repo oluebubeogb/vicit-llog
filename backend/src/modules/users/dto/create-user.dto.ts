@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsObject } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsObject, IsArray, ArrayMaxSize } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 
@@ -37,4 +37,11 @@ export class CreateUserDto {
   @IsOptional()
   @IsObject()
   customFields?: Record<string, any>;
+
+  @ApiPropertyOptional({ description: 'Gate officers only: gates/checkpoints to assign on create', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  gateIds?: string[];
 }

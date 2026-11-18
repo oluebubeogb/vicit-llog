@@ -40,6 +40,7 @@ import Tooltip, { InfoTip } from '@/components/ui/Tooltip';
 import Collapse from '@/components/ui/Collapse';
 import { Empty, Field, Fields, Notice } from '@/components/ui/Bits';
 import BulkImportReport from '@/components/BulkImportReport';
+import { GateAssignmentPicker, GateChips, gateDiffText, gatesFromLocations, type PickGate } from '@/components/GateAssignment';
 import PersonLink from '@/components/PersonLink';
 import { InviteDetail, InviteRow, VisitorCard, inviteSheetProps } from '@/components/InviteBits';
 import { AUDIT_TILE, auditMeta, fieldLabel, fmtValue } from '@/components/AuditBits';
@@ -72,7 +73,9 @@ export default function AdminPage() {
   const [audit, setAudit] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>('tools');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '' });
+  const [form, setForm] = useState({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '', gateIds: [] as string[] });
+  const [gateOptions, setGateOptions] = useState<PickGate[]>([]);
+  const [gatesLoading, setGatesLoading] = useState(true);
   const [formCustom, setFormCustom] = useState<Record<string, any>>({});
   const customFields = useCustomFields(null, true);
   const [msg, setMsg] = useState<{ tone: 'success' | 'error' | 'brand'; text: string } | null>(null);
@@ -113,6 +116,8 @@ export default function AdminPage() {
     api.audit().then(setAudit).catch(() => {});
     api.health().then(setHealth).catch(() => {});
     api.listProfileEdits().then(setProfileEdits).catch(() => {});
+    api.setLocationsOrg(null);
+    api.locations().then((locs: any[]) => setGateOptions(gatesFromLocations(locs))).catch(() => {}).finally(() => setGatesLoading(false));
     if (typeof window !== 'undefined') {
       const t = new URLSearchParams(window.location.search).get('tab') as Tab | null;
       if (t && ['tools', 'users', 'invites', 'audit'].includes(t)) setTab(t);
@@ -126,11 +131,12 @@ export default function AdminPage() {
       return;
     }
     try {
-      const res = await api.createUser({ ...form, ...(customFields.length ? { customFields: formCustom } : {}) });
+      const { gateIds, ...base } = form;
+      const res = await api.createUser({ ...base, ...(form.role === 'GATE' && gateIds.length ? { gateIds } : {}), ...(customFields.length ? { customFields: formCustom } : {}) });
       ok(`${form.fullName} was added${res.emailSent ? ' — welcome email sent' : ' — welcome email NOT sent (check mail settings)'}`);
       setOncePassword(res.initialPassword);
       setShowForm(false);
-      setForm({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '' });
+      setForm({ email: '', fullName: '', role: 'STAFF', portfolio: '', phone: '', gateIds: [] });
       setFormCustom({});
       loadUsers();
     } catch (err: any) {
@@ -230,8 +236,9 @@ export default function AdminPage() {
   }
 
   function openUser(u: any) {
-    setSelected({ ...u });
-    setOriginal({ ...u });
+    const gateIds = (u.gateAssignments || []).map((a: any) => a.gateId);
+    setSelected({ ...u, gateIds });
+    setOriginal({ ...u, gateIds });
     setOverlayMsg(null);
     setOncePassword(null);
   }
@@ -239,7 +246,9 @@ export default function AdminPage() {
   const EDIT_FIELDS = ['fullName', 'email', 'phone', 'portfolio', 'role', 'isActive'] as const;
   const fieldDirty = selected && original ? EDIT_FIELDS.filter((k) => (selected[k] ?? '') !== (original[k] ?? '')) : [];
   const customDirty = !!selected && !!original && JSON.stringify(selected.customFields || {}) !== JSON.stringify(original.customFields || {});
-  const dirty: string[] = [...fieldDirty, ...(customDirty ? ['customFields'] : [])];
+  const sortedIds = (v: any) => [...(v || [])].sort().join(',');
+  const gatesDirty = !!selected && !!original && selected.role === 'GATE' && sortedIds(selected.gateIds) !== sortedIds(original.gateIds);
+  const dirty: string[] = [...fieldDirty, ...(customDirty ? ['customFields'] : []), ...(gatesDirty ? ['gateIds'] : [])];
   const isSelf = selected && me && selected.id === me.id;
 
   async function saveSelected(e: React.FormEvent) {
@@ -254,9 +263,10 @@ export default function AdminPage() {
       const patch: any = {};
       for (const k of dirty) patch[k] = selected[k];
       const updated = await api.updateUser(selected.id, patch);
-      setOverlayMsg({ tone: 'success', text: `Saved ${dirty.map((k) => (k === 'customFields' ? 'extra fields' : fieldLabel(k as any).toLowerCase())).join(', ')}` });
-      setSelected({ ...selected, ...updated });
-      setOriginal({ ...selected, ...updated });
+      setOverlayMsg({ tone: 'success', text: `Saved ${dirty.map((k) => (k === 'customFields' ? 'extra fields' : k === 'gateIds' ? 'gates & checkpoints' : fieldLabel(k as any).toLowerCase())).join(', ')}` });
+      const gateIds = (updated.gateAssignments || []).map((a: any) => a.gateId);
+      setSelected({ ...selected, ...updated, gateIds });
+      setOriginal({ ...selected, ...updated, gateIds });
       loadUsers();
       api.audit().then(setAudit).catch(() => {});
     } catch (err: any) {
@@ -567,11 +577,16 @@ export default function AdminPage() {
               <input placeholder="Full name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className="input" required />
               <input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input" required />
               <input placeholder="Phone (+234…)" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input" />
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="input">
+              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, gateIds: e.target.value === 'GATE' ? form.gateIds : [] })} className="input" data-testid="new-user-role">
                 <option value="STAFF">Staff</option>
                 <option value="GATE">Gate officer</option>
                 <option value="ADMIN">Admin</option>
               </select>
+              {form.role === 'GATE' && (
+                <div className="animate-in rounded-2xl border border-brand-100 bg-brand-50/40 p-3">
+                  <GateAssignmentPicker gates={gateOptions} loading={gatesLoading} value={form.gateIds} onChange={(gateIds) => setForm({ ...form, gateIds })} />
+                </div>
+              )}
               <input placeholder="Portfolio / department" value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} className="input" />
               <CustomFieldInputs fields={customFields} value={formCustom} onChange={setFormCustom} />
               <button type="submit" className="btn-primary w-full">
@@ -616,6 +631,7 @@ export default function AdminPage() {
                           {u.isActive === false && <StatusPill label="Deactivated" tone="slate" className="!py-0 !text-[10px]" />}
                           {u.mustChangePassword && <StatusPill label="Temp password" tone="amber" className="!py-0 !text-[10px]" />}
                         </span>
+                      <GateChips role={u.role} assignments={u.gateAssignments} />
                     </span>
                   </button>
                   <Tooltip content="Preview profile">
@@ -808,6 +824,17 @@ export default function AdminPage() {
                 ))}
               </div>
             </div>
+            {selected.role === 'GATE' && (
+              <div className="animate-in rounded-2xl border border-brand-100 bg-brand-50/40 p-3" data-testid="edit-user-gates">
+                <GateAssignmentPicker gates={gateOptions} loading={gatesLoading} value={selected.gateIds || []} onChange={(gateIds) => setSelected({ ...selected, gateIds })} />
+                {original?.role === 'GATE' && (original.gateIds || []).some((id: string) => !(selected.gateIds || []).includes(id)) && (
+                  <p className="mt-2 text-[11px] text-slate-500">Removed gates take effect when you save. Past checkpoint records stay in the history.</p>
+                )}
+              </div>
+            )}
+            {original?.role === 'GATE' && selected.role !== 'GATE' && (original.gateIds || []).length > 0 && (
+              <Notice tone="brand">Changing the role removes {original.gateIds.length} gate assignment{original.gateIds.length === 1 ? '' : 's'} on save.</Notice>
+            )}
             <div className="tile-muted flex items-center gap-3">
               <div className="flex-1">
                 <p className="text-sm font-semibold text-slate-800">Account active</p>
@@ -822,7 +849,13 @@ export default function AdminPage() {
             {dirty.length > 0 && (
               <div className="animate-in rounded-2xl border border-brand-100 bg-brand-50/60 p-3 text-xs">
                 <p className="mb-1 font-semibold text-brand-800">Pending changes</p>
-                {dirty.map((k) => (
+                {dirty.map((k) => k === 'gateIds' ? (
+                  <p key={k} className="text-slate-600">
+                    <span className="font-medium">Gates &amp; checkpoints:</span> {gateDiffText(original?.gateIds || [], selected.gateIds || [], gateOptions).split(' · ').map((part, i) => (
+                      <span key={i} className={`mr-1.5 font-semibold ${part.startsWith('−') ? 'text-rose-600' : 'text-emerald-700'}`}>{part}</span>
+                    ))}
+                  </p>
+                ) : (
                   <p key={k} className="text-slate-600">
                     <span className="font-medium">{fieldLabel(k)}:</span>{' '}
                     <span className="text-slate-400 line-through">{fmtValue(original?.[k])}</span> → <span className="font-semibold text-emerald-700">{fmtValue(selected[k])}</span>

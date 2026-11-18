@@ -21,6 +21,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { isValidEmail } from '../../common/utils/email';
 import { AuditService } from '../audit/audit.service';
 import { cleanCustomFields } from '../../common/utils/custom-fields';
+import { syncOfficerGates, validateGateIds, withGateAssignments } from '../../common/utils/officer-gates';
 
 const APPROVER_ROLES = ['ADMIN', 'SUPER_ADMIN', 'GLOBAL_ADMIN'];
 
@@ -63,6 +64,9 @@ export class UsersService {
     if (existing) throw new ConflictException('Email already registered');
 
     const customFields = await cleanCustomFields(this.prisma, orgId, (dto as any).customFields, { enforceRequired: true });
+    const role = dto.role || Role.STAFF;
+    const gateIds = await validateGateIds(this.prisma, orgId, dto.gateIds);
+    if (gateIds.length && role !== Role.GATE) throw new BadRequestException('Only gate officers can be assigned to gates or checkpoints');
     const initialPassword = generateNigerianPassword(); // lowercase 5-letter
     const passwordHash = await bcrypt.hash(initialPassword, 12);
 
@@ -71,7 +75,7 @@ export class UsersService {
         email: dto.email.toLowerCase(),
         passwordHash,
         fullName: dto.fullName,
-        role: dto.role || Role.STAFF,
+        role,
         portfolio: dto.portfolio,
         phone: dto.phone,
         organisationId: orgId,
@@ -81,12 +85,15 @@ export class UsersService {
       select: userSelect,
     });
 
+    if (gateIds.length) await syncOfficerGates(this.prisma, this.audit, { orgId, userId: user.id, gateIds, actorId, via: 'user-create' });
+    const [withGates] = await withGateAssignments(this.prisma, [user]);
+
     // Always try welcome email
     const mailResult = await this.mail.sendWelcome(user.email, user.fullName, initialPassword, undefined, orgId);
     await this.audit.log({ action: 'USER_CREATED', entity: 'User', entityId: user.id, userId: actorId, details: { role: user.role, welcomeEmailSent: !!mailResult?.ok } });
 
     return {
-      user,
+      user: withGates,
       // Only include plaintext password in API when env allows admin UI display
       ...(showTempInAdmin() ? { initialPassword } : {}),
       emailSent: !!mailResult?.ok,
@@ -95,11 +102,12 @@ export class UsersService {
   }
 
   async findAll(orgId: string) {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { organisationId: orgId },
       select: { ...userSelect, updatedAt: true, _count: { select: { invites: true } } },
       orderBy: { createdAt: 'desc' },
     });
+    return withGateAssignments(this.prisma, users);
   }
 
   async findById(id: string, orgId?: string) {
@@ -165,6 +173,7 @@ export class UsersService {
       role?: Role;
       isActive?: boolean;
       customFields?: Record<string, any>;
+      gateIds?: string[];
     },
     actorId?: string,
   ) {
@@ -220,25 +229,37 @@ export class UsersService {
       if (before !== v) changes[k] = { from: before, to: v };
       else delete next[k];
     }
+    // Gate / checkpoint assignments (validated before anything is written)
+    const finalRole = (next.role ?? user.role) as Role;
+    const gateIds = data.gateIds !== undefined ? await validateGateIds(this.prisma, orgId, data.gateIds) : undefined;
+    if (gateIds?.length && finalRole !== Role.GATE) throw new BadRequestException('Only gate officers can be assigned to gates or checkpoints');
+
+    let updated: any;
     if (!Object.keys(next).length) {
-      return this.prisma.user.findUnique({ where: { id: userId }, select: userSelect });
+      updated = await this.prisma.user.findUnique({ where: { id: userId }, select: userSelect });
+    } else {
+      updated = await this.prisma.user.update({
+        where: { id: userId },
+        data: next,
+        select: userSelect,
+      });
+      await this.audit.log({
+        action: 'USER_UPDATED',
+        entity: 'User',
+        entityId: userId,
+        userId: actorId,
+        details: { changes },
+      });
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: userId },
-      data: next,
-      select: userSelect,
-    });
-
-    await this.audit.log({
-      action: 'USER_UPDATED',
-      entity: 'User',
-      entityId: userId,
-      userId: actorId,
-      details: { changes },
-    });
-
-    return updated;
+    if (finalRole !== Role.GATE && user.role === Role.GATE) {
+      // No longer a gate officer: drop their assignments (past records stay)
+      await syncOfficerGates(this.prisma, this.audit, { orgId, userId, gateIds: [], actorId, via: 'role-change' });
+    } else if (gateIds !== undefined) {
+      await syncOfficerGates(this.prisma, this.audit, { orgId, userId, gateIds, actorId, via: 'user-edit' });
+    }
+    const [withGates] = await withGateAssignments(this.prisma, [updated]);
+    return withGates;
   }
 
   async bulkCreate(

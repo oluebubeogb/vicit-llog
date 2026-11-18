@@ -1,4 +1,4 @@
-import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength , IsObject } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength, IsObject, IsArray, ArrayMaxSize } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 
@@ -11,4 +11,6 @@ export class UpdateUserDto {
   @ApiPropertyOptional({ enum: Role }) @IsOptional() @IsEnum(Role) role?: Role;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsObject() customFields?: Record<string, any>;
+  /** Gate officers only: the full list of gates/checkpoints they should be assigned to. */
+  @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) gateIds?: string[];
 }
