@@ -2,13 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { sendSms } from './providers/sms.provider';
 import { sendWhatsApp } from './providers/whatsapp.provider';
+import { NotificationHub } from './notification.hub';
 import { isPushReady, pushEnabledFlag, sendPush, vapidPublicKey } from './providers/push.provider';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private hub: NotificationHub) {}
 
   /**
    * Create in-app notification and fan-out to SMS / WhatsApp (when requested)
@@ -39,6 +40,20 @@ export class NotificationsService {
         },
       },
     });
+
+    if (channels.includes('in_app')) {
+      // v31: live update for open tabs (bell, toast, double-tune chime) before slower channels.
+      this.hub.publish(data.userId, {
+        type: 'notification',
+        id: notification.id,
+        title: data.title,
+        body: data.body,
+        kind: data.meta?.type || null,
+        url: data.link || data.meta?.url || '/notifications',
+        callId: data.meta?.callId || null,
+        createdAt: notification.createdAt,
+      });
+    }
 
     const message = `${data.title}\n${data.body}`;
     const delivery: Record<string, any> = {};

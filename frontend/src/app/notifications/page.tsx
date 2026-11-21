@@ -66,7 +66,8 @@ const TONE_TILE: Record<Tone, string> = {
   violet: 'from-violet-100 to-violet-50 text-violet-600',
 };
 type Filter = 'all' | 'gate' | 'other' | 'calls';
-const GATE_TYPES = ['ARRIVAL', 'EXIT', 'ENTRY_DENIED'];
+// v31: every gate-movement alert sits on the Gate tab.
+const GATE_TYPES = ['ARRIVAL', 'EXIT', 'ENTRY_DENIED', 'VISITOR_AT_GATE', 'CHECKPOINT_PASSED', 'CHECKPOINT_EXIT_PASSED', 'VISITOR_EXITED', 'VISITOR_OVERSTAY', 'ITEM_WITHHELD', 'ITEM_RETURNED', 'ITEM_SEIZED', 'ITEM_OTHER', 'TAG_ISSUED', 'PASS_ISSUED', 'TAG_RETURNED', 'PASS_RETURNED', 'TAG_LOST', 'PASS_LOST'];
 /** On the All tab each section shows at most this many items, then "View more". */
 const ALL_LIMIT = 5;
 
@@ -411,7 +412,7 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     setRole(getUser()?.role ?? null);
-    (async () => {
+    const load = async () => {
       try {
         const list = await api.notifications();
         setItems(list);
@@ -426,7 +427,11 @@ export default function NotificationsPage() {
       } finally {
         setLoading(false);
       }
-    })();
+    };
+    load();
+    // v31: new alerts arrive live (SSE / push) while this page is open.
+    window.addEventListener('vicit:notification', load);
+    return () => window.removeEventListener('vicit:notification', load);
   }, []);
 
   const isGate = (n: any) => GATE_TYPES.includes(n?.meta?.type);

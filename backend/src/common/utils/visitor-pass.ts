@@ -60,6 +60,9 @@ export async function linkSameDayVisits(prisma: PrismaService, visitorId: string
       include: { invite: { select: { id: true, expectedAt: true, createdAt: true, passphrase: true, token: true, purpose: true, organisationId: true, locationId: true, hostId: true } } },
     });
     candidates = candidates.filter((v) => visitDayKey(v) === day);
+    // v31 (Cause A guard): guests on the SAME invite are separate people even when they share an
+    // email or phone (e.g. one assistant's address for the whole group) — never link or mirror them.
+    candidates = candidates.filter((v) => v.id === visitor.id || v.inviteId !== visitor.inviteId);
   }
   if (!candidates.some((v) => v.id === visitor.id)) {
     candidates = [visitor, ...candidates];
@@ -84,7 +87,7 @@ export async function linkSameDayVisits(prisma: PrismaService, visitorId: string
       },
     },
   });
-  const sameDay = visitors.filter((v) => visitDayKey(v) === day);
+  const sameDay = visitors.filter((v) => visitDayKey(v) === day && (v.id === visitor.id || v.inviteId !== visitor.inviteId));
   return { passToken: existing, visitorIds: sameDay.map((v) => v.id), visitors: sameDay, day };
 }
 

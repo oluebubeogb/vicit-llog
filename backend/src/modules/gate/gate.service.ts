@@ -18,6 +18,7 @@ import { ContractorsService } from '../contractors/contractors.service';
 import { GatePassService } from './gate-pass.service';
 import { allowedEntryModes, cleanPlate, cleanVehicleDetails, vehicleMode } from '../../common/utils/entry-modes';
 import { v4 as uuidv4 } from 'uuid';
+import { HostNotifierService } from '../notifications/host-notifier.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -30,9 +31,10 @@ export class GateService {
     private mail: MailService,
     private contractors: ContractorsService,
     private passes: GatePassService,
+    private hostEvents: HostNotifierService,
   ) {}
 
-  async lookup(passphraseOrQr: string, actor?: any) {
+  async lookup(passphraseOrQr: string, actor?: any, atGateId?: string) {
     const parsed = parseGateCode(passphraseOrQr);
     if (parsed.contractorToken) {
       const found = await this.contractors.lookup(parsed.contractorToken, actor);
@@ -145,6 +147,14 @@ export class GateService {
     });
 
     const presentedVisitors = await this.withPassItems(this.lookupVisitors(invite, linked, !seedVisitorId && !scannedVisitorId).map(presentVisitor), invite, actor);
+    if (atGateId && actor) {
+      const targets = scannedVisitorId
+        ? presentedVisitors.filter((v: any) => v.id === scannedVisitorId)
+        : seedVisitorId
+          ? presentedVisitors.filter((v: any) => v.id === seedVisitorId || (linked.passToken && v.passToken === linked.passToken))
+          : presentedVisitors.length === 1 ? presentedVisitors : [];
+      for (const t of targets) this.announceAtGate(t.id, String(atGateId), actor).catch(() => null);
+    }
     return {
       kind: 'visitor',
       inviteId: invite.id,
@@ -173,6 +183,47 @@ export class GateService {
       // Gate 1 per guest (multi-site agencies follow each guest's own route); the top-level id is kept for older screens.
       passGateId: presentedVisitors.find((v: any) => v.id === scannedVisitorId)?.passGateId ?? presentedVisitors[0]?.passGateId ?? (await this.passes.firstGateFor({ invite }, { actor }))?.id ?? null,
     };
+  }
+
+  private announced = new Map<string, number>();
+
+  /**
+   * v31: "<guest> is at <gate>" for the host (in-app only, once per guest/gate/direction) when a
+   * personal code is scanned at the officer's station and the guest is due there.
+   */
+  async announceAtGate(visitorId: string, gateId: string, actor: any) {
+    const gate = await this.prisma.gate.findFirst({ where: { id: gateId, isActive: true }, include: { location: true, assignments: true } });
+    if (!gate) return false;
+    const visitor = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: true } });
+    if (!visitor || visitor.invite.organisationId !== gate.location.organisationId) return false;
+    if (visitor.invite.locationId && visitor.invite.locationId !== gate.locationId) return false;
+    const global = ['SUPER_ADMIN', 'GLOBAL_GATE'].includes(actor.role);
+    if (!global && gate.location.organisationId !== actor.orgId) return false;
+    if (actor.role === 'GATE' && !gate.assignments.some((a: any) => a.userId === actor.id)) return false;
+    let direction: 'ENTRY' | 'EXIT';
+    if (visitor.status === VisitStatus.INVITED && visitor.photoPath) direction = 'ENTRY';
+    else if (visitor.status === VisitStatus.ARRIVED) direction = 'EXIT';
+    else return false;
+    const events = await this.prisma.gateVisit.findMany({ where: { visitorId, direction, decision: 'PASSED', gate: { locationId: gate.locationId } }, select: { gateId: true } });
+    const passed = new Set(events.map((e) => e.gateId));
+    if (passed.has(gate.id)) return false;
+    const before = await this.prisma.gate.findMany({ where: { locationId: gate.locationId, isActive: true, sequence: direction === 'ENTRY' ? { lt: gate.sequence } : { gt: gate.sequence } }, select: { id: true } });
+    if (before.some((g) => !passed.has(g.id))) return false;
+    const key = `${visitorId}:${gate.id}:${direction}`;
+    const now = Date.now();
+    for (const [k, t] of Array.from(this.announced.entries())) if (now - t > 12 * 3600000) this.announced.delete(k);
+    if (this.announced.has(key)) return false;
+    this.announced.set(key, now);
+    const dup = await this.prisma.notification.findFirst({ where: { userId: visitor.invite.hostId, AND: [{ meta: { path: ['type'], equals: 'VISITOR_AT_GATE' } }, { meta: { path: ['visitorId'], equals: visitorId } }, { meta: { path: ['gateId'], equals: gate.id } }, { meta: { path: ['direction'], equals: direction } }] }, select: { id: true } });
+    if (dup) return false;
+    await this.hostEvents.visitorEvent(visitorId, {
+      type: 'VISITOR_AT_GATE',
+      title: direction === 'ENTRY' ? `${visitor.fullName} is at ${gate.name}` : `${visitor.fullName} is leaving via ${gate.name}`,
+      body: direction === 'ENTRY' ? `${visitor.fullName} has reached ${gate.name} and is being checked.` : `${visitor.fullName} is at ${gate.name} on the way out.`,
+      meta: { gateId: gate.id, direction },
+      email: 'none',
+    });
+    return true;
   }
 
   /** v22: every tag / printed pass issued to these guests (open and closed), for the guest card + history. */
@@ -428,25 +479,8 @@ export class GateService {
       return tx.gateVisit.findUnique({ where: { id: created.id }, include: { gate: { include: { location: true } }, officer: { select: { id: true, fullName: true } }, particulars: true } });
     });
     await this.audit.log({ action: `CHECKPOINT_${decision}`, entity: 'Visitor', entityId: visitorId, userId: actor.id, details: { gateId, gateName: gate.name, particulars: particulars.length, direction } });
+    await this.notifyCheckpoint(visitorId, gate, { decision, direction, prevStatus: visitor.status, notes: String(body.notes || '').trim(), withheld: particulars.filter((i: any) => String(i.kind).toUpperCase() === 'WITHHELD').map((i: any) => String(i.description).trim()) });
     await this.mirrorCheckpointToLinked(visitorId, gate, { decision, direction, actorId: actor.id, particularsChecked: body.particularsChecked === true, evidencePhotos, notes: body.notes ? String(body.notes).slice(0, 2000) : null, entryMode: body.entryMode });
-    if (decision === 'DENIED') {
-      await this.notifications.create({ userId: visitor.invite.hostId, title: 'Visitor entry declined', body: `${visitor.fullName} was declined at ${gate.name}: ${String(body.notes).trim()}`, meta: { visitorId, inviteId: visitor.inviteId, type: 'ENTRY_DENIED' }, channels: ['in_app'] });
-      const host = await this.prisma.user.findUnique({ where: { id: visitor.invite.hostId }, select: { email: true, fullName: true } });
-      if (host?.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'denied', reason: String(body.notes).trim(), at: new Date().toISOString(), organisationId: visitor.invite.organisationId }).catch(() => {});
-    }
-    if (decision === 'PASSED') {
-      const fresh = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: true } });
-      if (fresh?.status === VisitStatus.ARRIVED && visitor.status !== VisitStatus.ARRIVED) {
-        const host = await this.prisma.user.findUnique({ where: { id: fresh.invite.hostId }, select: { id: true, phone: true, email: true, fullName: true } });
-        if (host) {
-          const channels: Array<'in_app' | 'sms' | 'whatsapp'> = ['in_app'];
-          if (process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== 'log' && host.phone) channels.push('sms');
-          if (process.env.WHATSAPP_PROVIDER && process.env.WHATSAPP_PROVIDER !== 'log' && host.phone) channels.push('whatsapp');
-          await this.notifications.create({ userId: host.id, title: 'Visitor Arrived', body: `${visitor.fullName} has completed all checkpoints and entered the premises.`, meta: { visitorId, inviteId: visitor.inviteId, type: 'HOST_ARRIVAL_CONFIRMATION', requiresHostResponse: true }, channels, phone: host.phone || undefined });
-          if (host.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: visitor.fullName, purpose: visitor.invite.purpose, event: 'arrival', at: fresh.enteredAt?.toISOString(), organisationId: fresh.invite.organisationId }).catch(() => {});
-        }
-      }
-    }
     return event;
   }
 
@@ -522,6 +556,15 @@ export class GateService {
       },
     });
     await this.audit.log({ action: `WITHHELD_ITEM_${resolution}`, entity: 'GateParticular', entityId: particularId, userId: actor.id, details: { gateId: gate.id, visitorId: item.gateVisit.visitorId, note } });
+    const label = resolution === 'RETURNED' ? 'returned' : resolution === 'SEIZED' ? 'seized' : 'resolved';
+    const vName = (await this.prisma.visitor.findUnique({ where: { id: item.gateVisit.visitorId }, select: { fullName: true } }))?.fullName || 'Your guest';
+    await this.hostEvents.visitorEvent(item.gateVisit.visitorId, {
+      type: `ITEM_${resolution}`,
+      title: `Withheld item ${label}`,
+      body: `${item.description} was ${label} at ${gate.name} for ${vName}${note ? `: ${note}` : ''}.`,
+      meta: { gateId: gate.id, particularId },
+      email: resolution === 'RETURNED' ? 'none' : 'now',
+    });
     return updated;
   }
 
@@ -1032,6 +1075,56 @@ export class GateService {
           await this.prisma.visitor.update({ where: { id: other.id }, data: { status: VisitStatus.EXITED, exitedAt: new Date(), exitById: opts.actorId } });
         }
       }
+      // v31: the linked visit's own host hears about it too (it was silent before).
+      await this.notifyCheckpoint(other.id, gate, { decision: opts.decision, direction: opts.direction, prevStatus: other.status, notes: opts.notes || '', withheld: [], mirrored: true });
+    }
+  }
+
+  /**
+   * v31: tell the host about one guest's checkpoint result.
+   * ENTRY pass (not last gate) / EXIT pass (not last gate): in-app now + email in the 1-minute digest.
+   * Final ENTRY = arrived (in-app + SMS/WhatsApp if configured + email now). Final EXIT = left (in-app + email now).
+   * DENIED and withheld items: in-app + email now.
+   */
+  private async notifyCheckpoint(visitorId: string, gate: any, o: { decision: string; direction: string; prevStatus: string; notes: string; withheld: string[]; mirrored?: boolean }) {
+    try {
+      const fresh = await this.prisma.visitor.findUnique({ where: { id: visitorId }, include: { invite: true } });
+      if (!fresh) return;
+      const name = fresh.fullName;
+      const viaLinked = o.mirrored ? ' (linked visit)' : '';
+      if (o.decision === 'DENIED') {
+        const what = o.direction === 'EXIT' ? 'exit was held' : 'was declined';
+        await this.notifications.create({ userId: fresh.invite.hostId, title: o.direction === 'EXIT' ? 'Visitor exit held' : 'Visitor entry declined', body: `${name} ${what} at ${gate.name}${viaLinked}: ${o.notes}`, meta: { visitorId, inviteId: fresh.inviteId, gateId: gate.id, type: 'ENTRY_DENIED', url: '/notifications' }, channels: ['in_app'] });
+        const host = await this.prisma.user.findUnique({ where: { id: fresh.invite.hostId }, select: { email: true, fullName: true } });
+        if (host?.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: name, purpose: fresh.invite.purpose, event: 'denied', reason: `${gate.name}: ${o.notes}`, at: new Date().toISOString(), organisationId: fresh.invite.organisationId }).catch(() => {});
+      } else if (o.direction === 'ENTRY' && fresh.status === VisitStatus.ARRIVED && o.prevStatus !== VisitStatus.ARRIVED) {
+        const host = await this.prisma.user.findUnique({ where: { id: fresh.invite.hostId }, select: { id: true, phone: true, email: true, fullName: true } });
+        if (host) {
+          const channels: Array<'in_app' | 'sms' | 'whatsapp'> = ['in_app'];
+          if (process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== 'log' && host.phone) channels.push('sms');
+          if (process.env.WHATSAPP_PROVIDER && process.env.WHATSAPP_PROVIDER !== 'log' && host.phone) channels.push('whatsapp');
+          await this.notifications.create({ userId: host.id, title: 'Visitor Arrived', body: `${name} has passed ${gate.name}, completed all checkpoints and entered the premises.`, meta: { visitorId, inviteId: fresh.inviteId, gateId: gate.id, type: 'HOST_ARRIVAL_CONFIRMATION', requiresHostResponse: true, url: '/notifications' }, channels, phone: host.phone || undefined });
+          if (host.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: name, purpose: fresh.invite.purpose, event: 'arrival', at: fresh.enteredAt?.toISOString(), organisationId: fresh.invite.organisationId }).catch(() => {});
+        }
+      } else if (o.direction === 'EXIT' && fresh.status === VisitStatus.EXITED && o.prevStatus !== VisitStatus.EXITED) {
+        await this.hostEvents.visitorEvent(visitorId, { type: 'VISITOR_EXITED', title: 'Visitor left', body: `${name} passed ${gate.name} and has left the premises${viaLinked}.`, meta: { gateId: gate.id }, email: 'none' });
+        const host = await this.prisma.user.findUnique({ where: { id: fresh.invite.hostId }, select: { email: true, fullName: true } });
+        if (host?.email) await this.mail.sendHostVisitorUpdate({ to: host.email, hostName: host.fullName, guestName: name, purpose: fresh.invite.purpose, event: 'exit', at: (fresh.exitedAt || new Date()).toISOString(), organisationId: fresh.invite.organisationId }).catch(() => {});
+      } else {
+        const next = await this.prisma.gate.findFirst({
+          where: { locationId: gate.locationId, isActive: true, sequence: o.direction === 'EXIT' ? { lt: gate.sequence } : { gt: gate.sequence } },
+          orderBy: { sequence: o.direction === 'EXIT' ? 'desc' : 'asc' },
+          select: { name: true },
+        });
+        const verb = o.direction === 'EXIT' ? 'on the way out' : 'on the way in';
+        const body = `${name} passed ${gate.name} ${verb}${next ? ` · next: ${next.name}` : ''}${viaLinked}.`;
+        await this.hostEvents.visitorEvent(visitorId, { type: o.direction === 'EXIT' ? 'CHECKPOINT_EXIT_PASSED' : 'CHECKPOINT_PASSED', title: `${name} passed ${gate.name}`, body, emailLine: `passed ${gate.name} ${verb}${next ? ` (next: ${next.name})` : ''}`, meta: { gateId: gate.id, direction: o.direction }, email: 'digest' });
+      }
+      if (o.withheld.length) {
+        await this.hostEvents.visitorEvent(visitorId, { type: 'ITEM_WITHHELD', title: 'Item withheld at the gate', body: `${gate.name} is holding ${o.withheld.join(', ')} for ${name}. It is returned on the way out.`, meta: { gateId: gate.id }, email: 'now' });
+      }
+    } catch {
+      /* notifications never undo a checkpoint */
     }
   }
 

@@ -6,6 +6,7 @@ import * as QRCode from 'qrcode';
 import PDFDocument = require('pdfkit');
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { HostNotifierService } from '../notifications/host-notifier.service';
 import { buildGateQrPayload, QR_RENDER_OPTIONS } from '../../common/utils/qr';
 import { linkSameDayVisits } from '../../common/utils/visitor-pass';
 import { attendanceTimeZone, startOfNextLocalDay } from '../../common/utils/attendance-day';
@@ -42,7 +43,7 @@ type PassCard = {
 
 @Injectable()
 export class GatePassService {
-  constructor(private prisma: PrismaService, private audit: AuditService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, private hostEvents: HostNotifierService) {}
 
   // ---------------------------------------------------------------- protocol
   async protocol(): Promise<GatePassProtocol> {
@@ -236,6 +237,7 @@ export class GatePassService {
       },
     });
     await this.audit.log({ action: kind === 'TAG' ? 'TAG_ISSUED' : 'PASS_ISSUED', entity: 'Visitor', entityId: visitor.id, userId: actor.id, details: { itemId: item.id, gateId: gate.id, gateName: gate.name, tagNumber, destination: item.destination, guest: visitor.fullName } });
+    await this.hostEvents.visitorEvent(visitor.id, { type: `${kind}_ISSUED`, title: kind === 'TAG' ? 'Visitor tag issued' : 'Visitor pass issued', body: `${visitor.fullName} was given a ${kind === 'TAG' ? 'tag' : 'pass'}${tagNumber ? ` (${tagNumber})` : ''} at ${gate.name}.`, meta: { gateId: gate.id, itemId: item.id } });
     return item;
   }
 
@@ -255,6 +257,14 @@ export class GatePassService {
       data: { status, lostReason: status === 'LOST' ? reason.slice(0, 500) : null, closedById: actor.id, closedAt: new Date() },
     });
     await this.audit.log({ action: `${item.kind}_${status}`, entity: 'Visitor', entityId: item.visitorId, userId: actor.id, details: { itemId: id, gateId: item.gateId, gateName: gate.name, tagNumber: item.tagNumber, reason: status === 'LOST' ? reason : undefined, guest: visitor.fullName } });
+    const word = item.kind === 'TAG' ? 'tag' : 'pass';
+    await this.hostEvents.visitorEvent(item.visitorId, {
+      type: `${item.kind}_${status}`,
+      title: status === 'LOST' ? `Visitor ${word} reported lost` : `Visitor ${word} returned`,
+      body: status === 'LOST' ? `${visitor.fullName}'s ${word}${item.tagNumber ? ` (${item.tagNumber})` : ''} was reported lost at ${gate.name}: ${reason}` : `${visitor.fullName} returned the ${word}${item.tagNumber ? ` (${item.tagNumber})` : ''} at ${gate.name}.`,
+      meta: { gateId: gate.id, itemId: id },
+      email: status === 'LOST' ? 'now' : 'none',
+    });
     return updated;
   }
 

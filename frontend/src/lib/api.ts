@@ -134,8 +134,8 @@ export const api = {
   },
   confirmPhoto: (token: string, visitorId: string, pendingId: string) =>
     request(`/visitors/${token}/${visitorId}/photo/confirm`, { method: 'POST', body: JSON.stringify({ pendingId }) }),
-  gateLookup: (code: string) =>
-    request(`/gate/lookup?code=${encodeURIComponent(code)}`),
+  gateLookup: (code: string, atGateId?: string) =>
+    request(`/gate/lookup?code=${encodeURIComponent(code)}${atGateId ? `&atGateId=${encodeURIComponent(atGateId)}` : ''}`),
   gateVisits: (filter?: string, q?: string) => {
     const p = new URLSearchParams();
     if (filter) p.set('filter', filter);
@@ -366,6 +366,8 @@ export const api = {
   activeRing: () => request('/rings/active'),
   recentRings: () => request('/rings/recent'),
   ringCallback: (callId: string) => request('/rings/callback', { method: 'POST', body: JSON.stringify({ callId }) }),
+  notificationStreamUrl: () => `${API_URL}/notifications/stream?token=${encodeURIComponent(getToken() || '')}`,
+  setMyPreferences: (body: { notificationSound?: boolean }) => request('/users/me/preferences', { method: 'PATCH', body: JSON.stringify(body) }),
   ringStreamUrl: () => `${API_URL}/rings/stream?token=${encodeURIComponent(getToken() || '')}`,
   platformInvite: (id: string) => request(`/platform/invites/${id}`),
   exportCsv: (from?: string, to?: string, columns?: string[]) => {

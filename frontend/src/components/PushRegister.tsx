@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, X } from 'lucide-react';
-import { getToken } from '@/lib/api';
+import { api, getToken } from '@/lib/api';
+import { playChime } from '@/lib/ringtone';
+import { firstTimeSeen, notificationSoundOn } from '@/lib/notifySound';
 import { setupPush } from '@/lib/push';
 
 type Toast = { title: string; body: string; url: string };
@@ -22,6 +24,58 @@ export default function PushRegister() {
   const started = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
+  /** One path for live (SSE) and foreground push alerts: refresh the badge, toast, double-tune chime. */
+  const show = (p: { title: string; body: string; url?: string; callId?: string; type?: string; notificationId?: string }) => {
+    if (!firstTimeSeen(p.notificationId)) return;
+    window.dispatchEvent(new Event('vicit:notification'));
+    if (p.callId || p.type === 'RING' || (p.url || '').includes('/ring')) return; // calls keep their ringtone
+    setToast({ title: p.title, body: p.body, url: p.url || '/notifications' });
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setToast(null), 6000);
+    if (notificationSoundOn()) playChime();
+  };
+
+  // v31: live notifications over Server-Sent Events while the app is open (push is the backup).
+  const [jwtKey, setJwtKey] = useState<string | null>(null);
+  useEffect(() => {
+    const sync = () => setJwtKey(getToken());
+    sync();
+    window.addEventListener('vicit-auth-updated', sync);
+    return () => window.removeEventListener('vicit-auth-updated', sync);
+  }, []);
+  useEffect(() => {
+    if (!jwtKey || typeof EventSource === 'undefined') return;
+    let es: EventSource | null = null;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+    let backoff = 2000;
+    const open = () => {
+      if (stopped) return;
+      es = new EventSource(api.notificationStreamUrl());
+      es.onmessage = (ev) => {
+        backoff = 2000;
+        let d: any = null;
+        try { d = JSON.parse(ev.data); } catch { return; }
+        if (d?.type !== 'notification') return;
+        show({ title: d.title || 'Vicit', body: d.body || '', url: d.url || '/notifications', callId: d.callId || '', type: d.kind || '', notificationId: d.id });
+      };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (stopped) return;
+        retry = setTimeout(open, backoff);
+        backoff = Math.min(backoff * 2, 30000);
+      };
+    };
+    open();
+    return () => {
+      stopped = true;
+      clearTimeout(retry);
+      es?.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jwtKey]);
+
   useEffect(() => {
     const jwt = getToken();
     if (!jwt) {
@@ -34,13 +88,7 @@ export default function PushRegister() {
     started.current = jwt;
     // Let the page settle before the (one-time) browser permission prompt.
     const t = setTimeout(() => {
-      setupPush((p) => {
-        window.dispatchEvent(new Event('vicit:notification'));
-        if (p.callId || (p.url || '').includes('/ring')) return;
-        setToast(p);
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => setToast(null), 6000);
-      })
+      setupPush((p: any) => show(p))
         .then((u) => {
           unsub.current?.();
           unsub.current = u || null;

@@ -103,6 +103,14 @@ export class UsersController {
     return this.usersService.findById(user.id);
   }
 
+  @Patch('me/preferences')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Update my preferences (notification sound)' })
+  setPreferences(@Body() body: any, @CurrentUser() user: any) {
+    return this.usersService.setPreferences(user.id, body);
+  }
+
   @Post('me/profile-edit')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)

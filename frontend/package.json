@@ -1,6 +1,6 @@
 {
   "name": "vicit-llog-frontend",
-  "version": "1.0.1-v30",
+  "version": "1.0.1-v31",
   "private": true,
   "scripts": {
     "dev": "next dev",

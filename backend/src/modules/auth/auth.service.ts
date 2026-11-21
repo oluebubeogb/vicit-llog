@@ -46,6 +46,7 @@ export class AuthService {
         portfolio: user.portfolio,
         phone: user.phone,
         mustChangePassword: user.mustChangePassword,
+        notificationSound: (user as any).notificationSound !== false,
         organisation: {
           id: user.organisation.id,
           name: user.organisation.name,

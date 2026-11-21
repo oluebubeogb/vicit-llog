@@ -7,7 +7,9 @@ import { useBrand } from '@/components/BrandProvider';
 import { mergeTemplates, profileVars, renderList, renderTemplate } from '@/lib/profileTemplate';
 import { isValidEmail } from '@/lib/email';
 import { detectHumanInVideo } from '@/lib/detectHuman';
-import { LogOut, User, Camera, Loader2, Send } from 'lucide-react';
+import { LogOut, User, Camera, Loader2, Send, Volume2, VolumeX } from 'lucide-react';
+import { notificationSoundOn, setNotificationSound } from '@/lib/notifySound';
+import { playChime, unlockRingtone } from '@/lib/ringtone';
 import PageHeader from '@/components/ui/PageHeader';
 import Sheet from '@/components/ui/Sheet';
 import Avatar from '@/components/ui/Avatar';
@@ -25,6 +27,23 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 export default function ProfilePage() {
   const router = useRouter();
   const [user, setLocal] = useState<any>(null);
+  // v31: per-user "Notification sound" (server-side, on by default).
+  const [soundOn, setSoundOn] = useState(true);
+  const [soundSaving, setSoundSaving] = useState(false);
+  useEffect(() => { setSoundOn(notificationSoundOn()); }, [user]);
+  const toggleSound = async () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    setSoundSaving(true);
+    try {
+      await setNotificationSound(next);
+      if (next) { unlockRingtone(); playChime(); }
+    } catch {
+      setSoundOn(!next);
+    } finally {
+      setSoundSaving(false);
+    }
+  };
   // v25: Super Admin profile header template (defaults = name, email, role badge, agency)
   const { brand: tplBrand } = useBrand();
   const myTpl = mergeTemplates((tplBrand as any)?.profileTemplates).myProfile;
@@ -322,6 +341,30 @@ export default function ProfilePage() {
           <Send size={15} /> {saving ? (approver ? 'Saving…' : 'Submitting…') : approver ? 'Save changes' : 'Submit for approval'}
         </button>
       </form>
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={soundOn}
+        disabled={soundSaving}
+        onClick={toggleSound}
+        data-testid="notification-sound"
+        className="surface animate-in mb-5 flex w-full items-center gap-3 text-left transition hover:shadow-soft"
+      >
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${soundOn ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-400'}`}>
+          {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1 text-sm font-semibold text-slate-800">
+            Notification sound
+            <InfoTip text="A short double tune when a new alert arrives while the app is open. Calls always ring." size={12} />
+          </span>
+          <span className="block text-xs text-slate-500">{soundOn ? 'Double tune on new alerts' : 'Silent — alerts still show'}</span>
+        </span>
+        <span className={`relative h-7 w-12 shrink-0 rounded-full transition ${soundOn ? 'bg-gradient-to-r from-brand-500 to-brand-700' : 'bg-slate-200'}`}>
+          <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${soundOn ? 'left-6' : 'left-1'}`} />
+        </span>
+      </button>
 
       {user && (
         <div className="mb-4">

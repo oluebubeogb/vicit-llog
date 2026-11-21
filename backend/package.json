@@ -1,6 +1,6 @@
 {
   "name": "vicit-llog-backend",
-  "version": "1.0.1-v30",
+  "version": "1.0.1-v31",
   "description": "Vicit Llog Phase 1 – NestJS API",
   "scripts": {
     "build": "nest build",

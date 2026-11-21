@@ -178,6 +178,8 @@ model User {
   scannedAttendances   StaffAttendance[] @relation("StaffAttendanceScanner")
   /// Values for the agency's custom user fields, keyed by AgencyCustomField.key
   customFields         Json?
+  /// v31: play the two-note chime for new in-app notifications (on by default)
+  notificationSound    Boolean   @default(true)
 }
 
 model Invite {
@@ -235,6 +237,8 @@ model Visitor {
   entryMode   EntryMode?
   enteredAt   DateTime?
   exitedAt    DateTime?
+  /// v31: set once when the host was alerted that this guest stayed past the visit end
+  overstayNotifiedAt DateTime?
   deniedAt    DateTime?
   deniedReason String?
   gateId      String?

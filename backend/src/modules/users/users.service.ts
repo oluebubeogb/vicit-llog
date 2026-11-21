@@ -39,6 +39,7 @@ const userSelect = {
   organisationId: true,
   staffBadgePhotoPath: true,
   customFields: true,
+  notificationSound: true,
 } as const;
 
 function showTempInAdmin(): boolean {
@@ -907,4 +908,12 @@ export class UsersService {
     return filepath;
   }
 
+
+  /** v31: the signed-in user's own preferences (currently the notification chime). */
+  async setPreferences(userId: string, body: { notificationSound?: unknown }) {
+    const data: any = {};
+    if (typeof body?.notificationSound === 'boolean') data.notificationSound = body.notificationSound;
+    if (!Object.keys(data).length) return this.prisma.user.findUnique({ where: { id: userId }, select: { notificationSound: true } });
+    return this.prisma.user.update({ where: { id: userId }, data, select: { notificationSound: true } });
+  }
 }

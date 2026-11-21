@@ -36,7 +36,7 @@ async function swRegistration() {
  * Prompts only while permission is "default". Returns nothing to unsubscribe from
  * a Firebase listener — foreground pushes arrive as service-worker messages.
  */
-export async function setupPush(onForeground?: (p: { title: string; body: string; url: string; callId?: string; type?: string }) => void) {
+export async function setupPush(onForeground?: (p: { title: string; body: string; url: string; callId?: string; type?: string; notificationId?: string }) => void) {
   if (!getToken() || !pushSupported()) return null;
   const cfg = await api.pushConfig().catch(() => null);
   if (!cfg?.enabled || !cfg.publicKey) return null;
@@ -75,6 +75,7 @@ export async function setupPush(onForeground?: (p: { title: string; body: string
       url: d.url || '/notifications',
       callId: d.callId || '',
       type: d.kind || d.pushType || '',
+      notificationId: d.notificationId || '',
     });
   };
   navigator.serviceWorker.addEventListener('message', onMessage);

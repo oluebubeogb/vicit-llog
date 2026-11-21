@@ -1,5 +1,5 @@
 /* Vicit Llog service worker — asset cache + standard Web Push (VAPID). */
-const CACHE = 'vicit-llog-1.0.1-v30';
+const CACHE = 'vicit-llog-1.0.1-v31';
 const ASSETS = ['/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
@@ -85,6 +85,7 @@ self.addEventListener('push', (event) => {
         url: data.url || '/notifications',
         callId: data.callId || '',
         kind: data.type || '',
+        notificationId: data.notificationId || '',
       });
     }
     const visible = clients.some((client) => client.visibilityState === 'visible');
@@ -105,7 +106,8 @@ self.addEventListener('push', (event) => {
       tag: data.tag || data.callId || data.notificationId || 'vicit',
       renotify: true,
       requireInteraction: data.type === 'RING',
-      vibrate: data.type === 'RING' ? [300, 120, 300, 120, 500] : [80],
+      // v31: double buzz for a normal alert (Android), long pattern for a call.
+      vibrate: data.type === 'RING' ? [300, 120, 300, 120, 500] : [120, 80, 120],
       ...(actions ? { actions } : {}),
       data: { url: data.url || '/notifications', callId: data.callId || null, type: data.type || '' },
     });

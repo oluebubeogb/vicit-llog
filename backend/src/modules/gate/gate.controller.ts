@@ -81,8 +81,9 @@ export class GateController {
 
   @Get('lookup')
   @ApiOperation({ summary: 'Lookup visitor by passphrase or QR payload' })
-  lookup(@Query('code') code: string, @CurrentUser() user: any) {
-    return this.gateService.lookup(code, user);
+  lookup(@Query('code') code: string, @CurrentUser() user: any, @Query('atGateId') atGateId?: string) {
+    // v31: atGateId = the officer's station; a personal scan there tells the host "reached <gate>".
+    return this.gateService.lookup(code, user, atGateId);
   }
 
   @Get('visits')

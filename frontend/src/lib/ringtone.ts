@@ -73,3 +73,33 @@ export function stopRingtone() {
   try { gain?.disconnect(); } catch { /* ignore */ }
   gain = null;
 }
+
+/**
+ * v31: short "double tune" for a new in-app notification (two rising notes, ~0.45 s).
+ * Uses the same AudioContext as the ringtone, so the existing tap-to-unlock applies.
+ * Never plays over a ringing call.
+ */
+export function playChime() {
+  if (timer != null) return false;
+  const c = context();
+  if (!c) return false;
+  if (c.state === 'suspended') c.resume().catch(() => {});
+  if (c.state !== 'running') return false;
+  const notes: Array<[number, number]> = [[880, 0], [1318.5, 0.2]];
+  for (const [freq, at] of notes) {
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const t0 = c.currentTime + at;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
+    osc.connect(g);
+    g.connect(c.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.26);
+  }
+  try { navigator.vibrate?.([120, 80, 120]); } catch { /* unsupported */ }
+  return true;
+}
